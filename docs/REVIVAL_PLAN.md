@@ -1,0 +1,85 @@
+# Trick Evolution revival plan
+
+## Goal and scope
+
+Revive the multiplayer trick-taking game around its defining loop: after every 3–5 hands, a rule card enters play. Rules generally accumulate; a card can explicitly override an earlier rule. This plan treats a *hand* as one deal played through its tricks, matching the current code's “round” loop. Confirm the exact cadence, initial rules, and override wording during F1; precise conflict resolution is deliberately deferred. The first playable version should use a small, coherent rule subset, not the whole printed catalog.
+
+## Current architecture and evidence
+
+| Area | What exists |
+| --- | --- |
+| HTTP and UI | `main.go` starts one `net/http` server, registers `cards.GameUI`, and redirects `/` to `/game`. `cards/cards.go` serves join/lobby pages and server-rendered game HTML with HTMX; `cards/cards.js` sends drag-and-drop plays. `html/html.go` is a general Go HTML builder and CDN-based layout. |
+| Game state | `cards/cardrules.go` defines mutable `Game`, phases, actions, hooks, and a `RuleEngine`. `cards/cards.go` holds process-global room/lobby maps and performs dealing, play, scoring, phase changes, and broadcasts inside websocket command handlers. |
+| Cards and rules | `cards/trick.go` seeds a 52-card standard deck and a substantial set of printable rule/phase card descriptions in a locked in-memory store. Its `/cards` routes are defined by `Trick(mux)` but are not registered in `main.go`. `RulesList()` has one executable rule, “High Card Wins”; printed rule cards do not activate it or any other effect. |
+| Transport | `websocket/websocket.go` has a global room hub, JSON command registry, client read/write pumps, and room/player-targeted HTML messages. The room and player ID are supplied in URLs and command payloads. |
+| Other code | `db/` contains generic storage/search helpers and the only `_test.go` file. The running game does not import this package. |
+
+### Verified findings from code inspection
+
+- A new game deals five cards each from `getStandardDeck()` without shuffling; that function iterates a Go map. Later hands rebuild and shuffle with a time-based seed (`cards/cards.go`, `cards/cardrules.go`). This makes deals hard to reproduce and the first deal unintentionally dependent on map iteration.
+- There is no active-rule list, rule-card draw cadence, score total, or game-over implementation. `IsGameOver()` always returns false. `CurrentTurn` and `Started` are present but unused. The only executable winner rule compares rank across all suits, while the catalog's “High Card Wins” text specifies the lead suit (`cards/cardrules.go`, `cards/trick.go`).
+- The play command has no built-in turn/phase check. `ValidateAction` currently iterates zero `HookOnPlay` rules, so it accepts any action before the handler checks whether the card is in the claimed player's hand. The discard command removes a card without phase or turn validation. `ApplyEffects` results and most `TriggerHook` results are ignored (`cards/cards.go`, `cards/cardrules.go`).
+- The start command can deal five more cards to an existing game on a repeated request. Its insufficient-deck early return occurs after `mu.Lock()` without unlocking, which can permanently block later handlers. Lobby reads in start/render paths occur without the mutex used for lobby writes (`cards/cards.go`).
+- Command handlers trust the payload's `room` and `playerId`, use unchecked string assertions, and do not bind them to the websocket client's room/ID. The hub targets messages by these IDs, but does not authorize commands. Malformed or forged commands can panic or act on another player's hand (`cards/cards.go`, `websocket/websocket.go`).
+- The only tests are `db/search_test.go`; two depend on relative `data/recipes/thewok` and `data/search.bleve` paths and print errors instead of asserting outcomes. There are no game, rule, UI, or websocket tests. A focused `go test ./cards ./websocket ./html` completed with `[no test files]`. One `go test ./...` attempt stopped during setup because the default Go module/build caches were read only; it did not provide a full-suite result.
+
+### Suspected issues to verify with focused tests or a manual browser pass
+
+- Sending a full HTML document as a websocket swap into the lobby element may not reliably initialize the game script or maintain the expected DOM. Verify the join → start → first play flow in a real browser before choosing the final fragment protocol.
+- Global mutex protection is inconsistent, and broadcasts occur while holding the game mutex. This likely creates races and can stall unrelated rooms under slow clients; confirm with targeted concurrent tests once room ownership is refactored.
+- Lobby polling, reconnects, duplicate joins, and client disconnects have no explicit lifecycle policy. Their visible behavior needs a small integration test, not assumptions from static inspection.
+
+## Retain and replace
+
+| Retain / adapt | Replace / isolate |
+| --- | --- |
+| Standard card types, ranks/suits, and catalog wording as design input; server-rendered card faces and the simple room/join flow. | Random UUIDs as rule identities; mix of printable descriptions and executable rules. Use stable rule IDs and an explicit playable subset. |
+| Go HTTP/WebSocket stack and HTMX-style fragments if the browser smoke test supports them. | Game mutations, validation, and phase progression inside websocket handlers. The server should call one engine transition and render its result. |
+| In-memory games for the first local playable release. | Process-global maps as the domain API; use a room/session owner with explicit locking and lifecycle. Add persistence only when a concrete requirement appears. |
+| Generic `html` helpers where useful. | Implicit side effects from hooks and `map[string]interface{}` effect parameters; use typed actions/effects and explicit transition order. |
+
+Do not migrate `db/` into the game merely because it exists. Trim or replace its unused dependencies only after the new engine's storage needs are known.
+
+## Proposed rule and transition design
+
+Keep one small, versioned, data-driven catalog of `RuleDefinition` records: stable `ID`, display title/text, category, trigger/timing, parameters, effect kind, and optional `overrides` IDs or group. A rule-card instance in a game references a catalog ID; it does not contain a Go closure. Validate the catalog at startup for unique IDs, known effect kinds, valid parameters, and valid override references. Custom `/cards` authoring remains a separate print/design workflow until authored cards can be validated against executable effect kinds. Do not promise that arbitrary prose is playable.
+
+The game state should hold seats/players, hands, deck, trick plays, dealer/leader/current turn, hand and trick numbers, scores, active rule IDs in activation order, and any small rule-specific choices. Keep the standard deck separate from the rule deck. A deterministic setup accepts a seed or injected shuffle source; record chosen rule cards and choices in state so replaying the same actions yields the same result. A complete immutable event log or generic rule language is unnecessary for F1–F3.
+
+Use a single entry point resembling `Step(state, action) -> (nextState, events, error)`. It validates membership, ownership, phase, turn, and active restrictions before changing state. It copies the state it changes, applies typed effects in a documented order, advances the trick/hand, then emits public and player-private events for rendering. The transport maps a connection to one seat and room, calls `Step` under that room's lock, and never accepts a claimed player ID as authority. Reject invalid actions without changing state. UI projection must hide opponents' hands.
+
+The catalog can record explicit override relationships now. F1 needs only a deterministic way to activate and display rules and to mark an explicitly overridden rule inactive. F2 defines precedence for the first chosen playable subset, with tests for those exact interactions. Broader conflicts among catalog cards remain an open design decision; do not silently infer semantics from their prose.
+
+## Staged roadmap
+
+### F1 — foundation, domain model, and rule catalog
+
+1. **F1a: baseline and vocabulary.** Record a short playable ruleset for one hand, define “hand” vs “trick,” minimum/maximum seats, turn order, scoring baseline, and the 3–5-hand rule-card cadence as a configuration/policy choice. Choose a small first rule subset (for example, Follow Suit and Low Card Wins) and write fixture states. **Accept:** a maintainer can describe a legal action and expected state for every phase; open conflict cases are listed, not guessed.
+2. **F1b: domain and catalog.** Introduce stable card/rule IDs, typed state/actions, standard and rule decks, active-rule order, and catalog validation. Preserve existing catalog text for print display while marking supported executable entries. **Accept:** one seed produces a repeatable deal and catalog draw; unknown/duplicate rule IDs fail validation; a fixture demonstrates activation after the selected 3–5-hand interval and an explicit override.
+
+**Tests:** table tests for card/deck uniqueness, deterministic shuffle, state setup, catalog validation, activation interval boundaries, and override bookkeeping. No server or browser needed yet.
+
+### F2 — pure deterministic game engine and rule effects
+
+1. **F2a: base hand.** Implement `Step` for start/deal, legal play, trick winner, score, next lead, and hand completion using the base rules. **Accept:** fixed action sequences complete a hand, conserve cards, award exactly one trick winner per completed trick, and reject out-of-turn/non-owned cards without mutation.
+2. **F2b: accumulating effects.** Apply the F1 subset through typed validation, winner, and scoring hooks; activate a rule card at the cadence and honor its explicit override. **Accept:** the same seed and action sequence produce identical state/events; two compatible rules remain active together; the chosen override disables only its named target; supported combinations have documented outcomes.
+3. **F2c: boundaries.** Add a deliberate game-end condition, stable error codes, and state-to-view projection. **Accept:** the engine can finish a configured game, expose public state and one player's private hand, and never reveal another hand.
+
+**Tests:** concise table-driven transition tests and a few complete scripted games. Include rejection/no-mutation checks, rule interaction fixtures, and a deterministic replay check. Use race testing only for the room wrapper in F3, not for the pure engine.
+
+### F3 — multiplayer UI integration and hardening
+
+1. **F3a: adapter and views.** Make HTTP/WebSocket handlers authenticate commands to a room/seat, call `Step`, and send fragments or snapshots derived from view projections. Show active rules, current turn, trick result, scores, and next-hand rule reveal. **Accept:** two browser clients can join, start, play several hands through a rule reveal, and see only their own cards.
+2. **F3b: lifecycle and safety.** Specify host/start permission, player count, reconnect behavior, duplicate messages, room cleanup, payload limits, origin policy, and slow-client handling; move locking to per-room ownership. **Accept:** malformed/cross-room commands return errors without panic or state change; a disconnected client can rejoin by the chosen policy; one slow room does not block another.
+3. **F3c: release check.** Remove dead code and unused dependencies made obsolete by the integration, document local run steps, and fix browser issues found in a short manual pass. **Accept:** a fresh checkout builds; focused unit/integration tests pass; one real-browser smoke path covers join → start → play → rule reveal → finish/reconnect.
+
+**Tests:** `httptest`/websocket integration cases for command authorization and broadcast privacy, one targeted `-race` run for concurrent rooms, and a brief manual browser smoke test. Avoid repeated full-suite or long automated browser loops.
+
+## Risks, dependencies, and first slice
+
+- **Rules are design material, not specifications.** Several catalog entries imply bids, teams, trump, hidden information, or special scoring. F1 must pick and document a narrow executable subset before F2 effects. Keep unresolved conflicts visible in the catalog instead of inventing behavior.
+- **Cadence and game length interact.** A game must last enough hands to reveal at least one rule. Pick a configurable 3–5-hand interval and a game-end condition together; test the first reveal and later accumulation.
+- **Transport trust and UI behavior matter early.** The current payload identity and full-document websocket update need focused integration and browser checks before the F3 adapter is considered complete.
+- **Build/test environment:** Go 1.24 is declared in `go.mod`; the game packages compile, while the full suite needs writable Go caches and the `db` tests may need their relative fixtures. Keep cache paths outside the repository and do one bounded baseline run when dependencies are available.
+
+**First recommended implementation slice:** F1a plus the smallest part of F1b: define typed card IDs/state/actions and a stable catalog for the base winner rule and one new rule, then demonstrate a seeded five-card hand fixture and activation at the chosen interval. Stop at domain tests. This gives F2 a concrete contract without changing live handlers prematurely.
