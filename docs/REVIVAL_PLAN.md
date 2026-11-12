@@ -83,3 +83,41 @@ The catalog can record explicit override relationships now. F1 needs only a dete
 - **Build/test environment:** Go 1.24 is declared in `go.mod`; the game packages compile, while the full suite needs writable Go caches and the `db` tests may need their relative fixtures. Keep cache paths outside the repository and do one bounded baseline run when dependencies are available.
 
 **First recommended implementation slice:** F1a plus the smallest part of F1b: define typed card IDs/state/actions and a stable catalog for the base winner rule and one new rule, then demonstrate a seeded five-card hand fixture and activation at the chosen interval. Stop at domain tests. This gives F2 a concrete contract without changing live handlers prematurely.
+
+## Review addendum — implementation guardrails (2026-11-12)
+
+These refinements clarify implementation contracts without deciding unresolved game-design questions.
+
+### Separate card definitions, instances, and resolved rules
+
+- **Definition:** stable catalog ID, printable text, supported behavior kind and validated parameters. This is versioned game content, not mutable match state.
+- **Instance:** a particular rule card introduced during a match, with its definition ID and introduction sequence; retain instances in field order even when inactive.
+- **Resolved rule set:** a deterministic projection of field instances and explicit override metadata. Evaluate this projection for an action; do not permanently erase older cards as a side effect of resolving precedence. Define how overrides interact only for the initial supported subset in F2b.
+- Avoid using a broad category as an implicit override rule: categories are for grouping/validation, while override relationships must be explicit.
+
+### Make the transition boundary genuinely deterministic
+
+- Prefer a transition that receives all externally chosen outcomes (shuffled deck, rule draw, optional player choices) as explicit inputs or already-recorded state. If a seeded generator is used, keep its state within the match or advance it only at documented boundaries; don't seed from wall-clock time inside `Step`.
+- Return typed domain events, not network messages or rendered HTML. Events may be projected to per-player views by the adapter; event payloads must not accidentally include private hands in public broadcasts.
+- Invalid actions must return an error with *no mutation* to the input state, including deck order, RNG state, and rule-field order. Test this invariant.
+- Define deterministic ordering for validation, effect evaluation, trick award, phase advancement, and rule introduction. Document the ordering for each supported rule, not for hypothetical future cards.
+
+### Keep F1 and F2 vertically testable
+
+- F1a should explicitly document the chosen initial default (e.g. rule reveal every 3 completed hands) while keeping the cadence configurable for 3–5; distinguish a **trick** (one card per player) from a **hand** (one deal played through all tricks). Treat the default as a provisional implementation choice, not a newly agreed game rule.
+- Start with a single baseline winner rule plus one additive rule and one override example. Do not require all catalog entries to become executable in F1.
+- The first end-to-end engine fixture should play a complete hand with fixed cards, then repeat enough hands to trigger one rule reveal. Check card conservation, legal turn sequence, trick ownership, score changes, and public/private views.
+- If a rule needs an interaction the engine does not yet model (bidding, team assignment, custom trump selection), mark it **unsupported**, rather than treating its printed description as executable behavior.
+
+### F3 multiplayer contract
+
+- Bind seat identity to the connection/session on the server; room ID and player ID in a client command are never proof of authorization.
+- Give each accepted command a monotonic room revision or action ID so duplicate/retried commands cannot play a card twice. Choose a small reconnect policy and test it before expanding multiplayer features.
+- Keep network and rendering operations outside the room state lock when practical; publish immutable snapshots/events after a successful transition.
+- Add one targeted browser smoke test early in F3a for full-document versus fragment swapping, then choose a single update protocol. Do not rebuild the entire UI merely to adopt a framework.
+
+### Scope boundaries and completion evidence
+
+- Preserve the existing card catalog and printable card tooling as historical/design assets. Avoid importing unrelated `db/` or generic HTML framework code into the domain engine.
+- Each milestone should leave a small documented fixture or test command and a concise list of known unsupported rule types. A completed milestone is not equivalent to having implemented every catalog card.
+- Use fast, focused Go tests in the agent loop; reserve expensive browser or exhaustive interaction checks for a short manual test by the maintainer.
