@@ -59,6 +59,8 @@ The catalog can record explicit override relationships now. F1 needs only a dete
 
 **Tests:** table tests for card/deck uniqueness, deterministic shuffle, state setup, catalog validation, activation interval boundaries, and override bookkeeping. No server or browser needed yet.
 
+**F1 implementation status (2026-11-12): complete on `feature/f1-gameplay-foundation`.** The provisional vocabulary, legal action/phase contract, ordering, fixture, and unresolved semantics are in [F1_GAMEPLAY_FOUNDATION.md](F1_GAMEPLAY_FOUNDATION.md). The new `domain/` package provides stable standard-card and rule IDs, typed state/actions, recorded seeded setup and replay, a validated version 1 catalog with all printed entries explicitly classified, an ordered rule field, explicit override projection, and 3–5-hand reveal bookkeeping (default 3). The `cards/` catalog, printable tooling, and live multiplayer prototype are unchanged. Focused evidence: `GOCACHE=/tmp/trick-evolution-go-cache GOMODCACHE=/tmp/trick-evolution-mod-cache /usr/local/go/bin/go test ./domain -count=1` passed. The live game does not yet use this package; F2 must implement a pure `Step`, verify hand completion before calling `RecordCompletedHand`, define a game end condition, and add typed events plus public/private views. Open rule semantics are listed in the F1 document; unsupported print cards are not executable.
+
 ### F2 — pure deterministic game engine and rule effects
 
 1. **F2a: base hand.** Implement `Step` for start/deal, legal play, trick winner, score, next lead, and hand completion using the base rules. **Accept:** fixed action sequences complete a hand, conserve cards, award exactly one trick winner per completed trick, and reject out-of-turn/non-owned cards without mutation.
