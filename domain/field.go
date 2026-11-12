@@ -12,11 +12,12 @@ type RuleInstance struct {
 type ResolvedRule struct {
 	Instance     RuleInstance
 	Active       bool
-	OverriddenBy []string // Later instance IDs, in activation order.
+	OverriddenBy []string // Explicit overriding instance IDs, in activation order.
 }
 
 // ResolveField is a projection: it never removes or changes a field instance.
-// Only explicit definition IDs in Overrides can disable an earlier instance.
+// Only explicit definition IDs in Overrides can disable another instance.
+// The source may arrive before its target; the rule deck is shuffled.
 func ResolveField(field []RuleInstance, catalog Catalog) ([]ResolvedRule, error) {
 	if err := catalog.Validate(); err != nil {
 		return nil, err
@@ -33,7 +34,13 @@ func ResolveField(field []RuleInstance, catalog Catalog) ([]ResolvedRule, error)
 		}
 		seenInstances[instance.InstanceID] = true
 		resolved[i] = ResolvedRule{Instance: instance, Active: true}
-		for j := 0; j < i; j++ {
+	}
+	for i, instance := range field {
+		definition, _ := catalog.Definition(instance.DefinitionID)
+		for j := range resolved {
+			if i == j {
+				continue
+			}
 			for _, target := range definition.Overrides {
 				if resolved[j].Instance.DefinitionID == target {
 					resolved[j].Active = false

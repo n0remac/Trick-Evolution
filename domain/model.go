@@ -1,4 +1,4 @@
-// Package domain contains the provisional, transport-independent F1 game model.
+// Package domain contains the transport-independent game model and pure engine.
 // The existing multiplayer prototype continues to use package cards until F3.
 package domain
 
@@ -57,9 +57,10 @@ const (
 
 // Action is the future Step input. Seat is always supplied by a trusted adapter.
 type Action struct {
-	Kind ActionKind
-	Seat SeatID
-	Card CardID // Only used for play_card.
+	Kind      ActionKind
+	Seat      SeatID
+	Card      CardID   // Only used for play_card.
+	DeckOrder []CardID // Full chosen order, required for start_hand.
 }
 
 type Seat struct {
@@ -76,9 +77,10 @@ type Play struct {
 type Config struct {
 	HandSize    int
 	RevealEvery int // Completed hands between rule reveals, 3 through 5.
+	MaxHands    int // The match ends after this many completed hands.
 }
 
-func DefaultConfig() Config { return Config{HandSize: 5, RevealEvery: 3} }
+func DefaultConfig() Config { return Config{HandSize: 5, RevealEvery: 3, MaxHands: 10} }
 
 func (c Config) Validate(seatCount int) error {
 	if seatCount < 2 || seatCount > 4 {
@@ -89,6 +91,9 @@ func (c Config) Validate(seatCount int) error {
 	}
 	if c.RevealEvery < 3 || c.RevealEvery > 5 {
 		return fmt.Errorf("reveal interval must be 3 through 5 completed hands")
+	}
+	if c.MaxHands < c.RevealEvery+1 || c.MaxHands > 100 {
+		return fmt.Errorf("max hands must be between reveal interval + 1 and 100")
 	}
 	return nil
 }
@@ -108,11 +113,13 @@ type ShuffleRecord struct {
 }
 
 type MatchState struct {
+	Revision       uint64
 	CatalogVersion int
 	Config         Config
 	Phase          Phase
 	Seats          []Seat
 	Hands          map[SeatID][]CardID
+	Captured       map[SeatID][]CardID
 	StandardDraw   []CardID
 	RuleDraw       []RuleID
 	CurrentTrick   []Play
@@ -228,7 +235,7 @@ func validateOrder(got, expected []string) error {
 
 func matchFromOrders(ids []SeatID, cfg Config, version int, standardOrder, ruleOrder []string) MatchState {
 	s := MatchState{CatalogVersion: version, Config: cfg, Phase: PhasePlayingTrick,
-		Seats: make([]Seat, len(ids)), Hands: make(map[SeatID][]CardID, len(ids)),
+		Seats: make([]Seat, len(ids)), Hands: make(map[SeatID][]CardID, len(ids)), Captured: make(map[SeatID][]CardID, len(ids)),
 		RuleDraw: make([]RuleID, len(ruleOrder)), HandNumber: 1, TrickNumber: 1,
 		Field:    []RuleInstance{{InstanceID: "rule:initial:0", DefinitionID: RuleHighCardWins, Sequence: 0, IntroducedAfterHand: 0}},
 		Shuffles: []ShuffleRecord{{Kind: StandardDeckKind, Order: append([]string(nil), standardOrder...)}, {Kind: RuleDeckKind, Order: append([]string(nil), ruleOrder...)}},

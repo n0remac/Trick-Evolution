@@ -1,6 +1,6 @@
 # F1 gameplay foundation (provisional)
 
-This is an implementation contract for F2, not a final interpretation of the printed rule cards. The existing multiplayer prototype and physical card catalog remain separate.
+This records the F1 starting contract; [F2_ENGINE.md](F2_ENGINE.md) documents the implemented transitions and resolved choices. The existing multiplayer prototype and physical card catalog remain separate.
 
 ## Vocabulary and first playable rules
 
@@ -12,7 +12,7 @@ This is an implementation contract for F2, not a final interpretation of the pri
 
 The initial field contains **High Card Wins**. Among cards in the lead suit, the highest rank wins; ace is high. **Follow Suit** requires a player holding the lead suit to play it. **Low Card Wins** explicitly overrides High Card Wins and selects the lowest rank in the lead suit. **No Follow Required** explicitly overrides Follow Suit and allows any suit. Off-suit cards cannot win under either supported winner rule. In a standard deck there are no equal ranks within one suit, so the winner is unique.
 
-The three draw cards are Follow Suit, Low Card Wins, and No Follow Required. Their order is shuffled and recorded. Rules accumulate in field order. An explicit override only marks an earlier named definition inactive in the resolved projection. The older instance stays in the field. The printed Score by Tricks card remains unsupported as a draw because one point per trick is already the provisional baseline.
+The three draw cards are Follow Suit, Low Card Wins, and No Follow Required. Their order is shuffled and recorded. Rules accumulate in field order. An explicit override marks its named definition inactive in the resolved projection even if the target arrives later. The target instance stays in the field. The printed Score by Tricks card remains unsupported as a draw because one point per trick is already the provisional baseline.
 
 ## Phases and legal actions
 
