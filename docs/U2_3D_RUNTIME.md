@@ -1,6 +1,6 @@
 # U2 — local 3D runtime and card-play slice
 
-Status: implemented on `feature/u2-3d-runtime`; awaiting a passing full browser gate before main integration. Baseline is deployed U1/main `2d10ae869ac98363caef7b33b97bfee0ea57c1b1`. U2 follows [the UI roadmap](UI_GODOM_3D_ROADMAP.md), [D1](D1_RELEASE_GATES.md), and [D2](D2_DEV_DEPLOYMENT.md).
+Status: implemented and verified on `feature/u2-3d-runtime`; main integration and D2 rollout pending. Baseline is deployed U1/main `2d10ae869ac98363caef7b33b97bfee0ea57c1b1`. U2 follows [the UI roadmap](UI_GODOM_3D_ROADMAP.md), [D1](D1_RELEASE_GATES.md), and [D2](D2_DEV_DEPLOYMENT.md).
 
 ## Scope and design
 
@@ -31,3 +31,7 @@ Focused schema and per-seat HTML tests validate versioning, rejected invalid inp
 - The final combined D1 full-game browser gate **failed** at the hand 1 boundary because Chromium DevTools stopped answering Alice's state evaluations and did not answer a fresh DevTools connection's `Runtime.enable`; Bob was connected at revision 1. Report: `/tmp/trick-u2-browser/20261113T074320-full-3510929/result.json`. An earlier run reached hand 2 and its failure capture showed both pages at the completed hand 2 boundary with no captured JavaScript exceptions; another run stalled during browser startup. The host had sustained load around 9–13 and full swap usage. These observations suggest an environment/Chromium stall, but the complete browser gate has **not passed**, so no claim of a successful full match is made.
 - The Pi race gate is unverified for the previously documented ThreadSanitizer VMA limitation. No manual phone feel test was performed. U2 was **not merged, pushed to main, or deployed**; D2 main-only rollout and public HTTP/WSS verification remain pending a passing full gate. No unrelated services were changed.
 - The existing deployment record and local `/healthz` still report U1 `2d10ae869ac98363caef7b33b97bfee0ea57c1b1`. A read-only public HTTPS `/healthz` request from this Pi timed out after eight seconds while DNS resolved to `165.227.55.254`; public WSS was not exercised because U2 was not deployed. This public reachability result is a separate current-environment limitation, not U2 deployment evidence.
+
+### Ubuntu CI gate (2026-11-13)
+
+[PR #1](https://github.com/n0remac/Trick-Evolution/pull/1) ran the full D1 gate on Ubuntu in [workflow run 43391461124](https://github.com/n0remac/Trick-Evolution/actions/runs/43391461124). The lightweight job passed. The full-browser job passed the focused Go and root build gate, the supported-host targeted race test, the exact ten-hand full-browser match in **14.906s**, and the 3D pointer/motion/bot-play/resize/reconnect smoke in **1.628s**. This resolves the release gate previously blocked by the Pi's Chromium DevTools stalls. Main integration and D2 deployment have not yet occurred at this evidence point.
