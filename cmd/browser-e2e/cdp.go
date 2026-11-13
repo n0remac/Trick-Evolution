@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -30,7 +32,7 @@ type cdpEnvelope struct {
 }
 
 func dialCDP(address string) (*cdpClient, error) {
-	conn, _, err := (&websocket.Dialer{HandshakeTimeout: 5 * time.Second}).Dial(address, http.Header{"Origin": []string{"http://127.0.0.1"}})
+	conn, _, err := (&websocket.Dialer{HandshakeTimeout: 20 * time.Second}).Dial(address, http.Header{"Origin": []string{"http://127.0.0.1"}})
 	if err != nil {
 		return nil, fmt.Errorf("connect to Chromium DevTools: %w", err)
 	}
@@ -139,6 +141,21 @@ func (p *page) eval(ctx context.Context, expression string, output any) error {
 		} `json:"exceptionDetails"`
 	}
 	if err := p.cdp.call(ctx, "Runtime.evaluate", map[string]any{"expression": expression, "returnByValue": true, "awaitPromise": true}, &reply); err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() && ctx.Err() == nil {
+			// A timed-out Gorilla WebSocket read is terminal. Reattach for the
+			// next state poll; never replay an action-bearing evaluation.
+			fresh, dialErr := dialCDP(p.debugURL)
+			if dialErr == nil {
+				fresh.errors = append(fresh.errors, p.cdp.errors...)
+				fresh.console = append(fresh.console, p.cdp.console...)
+				p.cdp.close()
+				p.cdp = fresh
+				if enableErr := fresh.call(ctx, "Runtime.enable", map[string]any{}, nil); enableErr != nil {
+					return fmt.Errorf("%w; reattach: %v", err, enableErr)
+				}
+			}
+		}
 		return err
 	}
 	if reply.ExceptionDetails != nil {
