@@ -1,0 +1,54 @@
+name: D1 release verification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full_browser:
+        description: Run the complete Chromium game and targeted race check
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  lightweight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Go tests and root build
+        run: scripts/test-release.sh
+
+  full-browser:
+    if: github.event_name == 'workflow_dispatch' && inputs.full_browser
+    needs: lightweight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+          install-dependencies: true
+      - name: Full browser and supported-host race gate
+        env:
+          BROWSER_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: scripts/test-release.sh --browser-full --race
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: d1-browser-failure
+          path: artifacts/browser-e2e/
+          if-no-files-found: warn

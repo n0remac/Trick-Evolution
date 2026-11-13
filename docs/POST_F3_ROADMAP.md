@@ -15,6 +15,8 @@ StarCoaster on this Pi uses **systemd user services** for its game and a separat
 
 **Acceptance:** clean checkout can run the documented automated full-game browser test and black-box complete-match test; both reach game completion and assert final outcomes. No release/deploy if required gates fail. The existing manual smoke remains a useful complement, not the sole evidence.
 
+**D1 implementation status (2026-11-12): complete on `feature/d1-complete-game-gates`.** [D1_RELEASE_GATES.md](D1_RELEASE_GATES.md) documents the checked-in black-box 2- and 4-player ten-hand fixtures, isolated-context Chromium runner, fast smoke option, release script, CI triggers, failure artifacts, local evidence, and remaining verification limits. The full local browser run passed; the race check remains unverified on this Pi because ThreadSanitizer rejected its VMA layout. The manual Ubuntu x64 workflow has not run because the branch has not been pushed. D2 deployment remains untouched.
+
 ## D2 — permanent DEV Pi deployment (after D1 gate)
 
 1. Create a dedicated, unprivileged Trick Evolution deployment layout (e.g. `/home/pi/services/trick-evolution/{releases,current,logs}`) and a **systemd user service** `trick-evolution.service` with `Restart=always`, sensible startup/shutdown limits, loopback bind on a dedicated nonconflicting port, and persistent user lingering if required. Never run from a Happier working tree.
