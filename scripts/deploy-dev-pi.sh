@@ -94,8 +94,9 @@ if [[ ! -d $release ]]; then
     git -C "$local_repo" archive "$target" | tar -x -C "$stage/source"
   fi
   cd "$stage/source"
-  export GOCACHE=${GOCACHE:-/tmp/trick-evolution-deploy-go-cache}
-  export GOMODCACHE=${GOMODCACHE:-/tmp/trick-evolution-deploy-mod-cache}
+  export GOCACHE=${GOCACHE:-/tmp/trick-evolution-go-cache}
+  export GOMODCACHE=${GOMODCACHE:-/tmp/trick-evolution-mod-cache}
+  export GOFLAGS="${GOFLAGS:+$GOFLAGS }-buildvcs=false"
   mkdir -p "$GOCACHE" "$GOMODCACHE"
   echo "Running D1 gate once for $target"
   bash scripts/test-release.sh
