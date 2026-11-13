@@ -1,5 +1,9 @@
 # Post-F3 roadmap: complete-game E2E, permanent dev deployment, and sandbox growth
 
+## Current priority (2026-11-12)
+
+The approved [UI/GoDom/3D roadmap](UI_GODOM_3D_ROADMAP.md) supersedes the next-session sequence below. D1/D2 and A1/A2 have been implemented; the user reports the AI works well. Start [U1 shared GoDom migration](U1_GODOM_MIGRATION.md), followed by local 3D packages, mobile table, physics/pacing and polish. Build new reusable features inside Trick Evolution first; extract to GoDom only after their APIs are proven. The following baseline is historical.
+
 ## Review baseline (2026-11-12)
 
 F3 commit `98ff4f3` on `feature/f3-multiplayer-integration` replaces the old game handlers with `gameui.Server` and authoritative `domain.Step` room state. Per-tab session tokens, reconnect, command deduplication, privacy projections, revisioned snapshots, origin and payload checks, idle cleanup, and a browser UI are implemented. The F3 Happier transcript reports focused Go tests and a root build passing, plus a **manual/one-off headless Chromium** full ten-hand two-tab smoke test after fixing a nil-hand rendering bug. This is not yet a committed, reproducible complete-game browser E2E suite. The checked-in WebSocket test reaches the first reveal at three hands, not the end of the default ten-hand game. The targeted Go race run did not execute because ThreadSanitizer rejected the Pi's VMA layout. No permanent Trick Evolution service or deploy timer was found during review.
@@ -55,6 +59,7 @@ StarCoaster on this Pi uses **systemd user services** for its game and a separat
 
 ## Suggested Happier session boundaries
 
-- **Next session: D1 complete-game E2E and CI/release gates.** Keep it focused; do not deploy yet.
-- **Following session: D2 dev Pi service and safe deployment.** Run D1 gates once per release, not in an expensive continuous loop. Inspect the actual StarCoaster effective service/timer and Caddy routes before changing system configuration.
-- Then D3 playtesting, followed by S1/S2 in bounded slices. All work remains on a branch until reviewed; don't push or deploy without explicit authorization.
+- Next: U1 shared GoDom migration, preserving current gameplay and visual layout.
+- Then U2 runtime vertical slice, U3 mobile table, U4 physics/pacing, U5 polish.
+- S1/S2 sandbox growth follows the UI milestone and playtesting.
+- Preserve D1 gates and D2 main-only automatic deployment; do not bypass gates or alter other projects.

@@ -1,6 +1,6 @@
 # trick-evolution
 
-See [the revival plan](docs/REVIVAL_PLAN.md) for the current architecture, findings, and staged roadmap.
+See [the UI and GoDom roadmap](docs/UI_GODOM_3D_ROADMAP.md) for the next milestone, starting with [U1: shared GoDom migration](docs/U1_GODOM_MIGRATION.md). The [revival plan](docs/REVIVAL_PLAN.md) records the earlier architecture and stages.
 
 ## Play locally
 
