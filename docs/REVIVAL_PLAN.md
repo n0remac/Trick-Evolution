@@ -158,3 +158,5 @@ For future work, keep **rule execution** separate from **game recognition** and 
 
 - **F3:** Connect authoritative room/seat ownership to `domain.Step`; derive per-player snapshots; use revision/deduplication; test reconnect and privacy; smoke-test the browser manually. Keep the initial rule subset intact so the integration is bounded.
 - **After a playable F3 vertical slice:** establish rule semantics and composability needed for sandbox presets, introduce rule dependencies and educational descriptions, then implement one named-game recognition profile with exact-versus-partial matching. Expand mechanics incrementally (e.g., trump, scoring, bidding), each with fixtures and a playable lesson. Avoid attempting all traditional trick games at once.
+
+See [post-F3 roadmap](POST_F3_ROADMAP.md) for complete-game E2E tests, permanent dev Pi deployment, and the sandbox/learning milestones.
