@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read or update only trick.noremac.dev's existing Porkbun A record.
 
-Credentials live outside Git in ~/.config/trick-evolution/porkbun.json.
+Credentials live outside Git in ~/.config/porkbun/credentials.json.
 """
 
 import argparse
@@ -19,7 +19,7 @@ import uuid
 API = "https://api.porkbun.com/api/json/v3"
 DOMAIN = "noremac.dev"
 HOST = "trick.noremac.dev"
-KEY_FILE = Path.home() / ".config/trick-evolution/porkbun.json"
+KEY_FILE = Path.home() / ".config/porkbun/credentials.json"
 
 
 def credentials():
