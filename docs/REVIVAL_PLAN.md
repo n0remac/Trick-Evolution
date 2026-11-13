@@ -125,3 +125,34 @@ These refinements clarify implementation contracts without deciding unresolved g
 - Preserve the existing card catalog and printable card tooling as historical/design assets. Avoid importing unrelated `db/` or generic HTML framework code into the domain engine.
 - Each milestone should leave a small documented fixture or test command and a concise list of known unsupported rule types. A completed milestone is not equivalent to having implemented every catalog card.
 - Use fast, focused Go tests in the agent loop; reserve expensive browser or exhaustive interaction checks for a short manual test by the maintainer.
+
+## Post-F2 review and product direction (2026-11-12)
+
+### Product vision confirmed
+
+Trick Evolution is ultimately a **trick-taking sandbox and learning game**, not just a single random-rules party game. In Evolution Mode, players start with an approachable rule such as High Card Wins and encounter randomly ordered new mechanics over time. The game should teach what each mechanic does and how combinations produce more sophisticated games. Players may eventually create or select arbitrary compatible rulesets, recreate known trick-taking games, or deliberately choose chaotic combinations. These are long-term goals, not promises that the F2 engine already supports them.
+
+The game should recognize when the **fully resolved** active rules and relevant setup (deck, player count, hand size, bidding, partnerships, trump, scoring, win condition, etc.) **exactly match a specified variant** of an established game, and notify players without forcing the game to stop evolving. Pitch is an example target, but its variants differ: do not label a partial resemblance an exact Pitch match. Optionally show partial matches as educational hints, clearly distinguished from exact matches. Traditional games should eventually be representable as named, validated ruleset presets using the same underlying mechanics as sandbox play; avoid one hard-coded engine per named game.
+
+For future work, keep **rule execution** separate from **game recognition** and **teaching content**. A canonical normalized ruleset/configuration projection can serve both preset comparison and save/share functionality. Rule definitions need stable semantic identities and parameters; a list of display titles is insufficient for equivalence. Game-recognition profiles must specify variant, required and excluded mechanics, and compatible setup. Rule randomization should eventually be constrained by dependencies and player comprehension, not merely an unconstrained shuffle of advanced mechanics. Preserve an optional chaotic mode.
+
+### F2 implementation review (code and Happier transcript)
+
+- Confirmed commit `9f8e540` on `feature/f2-pure-game-engine`. Happier reported focused tests passing for `./domain ./cards ./websocket ./html`; an independent `go test ./domain -count=1` also passed during review.
+- `domain.Step` implements play and next-hand transitions, turn/ownership/phase validation, lead-suit high/low winner resolution, Follow Suit and No Follow Required, trick capture, one-point-per-trick scoring, hand completion, cadence reveals, and configurable game completion. It clones state and returns typed public events with revisions and stable error codes. `ProjectPublic` and `ProjectForSeat` separate public state from a seat's hand.
+- Happier found and fixed an override-order edge case: No Follow Required can appear before Follow Suit in a shuffled rule deck. `ResolveField` treats explicit overrides independently of reveal order.
+- The existing `cards/` and WebSocket prototype still mutate their own game state. The F2 engine is **not integrated into a playable browser session** until F3.
+
+### Review cautions / follow-up tests
+
+1. **Override semantics are provisional.** `ResolveField` applies overrides from every present definition even if the overriding instance itself is inactive. That is workable for the current no-chain subset but must be specified before adding override chains, repeated instances, or custom sandbox rules.
+2. **Rule effect composition is deliberately narrow.** `activeEffects` permits only one active play restriction and one winner effect; this does not yet support the combinatorial rule sandbox. Future extension should define compatible effect families, precedence, and explicit incompatibilities rather than silently accepting combinations.
+3. **Current defaults are placeholders, not intended game-design commitments:** five cards per hand, one point per trick, ten hands total, and a reveal every three hands. They make F2 testable but won't model bidding/trump/partnership games such as Pitch.
+4. **Validation depth:** `Step` checks configuration/catalog/field plus action legality, but does not fully validate arbitrary corrupted match-state invariants (e.g., every card appears exactly once) on every transition. The server should own trusted state; add focused state-integrity tests where persistence/reconnect or external state loading enters the picture.
+5. **Performance:** `cardByID` linearly scans a newly constructed standard deck per lookup. This is fine for the current small game but can be replaced by a stable ID lookup if larger simulations or deck variants make it material.
+6. **Replay scope:** setup shuffle records and subsequent `start_hand` deck orders are recorded; full action history/command deduplication and persisted replay are not implemented. Do not conflate deterministic transitions with a durable event log.
+
+### Recommended next sequence
+
+- **F3:** Connect authoritative room/seat ownership to `domain.Step`; derive per-player snapshots; use revision/deduplication; test reconnect and privacy; smoke-test the browser manually. Keep the initial rule subset intact so the integration is bounded.
+- **After a playable F3 vertical slice:** establish rule semantics and composability needed for sandbox presets, introduce rule dependencies and educational descriptions, then implement one named-game recognition profile with exact-versus-partial matching. Expand mechanics incrementally (e.g., trump, scoring, bidding), each with fixtures and a playable lesson. Avoid attempting all traditional trick games at once.
