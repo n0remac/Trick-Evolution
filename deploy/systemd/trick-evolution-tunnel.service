@@ -1,0 +1,14 @@
+[Unit]
+Description=Trick Evolution restricted reverse SSH tunnel to Caddy
+After=network-online.target trick-evolution.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ConnectTimeout=10 -o IdentitiesOnly=yes -i /home/pi/.ssh/trick_evolution_proxy_ed25519 -R 127.0.0.1:18081:127.0.0.1:18081 trick-tunnel@165.227.55.254
+Restart=always
+RestartSec=10s
+TimeoutStartSec=20s
+
+[Install]
+WantedBy=default.target

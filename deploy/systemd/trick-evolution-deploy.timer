@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Trick Evolution origin/main every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=trick-evolution-deploy.service
+
+[Install]
+WantedBy=timers.target

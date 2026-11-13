@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -279,7 +280,15 @@ var upgrader = websocket.Upgrader{
 		if r.TLS != nil {
 			scheme = "https"
 		}
-		return u.Host == r.Host && u.Scheme == scheme
+		if u.Host != r.Host {
+			return false
+		}
+		if u.Scheme == scheme {
+			return true
+		}
+		// The reverse proxy terminates TLS. Only the exact configured public
+		// origin may use HTTPS when the backend request arrives over HTTP.
+		return origin == os.Getenv("TRICK_EVOLUTION_PUBLIC_ORIGIN") && origin != ""
 	},
 }
 

@@ -115,6 +115,21 @@ func readRevision(t *testing.T, conn *websocket.Conn, revision uint64) serverMes
 	return serverMessage{}
 }
 
+func TestConfiguredHTTPSWebSocketOrigin(t *testing.T) {
+	t.Setenv("TRICK_EVOLUTION_PUBLIC_ORIGIN", "https://trick.noremac.dev")
+	request := httptest.NewRequest(http.MethodGet, "http://trick.noremac.dev/ws/game", nil)
+	request.Header.Set("Origin", "https://trick.noremac.dev")
+	if !upgrader.CheckOrigin(request) {
+		t.Fatal("configured HTTPS reverse proxy origin rejected")
+	}
+	for _, origin := range []string{"https://evil.example", "http://trick.noremac.dev.evil.example", "https://trick.noremac.dev:444"} {
+		request.Header.Set("Origin", origin)
+		if upgrader.CheckOrigin(request) {
+			t.Fatalf("unexpected origin accepted: %s", origin)
+		}
+	}
+}
+
 func TestSessionBindingPrivacyDedupAndReconnect(t *testing.T) {
 	s, server := testServer(t)
 	host := joinRoom(t, server.URL, "table", "Host", "", http.StatusOK)

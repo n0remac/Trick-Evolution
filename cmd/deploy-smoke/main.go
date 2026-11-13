@@ -1,0 +1,141 @@
+// deploy-smoke checks the deployed HTTP and two-seat WebSocket path.
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+type session struct {
+	Room, Seat, Token string
+}
+
+type message struct {
+	Type     string `json:"type"`
+	Revision uint64 `json:"revision"`
+}
+
+func main() {
+	base := flag.String("url", "http://127.0.0.1:18081", "HTTP(S) base URL")
+	commit := flag.String("commit", "", "expected health commit")
+	flag.Parse()
+	if err := check(*base, *commit); err != nil {
+		fmt.Fprintln(os.Stderr, "deploy smoke:", err)
+		os.Exit(1)
+	}
+	fmt.Println("HTTP health and two-client WebSocket start/reconnect passed")
+}
+
+func check(base, commit string) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Get(strings.TrimRight(base, "/") + "/healthz")
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	var health struct{ Status, Commit string }
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&health) != nil || health.Status != "ok" || (commit != "" && health.Commit != commit) {
+		return fmt.Errorf("health status %d, commit %q (expected %q)", response.StatusCode, health.Commit, commit)
+	}
+	room := fmt.Sprintf("deploy%d", time.Now().UnixNano())
+	join := func(name string) (session, error) {
+		body, _ := json.Marshal(map[string]string{"room": room, "name": name})
+		resp, err := client.Post(strings.TrimRight(base, "/")+"/game/join", "application/json", bytes.NewReader(body))
+		if err != nil {
+			return session{}, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return session{}, fmt.Errorf("join %s: HTTP %d", name, resp.StatusCode)
+		}
+		var s session
+		if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+			return s, err
+		}
+		if s.Token == "" || s.Seat == "" {
+			return s, fmt.Errorf("join %s omitted authority", name)
+		}
+		return s, nil
+	}
+	host, err := join("Deployment host")
+	if err != nil {
+		return err
+	}
+	guest, err := join("Deployment guest")
+	if err != nil {
+		return err
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return err
+	}
+	scheme := "ws"
+	if u.Scheme == "https" {
+		scheme = "wss"
+	}
+	dial := func(s session) (*websocket.Conn, error) {
+		address := scheme + "://" + u.Host + "/ws/game?room=" + url.QueryEscape(s.Room) + "&token=" + url.QueryEscape(s.Token)
+		conn, response, err := (&websocket.Dialer{HandshakeTimeout: 5 * time.Second}).Dial(address, http.Header{"Origin": []string{strings.TrimRight(base, "/")}})
+		if err != nil {
+			if response != nil {
+				return nil, fmt.Errorf("websocket HTTP %d: %w", response.StatusCode, err)
+			}
+			return nil, err
+		}
+		return conn, nil
+	}
+	a, err := dial(host)
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	b, err := dial(guest)
+	if err != nil {
+		return err
+	}
+	defer b.Close()
+	read := func(c *websocket.Conn, revision uint64) error {
+		for i := 0; i < 12; i++ {
+			_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+			var m message
+			if err := c.ReadJSON(&m); err != nil {
+				return err
+			}
+			if m.Type == "state" && m.Revision >= revision {
+				return nil
+			}
+		}
+		return fmt.Errorf("missing state revision %d", revision)
+	}
+	if err := read(a, 0); err != nil {
+		return err
+	}
+	if err := read(b, 0); err != nil {
+		return err
+	}
+	if err := a.WriteJSON(map[string]string{"type": "start", "id": "deploy-start"}); err != nil {
+		return err
+	}
+	if err := read(a, 1); err != nil {
+		return err
+	}
+	if err := read(b, 1); err != nil {
+		return err
+	}
+	_ = b.Close()
+	b, err = dial(guest)
+	if err != nil {
+		return err
+	}
+	defer b.Close()
+	return read(b, 1)
+}

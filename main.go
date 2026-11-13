@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"github.com/n0remac/trick-evolution/gameui"
 	gamews "github.com/n0remac/trick-evolution/websocket"
 )
+
+var buildCommit = "development"
 
 func main() {
 	if debugEnabled {
@@ -27,6 +30,11 @@ func main() {
 	mux.Handle("/game", gameHandler)
 	mux.Handle("/game/", gameHandler)
 	mux.Handle("/ws/game", gameHandler)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "commit": buildCommit})
+	})
 	cards.Trick(mux)
 
 	// Redirect root to cards lobby

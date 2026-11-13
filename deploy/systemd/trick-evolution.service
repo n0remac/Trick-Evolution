@@ -1,0 +1,19 @@
+[Unit]
+Description=Trick Evolution dev game
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/services/trick-evolution
+Environment=TRICK_EVOLUTION_ADDR=127.0.0.1:18081
+Environment=TRICK_EVOLUTION_PUBLIC_ORIGIN=https://trick.noremac.dev
+ExecStart=/home/pi/services/trick-evolution/current/bin/trick-evolution
+Restart=always
+RestartSec=5s
+TimeoutStartSec=20s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
