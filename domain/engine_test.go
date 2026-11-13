@@ -341,3 +341,19 @@ func TestStartHandValidationAndViewPrivacy(t *testing.T) {
 		t.Fatal("unknown seat received view")
 	}
 }
+
+func TestEmptyPrivateHandProjectsAsArray(t *testing.T) {
+	state := mustMatch(t)
+	state.Hands["a"] = nil
+	view, err := ProjectForSeat(state, DefaultCatalog(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"Hand":[]`) {
+		t.Fatalf("empty hand was not a JSON array: %s", encoded)
+	}
+}

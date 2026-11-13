@@ -79,6 +79,8 @@ The catalog can record explicit override relationships now. F1 needs only a dete
 
 **Tests:** `httptest`/websocket integration cases for command authorization and broadcast privacy, one targeted `-race` run for concurrent rooms, and a brief manual browser smoke test. Avoid repeated full-suite or long automated browser loops.
 
+**F3 implementation status (2026-11-12): complete on `feature/f3-multiplayer-integration`.** [F3_MULTIPLAYER.md](F3_MULTIPLAYER.md) documents the authoritative room adapter, bearer-session reconnect policy, JSON snapshot protocol, host/start rules, per-room locking and revisions, command deduplication, origin and payload limits, idle cleanup, local run steps, and remaining product scope. The old game handlers and unused global WebSocket hub were removed; `/cards` and printable sheet tooling remain available. Focused `go test ./gameui ./domain ./cards ./websocket ./html -count=1` and `go build .` passed with writable caches. A two-tab headless Chromium pass completed join → start → play → first reveal → game finish → reload/reconnect without JavaScript exceptions. The targeted `-race` test could not execute on this host because ThreadSanitizer reported `unsupported VMA range`; it remains a verification task for a supported host. The unsupported catalog rule types and provisional defaults are unchanged.
+
 ## Risks, dependencies, and first slice
 
 - **Rules are design material, not specifications.** Several catalog entries imply bids, teams, trump, hidden information, or special scoring. F1 must pick and document a narrow executable subset before F2 effects. Keep unresolved conflicts visible in the catalog instead of inventing behavior.

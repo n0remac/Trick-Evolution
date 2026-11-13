@@ -9,12 +9,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	. "github.com/n0remac/trick-evolution/cards"
-	. "github.com/n0remac/trick-evolution/websocket"
-)
-
-const (
-	webPort = ":8080"
+	"github.com/n0remac/trick-evolution/cards"
+	"github.com/n0remac/trick-evolution/gameui"
+	gamews "github.com/n0remac/trick-evolution/websocket"
 )
 
 func main() {
@@ -26,23 +23,25 @@ func main() {
 
 	// Create a new HTTP server
 	mux := http.NewServeMux()
-	// create global registry
-	globalRegistry := NewCommandRegistry()
-
-	// Card game apps
-	GameUI(mux, globalRegistry)
+	gameHandler := gameui.NewServer().Handler()
+	mux.Handle("/game", gameHandler)
+	mux.Handle("/game/", gameHandler)
+	mux.Handle("/ws/game", gameHandler)
+	cards.Trick(mux)
 
 	// Redirect root to cards lobby
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/game", http.StatusFound)
 	})
 
-	WithWS("/ws/logs", mux, logSocketWS)
+	gamews.WithWS("/ws/logs", mux, logSocketWS)
 
-	go WsHub.Run()
-
-	log.Println("Card game server started on port", webPort)
-	log.Fatal(http.ListenAndServe(webPort, mux))
+	address := os.Getenv("TRICK_EVOLUTION_ADDR")
+	if address == "" {
+		address = ":8080"
+	}
+	log.Println("Card game server listening on", address)
+	log.Fatal(http.ListenAndServe(address, mux))
 }
 
 // debugEnabled toggles logging of incoming browser messages

@@ -11,6 +11,8 @@ type PublicSeat struct {
 type PublicView struct {
 	Revision       uint64
 	Phase          Phase
+	MaxHands       int
+	RevealEvery    int
 	Seats          []PublicSeat
 	CurrentTrick   []Play
 	Dealer         SeatID
@@ -39,7 +41,7 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 	if err != nil {
 		return PublicView{}, transitionError(ErrInvalidState, err.Error())
 	}
-	view := PublicView{Revision: state.Revision, Phase: state.Phase, Dealer: state.Dealer, Leader: state.Leader,
+	view := PublicView{Revision: state.Revision, Phase: state.Phase, MaxHands: state.Config.MaxHands, RevealEvery: state.Config.RevealEvery, Dealer: state.Dealer, Leader: state.Leader,
 		Turn: state.Turn, HandNumber: state.HandNumber, TrickNumber: state.TrickNumber, CompletedHands: state.CompletedHands,
 		Rules: rules, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...),
 		Seats: make([]PublicSeat, len(state.Seats))}
@@ -62,5 +64,7 @@ func ProjectForSeat(state MatchState, catalog Catalog, seat SeatID) (PlayerView,
 	if err != nil {
 		return PlayerView{}, err
 	}
-	return PlayerView{Public: public, Seat: seat, Hand: append([]CardID(nil), state.Hands[seat]...)}, nil
+	hand := make([]CardID, len(state.Hands[seat]))
+	copy(hand, state.Hands[seat])
+	return PlayerView{Public: public, Seat: seat, Hand: hand}, nil
 }
