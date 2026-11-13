@@ -103,32 +103,32 @@ func check(base, commit string) error {
 		return err
 	}
 	defer b.Close()
-	read := func(c *websocket.Conn, revision uint64) error {
+	read := func(c *websocket.Conn, wanted string, revision uint64) error {
 		for i := 0; i < 12; i++ {
 			_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
 			var m message
 			if err := c.ReadJSON(&m); err != nil {
 				return err
 			}
-			if m.Type == "state" && m.Revision >= revision {
+			if m.Type == wanted && m.Revision >= revision {
 				return nil
 			}
 		}
-		return fmt.Errorf("missing state revision %d", revision)
+		return fmt.Errorf("missing %s revision %d", wanted, revision)
 	}
-	if err := read(a, 0); err != nil {
+	if err := read(a, "lobby", 0); err != nil {
 		return err
 	}
-	if err := read(b, 0); err != nil {
+	if err := read(b, "lobby", 0); err != nil {
 		return err
 	}
 	if err := a.WriteJSON(map[string]string{"type": "start", "id": "deploy-start"}); err != nil {
 		return err
 	}
-	if err := read(a, 1); err != nil {
+	if err := read(a, "state", 1); err != nil {
 		return err
 	}
-	if err := read(b, 1); err != nil {
+	if err := read(b, "state", 1); err != nil {
 		return err
 	}
 	_ = b.Close()
@@ -137,5 +137,5 @@ func check(base, commit string) error {
 		return err
 	}
 	defer b.Close()
-	return read(b, 1)
+	return read(b, "state", 1)
 }

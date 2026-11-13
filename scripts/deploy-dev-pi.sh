@@ -62,7 +62,7 @@ switched=false
 previous=''
 cleanup() { [[ -z $stage || ! -d $stage ]] || rm -rf -- "$stage"; }
 rollback() {
-  rc=$?
+  rc=${1:-$?}
   trap - ERR
   set +e
   echo "Deployment of $target failed (exit $rc)"
@@ -123,7 +123,7 @@ for attempt in {1..10}; do
   if "$root/current/bin/deploy-smoke" -url http://127.0.0.1:18081 -commit "$target"; then healthy=true; break; fi
   sleep 1
 done
-[[ $healthy == true ]] || { echo 'Health check failed' >&2; exit 1; }
+[[ $healthy == true ]] || { echo 'Health check failed' >&2; rollback 1; }
 printf '%s\n' "$target" > "$root/state/deployed.tmp"
 mv -f "$root/state/deployed.tmp" "$root/state/deployed"
 if [[ $mode == --main ]]; then
