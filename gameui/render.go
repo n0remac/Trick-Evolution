@@ -1,11 +1,14 @@
 package gameui
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	h "github.com/n0remac/GoDom/html"
+	"github.com/n0remac/trick-evolution/cardtable"
 	"github.com/n0remac/trick-evolution/domain"
 )
 
@@ -21,7 +24,7 @@ func pageNode(room string) *h.Node {
 			h.Link(h.Rel("stylesheet"), h.Href("/game/style.css")),
 			h.Script(h.Src("/game/vendor/htmx-2.0.11.min.js"), h.Attr("defer", "")),
 			h.Script(h.Src("/game/vendor/htmx-ext-ws-2.0.4.min.js"), h.Attr("defer", "")),
-			h.Script(h.Src("/game/game.js"), h.Attr("defer", "")),
+			h.Script(h.Src("/game/game.js"), h.Type("module")),
 		),
 		h.Body(h.Main(h.Class("shell"),
 			h.Header(h.Class("masthead"),
@@ -29,6 +32,13 @@ func pageNode(room string) *h.Node {
 				h.Span(h.Id("connection"), h.Class("connection"), h.T("Offline")),
 			),
 			h.Div(h.Id("notice"), h.Class("notice"), h.Role("status"), h.Attr("aria-live", "polite")),
+			h.Section(h.Id("table3d"), h.Class("table3d"), h.Attr("hidden", ""), h.Attr("aria-label", "3D card table"),
+				h.NewNode("canvas", []*h.Node{h.Id("table3d-canvas"), h.Attr("aria-label", "Your cards on a 3D table")}),
+				h.Div(h.Class("table3d-controls"),
+					h.Span(h.Id("table3d-selection"), h.Role("status"), h.Attr("aria-live", "polite"), h.T("Select a card on the table.")),
+					h.Button(h.Id("table3d-play"), h.Type("button"), h.Attr("disabled", ""), h.T("Play selected card")),
+				),
+			),
 			h.Div(h.Id("live"), h.Attr("hx-ext", "ws"),
 				joinScreen(room),
 			),
@@ -87,6 +97,18 @@ func renderScreen(message serverMessage, seat domain.SeatID, catalog domain.Cata
 		h.Attr("data-revision", fmt.Sprint(message.Revision)),
 		h.Attr("data-kind", message.Type),
 		h.Attr("aria-live", "polite"), content)
+	if message.View != nil {
+		if payload, err := cardtable.Build(*message.View, catalog); err == nil {
+			if data, err := json.Marshal(payload); err == nil {
+				screen = h.Section(h.Id("screen"), h.Attr("hx-swap-oob", "outerHTML"),
+					h.Attr("data-update", fmt.Sprint(message.Sequence)),
+					h.Attr("data-revision", fmt.Sprint(message.Revision)),
+					h.Attr("data-kind", message.Type),
+					h.Attr("data-scene", base64.StdEncoding.EncodeToString(data)),
+					h.Attr("aria-live", "polite"), content)
+			}
+		}
+	}
 	return screen.Render() + noticeNode(eventNotice(message)).Render()
 }
 

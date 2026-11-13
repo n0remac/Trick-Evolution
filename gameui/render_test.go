@@ -1,6 +1,7 @@
 package gameui
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/n0remac/trick-evolution/cardtable"
 	"github.com/n0remac/trick-evolution/domain"
 )
 
@@ -31,6 +33,54 @@ func TestGoDomScreensKeepHandsPrivateAndUseDomainLegality(t *testing.T) {
 	seats := []seatSummary{{ID: "alice", Name: "Alice", Host: true}, {ID: "bob", Name: "Bob"}}
 	aliceHTML := renderScreen(serverMessage{Type: "state", Room: "test", View: &alice, Seats: seats, Sequence: 1}, "alice", catalog)
 	bobHTML := renderScreen(serverMessage{Type: "state", Room: "test", View: &bob, Seats: seats, Sequence: 1}, "bob", catalog)
+	decodeScene := func(html string) cardtable.Payload {
+		t.Helper()
+		match := regexp.MustCompile(`data-scene="([A-Za-z0-9+/=]+)"`).FindStringSubmatch(html)
+		if match == nil {
+			t.Fatal("missing Go-authored scene payload")
+		}
+		data, err := base64.StdEncoding.DecodeString(match[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload cardtable.Payload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if err := payload.Scene.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	aliceScene, bobScene := decodeScene(aliceHTML), decodeScene(bobHTML)
+	if len(aliceScene.Selections) != len(alice.Hand) || len(bobScene.Selections) != len(bob.Hand) {
+		t.Fatal("scene hand size differs from private view")
+	}
+	for _, selection := range aliceScene.Selections {
+		if selection.Animation.Validate() != nil {
+			t.Fatal("invalid Go-described card motion")
+		}
+		found := false
+		for _, own := range alice.Hand {
+			if own == selection.Card {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("Alice's scene contains non-owned card %s", selection.Card)
+		}
+	}
+	for _, selection := range bobScene.Selections {
+		found := false
+		for _, own := range bob.Hand {
+			if own == selection.Card {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("Bob's scene contains non-owned card %s", selection.Card)
+		}
+	}
 	for _, card := range bob.Hand {
 		if strings.Contains(aliceHTML, string(card)) {
 			t.Fatalf("Bob's private card %s in Alice HTML", card)

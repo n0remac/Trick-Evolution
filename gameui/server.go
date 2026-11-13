@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
+	"github.com/n0remac/trick-evolution/browser3d"
 	"github.com/n0remac/trick-evolution/domain"
 )
 
@@ -221,6 +222,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /game/style.css", serveGameCSS)
 	mux.HandleFunc("GET /game/vendor/htmx-2.0.11.min.js", serveHTMX)
 	mux.HandleFunc("GET /game/vendor/htmx-ext-ws-2.0.4.min.js", serveHTMXWS)
+	browser3d.Register(mux)
 	mux.HandleFunc("POST /game/join", s.join)
 	mux.HandleFunc("GET /ws/game", s.websocket)
 	return mux

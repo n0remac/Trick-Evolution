@@ -45,7 +45,7 @@ func launchBrowser(ctx context.Context, executable, artifacts string) (*browser,
 		return nil, err
 	}
 	args := []string{
-		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+		"--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-component-update", "--disable-default-apps", "--disable-sync",
 		"--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
 		"--disable-renderer-backgrounding", "--disable-features=IntensiveWakeUpThrottling",

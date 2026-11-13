@@ -20,7 +20,7 @@ scripts/test-release.sh --browser-bot-smoke
 scripts/test-release.sh --browser-full
 ```
 
-The fast smoke joins two isolated browser contexts and plays the first trick. The bot smoke joins alone, adds a bot from the lobby, scores a trick, ends the game from the UI, reloads the terminal state, and returns to join. Full mode uses the actual UI to finish all ten hands, checks the rule reveals and scoreboard after every hand, and reloads the guest during hand 5 and after game completion. It has a 150-second overall bound; smoke modes have 45 seconds. All launch headless Chromium with background timer throttling disabled. Use `--browser-bin /path/to/chrome` or `BROWSER_BIN=/path/to/chrome` if auto-detection does not find the browser. Use `--artifacts DIR` to choose where reports and failure files go. The runner can also be invoked directly:
+The fast smoke joins two isolated browser contexts and plays the first trick. The bot smoke joins alone, adds a bot from the lobby, scores a trick, ends the game from the UI, reloads the terminal state, and returns to join. The `3d-smoke` mode tests pointer selection, local motion, an accepted bot play, renderer reconciliation, resize and reconnect on a phone-size viewport. Full mode uses the actual UI to finish all ten hands, checks the rule reveals and scoreboard after every hand, and reloads the guest during hand 5 and after game completion. It has a 180-second overall bound; smoke modes have 45 seconds. All launch headless Chromium with background timer throttling disabled. Use `--browser-bin /path/to/chrome` or `BROWSER_BIN=/path/to/chrome` if auto-detection does not find the browser. Use `--artifacts DIR` to choose where reports and failure files go. The runner can also be invoked directly:
 
 ```sh
 go run ./cmd/browser-e2e -mode full -browser /usr/bin/chromium
@@ -45,7 +45,7 @@ The browser runner asserts the two-seat UI's exact 28–22 outcome, ten hand bou
 
 ## CI and current evidence
 
-`.github/workflows/d1-release.yml` runs the lightweight gate on pushes and pull requests. A manually triggered workflow with `full_browser=true` runs the full Chromium gate and targeted race check on an Ubuntu x64 runner. Browser artifacts are uploaded when that job fails. This workflow has been committed but has **not run remotely** because this branch was not pushed.
+`.github/workflows/d1-release.yml` runs the lightweight gate on pushes and pull requests. Pull requests also run the full Chromium gate and targeted race check on an Ubuntu x64 runner. A manually triggered workflow with `full_browser=true` runs the same full gate. Browser artifacts are uploaded when that job fails.
 
 Local evidence on 2026-11-12:
 

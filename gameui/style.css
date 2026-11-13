@@ -35,4 +35,9 @@ h2 { margin: 0 0 .75rem; }
 .card small { font-size: .7rem; }
 .card:disabled { opacity: .65; }
 .status { margin: .7rem 0; font-weight: 650; }
+.table3d { margin: 1rem 0; border: 1px solid #759b80; border-radius: .9rem; overflow: hidden; background: #184332; }
+.table3d[hidden] { display: none; }
+.table3d canvas { display: block; width: 100%; height: clamp(240px, 48vw, 360px); touch-action: none; }
+.table3d-controls { display: flex; align-items: center; justify-content: space-between; gap: .7rem; padding: .6rem .8rem; }
+.table3d-controls span { min-width: 0; }
 @media (max-width: 600px) { .shell { padding: .75rem; } .card { min-width: 59px; height: 88px; } }
