@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read or update only trick.noremac.dev's existing Porkbun A record.
+"""Read or update only trick.noremac.dev's Porkbun A record.
 
 Credentials live outside Git in ~/.config/porkbun/credentials.json.
 """
@@ -67,20 +67,33 @@ def api_request(keys, path, body=None):
     return result
 
 
-def trick_records(records):
+def trick_record(records):
     relevant = [
         record for record in records
         if str(record.get("name", "")).rstrip(".").lower() in {"trick", HOST}
         and record.get("type") in {"A", "AAAA", "CNAME"}
     ]
     a_records = [record for record in relevant if record["type"] == "A"]
+    if not relevant:
+        return None
     if len(a_records) != 1 or len(relevant) != 1:
-        raise ValueError("expected exactly one Trick A record and no Trick AAAA/CNAME")
+        raise ValueError("expected at most one Trick A record and no Trick AAAA/CNAME")
     record = a_records[0]
     if not str(record.get("id", "")).isdigit():
         raise ValueError("Trick A record has no numeric ID")
     ipaddress.IPv4Address(record.get("content", ""))
     return record
+
+
+def wildcard_address(records):
+    wildcard = [
+        record for record in records
+        if str(record.get("name", "")).rstrip(".").lower() in {"*", f"*.{DOMAIN}"}
+        and record.get("type") == "A"
+    ]
+    if len(wildcard) != 1:
+        raise ValueError("expected exactly one wildcard A record before creating Trick A")
+    return str(ipaddress.IPv4Address(wildcard[0].get("content", "")))
 
 
 def main():
@@ -97,9 +110,14 @@ def main():
     elif args.address or args.expected_current:
         parser.error("status takes no address")
     keys = credentials()
-    record = trick_records(api_request(keys, f"/dns/retrieve/{DOMAIN}")["records"])
-    current = record["content"]
-    print(f"{HOST} A record {record['id']}: {current}")
+    records = api_request(keys, f"/dns/retrieve/{DOMAIN}")["records"]
+    record = trick_record(records)
+    if record is None:
+        current = wildcard_address(records)
+        print(f"{HOST}: no explicit record; wildcard A resolves to {current}")
+    else:
+        current = record["content"]
+        print(f"{HOST} A record {record['id']}: {current}")
     if args.action == "status":
         return
     if current != expected:
@@ -107,11 +125,14 @@ def main():
     if current == desired:
         print("already at requested address; no update made")
         return
-    api_request(keys, f"/dns/edit/{DOMAIN}/{record['id']}", {"content": desired})
-    updated = trick_records(api_request(keys, f"/dns/retrieve/{DOMAIN}")["records"])
-    if updated["content"] != desired:
+    if record is None:
+        api_request(keys, f"/dns/create/{DOMAIN}", {"name": "trick", "type": "A", "content": desired})
+    else:
+        api_request(keys, f"/dns/edit/{DOMAIN}/{record['id']}", {"content": desired})
+    updated = trick_record(api_request(keys, f"/dns/retrieve/{DOMAIN}")["records"])
+    if updated is None or updated["content"] != desired:
         raise RuntimeError("API accepted update but readback did not match")
-    print(f"updated {HOST} A record {record['id']}: {current} -> {desired}")
+    print(f"set {HOST} A record {updated['id']}: {current} -> {desired}")
 
 
 if __name__ == "__main__":

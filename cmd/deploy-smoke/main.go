@@ -3,9 +3,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,16 +29,34 @@ type message struct {
 func main() {
 	base := flag.String("url", "http://127.0.0.1:18081", "HTTP(S) base URL")
 	commit := flag.String("commit", "", "expected health commit")
+	connectIP := flag.String("connect-ip", "", "connect to this IP while verifying the URL hostname and TLS certificate")
 	flag.Parse()
-	if err := check(*base, *commit); err != nil {
+	if err := check(*base, *commit, *connectIP); err != nil {
 		fmt.Fprintln(os.Stderr, "deploy smoke:", err)
 		os.Exit(1)
 	}
 	fmt.Println("HTTP health and two-client WebSocket start/reconnect passed")
 }
 
-func check(base, commit string) error {
-	client := &http.Client{Timeout: 5 * time.Second}
+func check(base, commit, connectIP string) error {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	wsDialer := &websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	if connectIP != "" {
+		if net.ParseIP(connectIP) == nil {
+			return fmt.Errorf("connect-ip must be an IP address")
+		}
+		dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+			_, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(connectIP, port))
+		}
+		transport.Proxy = nil
+		transport.DialContext = dial
+		wsDialer.NetDialContext = dial
+	}
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 	response, err := client.Get(strings.TrimRight(base, "/") + "/healthz")
 	if err != nil {
 		return err
@@ -84,7 +104,7 @@ func check(base, commit string) error {
 	}
 	dial := func(s session) (*websocket.Conn, error) {
 		address := scheme + "://" + u.Host + "/ws/game?room=" + url.QueryEscape(s.Room) + "&token=" + url.QueryEscape(s.Token)
-		conn, response, err := (&websocket.Dialer{HandshakeTimeout: 5 * time.Second}).Dial(address, http.Header{"Origin": []string{strings.TrimRight(base, "/")}})
+		conn, response, err := wsDialer.Dial(address, http.Header{"Origin": []string{strings.TrimRight(base, "/")}})
 		if err != nil {
 			if response != nil {
 				return nil, fmt.Errorf("websocket HTTP %d: %w", response.StatusCode, err)
