@@ -1,6 +1,6 @@
 # U2 — local 3D runtime and card-play slice
 
-Status: implemented and verified on `feature/u2-3d-runtime`; main integration and D2 rollout pending. Baseline is deployed U1/main `2d10ae869ac98363caef7b33b97bfee0ea57c1b1`. U2 follows [the UI roadmap](UI_GODOM_3D_ROADMAP.md), [D1](D1_RELEASE_GATES.md), and [D2](D2_DEV_DEPLOYMENT.md).
+Status: implemented, verified, and deployed on main. U1 baseline was `2d10ae869ac98363caef7b33b97bfee0ea57c1b1`. U2 follows [the UI roadmap](UI_GODOM_3D_ROADMAP.md), [D1](D1_RELEASE_GATES.md), and [D2](D2_DEV_DEPLOYMENT.md).
 
 ## Scope and design
 
@@ -18,13 +18,13 @@ Pinned `three@0.160.1`, locally embedded as `browser3d/vendor/three-0.160.1.modu
 
 ## Manual phone route and controls
 
-Open `https://trick.noremac.dev/game?room=YOUR_ROOM` on a phone after the U2 deployment. Join as host, choose one computer opponent (or add a bot in the lobby), and start. Touch a visible card in the 3D canvas to select it and see the short local lift/move/return motion. Press **Play selected card** below the canvas to submit the legal card. The HTML hand below remains available for normal play, including accessibility and full-game flow. Rotate or resize to check the canvas; reload to check current-state restoration. Manual feel and readability judgment belongs to phone playtesting.
+Open `https://trick.noremac.dev/game?room=YOUR_ROOM` on a phone. Join as host, choose one computer opponent (or add a bot in the lobby), and start. Touch a visible card in the 3D canvas to select it and see the short local lift/move/return motion. Press **Play selected card** below the canvas to submit the legal card. The HTML hand below remains available for normal play, including accessibility and full-game flow. Rotate or resize to check the canvas; reload to check current-state restoration. Manual feel and readability judgment belongs to phone playtesting.
 
 ## Verification and release
 
 Focused schema and per-seat HTML tests validate versioning, rejected invalid inputs, own-hand only scene content, Go-authored motion, and legal controls. The bounded `3d-smoke` Chromium mode uses a 390×844 emulated phone viewport, pointer input at a projected real mesh, checks measured local motion and the authenticated play against a bot, verifies renderer identity/object count after HTMX updates, resizes to 320×700 and checks the backing cap, then reloads and checks current-state restoration. It runs under `xvfb-run` on this Pi because bare headless Chromium stalled during DevTools startup/GPU initialization.
 
-### Local evidence (2026-11-12/13 UTC)
+### Pre-release Pi evidence (2026-11-12/13 UTC)
 
 - Focused `scene`, `animation`, and `gameui` tests passed. `scripts/test-release.sh --browser-full` passed its focused `domain`, `cards`, `websocket`, `gameui` tests, including ten-hand HTTP/WebSocket fixtures, and root/browser builds. `git diff --check` passed.
 - Final 3D browser smoke **passed** in 29.929s with actual rendered pointer selection, card movement, accepted bot play, update reconciliation, resize, and reconnect. Report: `/tmp/trick-u2-browser/20261113T074608-3d-smoke-3512935/result.json`.
@@ -35,3 +35,11 @@ Focused schema and per-seat HTML tests validate versioning, rejected invalid inp
 ### Ubuntu CI gate (2026-11-13)
 
 [PR #1](https://github.com/n0remac/Trick-Evolution/pull/1) ran the full D1 gate on Ubuntu in [workflow run 43391461124](https://github.com/n0remac/Trick-Evolution/actions/runs/43391461124). The lightweight job passed. The full-browser job passed the focused Go and root build gate, the supported-host targeted race test, the exact ten-hand full-browser match in **14.906s**, and the 3D pointer/motion/bot-play/resize/reconnect smoke in **1.628s**. This resolves the release gate previously blocked by the Pi's Chromium DevTools stalls. Main integration and D2 deployment have not yet occurred at this evidence point.
+
+The documentation follow-up head `8724b4ff3f924c6e69a0be6e31585e6623d7281b` passed the same lightweight and full-browser jobs in [workflow run 43392031845](https://github.com/n0remac/Trick-Evolution/actions/runs/43392031845) before merge.
+
+### Main integration and D2 rollout (2026-11-13)
+
+After confirming the latest `origin/main` was still the U1 baseline and an ancestor of the tested PR head, PR #1 was merged as `292b7a8e4db938ae3ba9e28d5b74b34bd7b733dd`. The installed D2 `--main` script fetched that exact main commit, passed its archived focused D1 gate and root build, installed the read-only release, and restarted the service. The first startup probe briefly saw connection refused; the documented retry passed local HTTP and two-client WebSocket start/reconnect. The deploy log recorded `deployed 292b7a8…` at `2026-11-13T00:22:28-08:00`.
+
+The deployment record, local `/healthz`, public HTTPS `/healthz`, and `origin/main` all reported the full merge SHA. The release's `deploy-smoke` passed on `https://trick.noremac.dev` with exact-commit HTTP health and two-client WSS start/reconnect. The Trick service, tunnel, and deploy timer were active. No unrelated service was changed. Manual phone feel remains for the user to judge.
