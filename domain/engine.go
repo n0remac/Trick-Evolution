@@ -141,7 +141,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog) (
 	if cardIndex < 0 {
 		return state, nil, transitionError(ErrCardNotOwned, "card is not in seat's hand")
 	}
-	card, ok := cardByID(action.Card)
+	_, ok := cardByID(action.Card)
 	if !ok {
 		return state, nil, transitionError(ErrInvalidState, "hand contains an unknown card")
 	}
@@ -149,22 +149,19 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog) (
 	if err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
-	if len(state.CurrentTrick) > 0 && playEffect == EffectFollow {
-		lead, ok := cardByID(state.CurrentTrick[0].Card)
-		if !ok {
-			return state, nil, transitionError(ErrInvalidState, "trick contains an unknown card")
+	legal, err := legalCardsForHand(hand, state.CurrentTrick, playEffect)
+	if err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
+	allowed := false
+	for _, id := range legal {
+		if id == action.Card {
+			allowed = true
+			break
 		}
-		if card.Suit != lead.Suit {
-			for _, id := range hand {
-				other, ok := cardByID(id)
-				if !ok {
-					return state, nil, transitionError(ErrInvalidState, "hand contains an unknown card")
-				}
-				if other.Suit == lead.Suit {
-					return state, nil, transitionError(ErrMustFollowSuit, "lead suit is available")
-				}
-			}
-		}
+	}
+	if !allowed {
+		return state, nil, transitionError(ErrMustFollowSuit, "lead suit is available")
 	}
 	if len(state.CurrentTrick) >= len(state.Seats) {
 		return state, nil, transitionError(ErrInvalidState, "trick already has all plays")

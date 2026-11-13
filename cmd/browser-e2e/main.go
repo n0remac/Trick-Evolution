@@ -89,13 +89,13 @@ const stateExpression = `(() => {
 func main() { os.Exit(runMain()) }
 
 func runMain() int {
-	mode := flag.String("mode", "smoke", "smoke or full")
+	mode := flag.String("mode", "smoke", "smoke, bot-smoke, or full")
 	browserPath := flag.String("browser", "", "Chromium/Chrome executable (auto-detected if empty)")
 	artifactRoot := flag.String("artifacts", "artifacts/browser-e2e", "directory for run reports and failure artifacts")
 	timeLimit := flag.Duration("timeout", 0, "overall time bound (default: 45s smoke, 150s full)")
 	flag.Parse()
-	if *mode != "smoke" && *mode != "full" {
-		fmt.Fprintln(os.Stderr, "-mode must be smoke or full")
+	if *mode != "smoke" && *mode != "bot-smoke" && *mode != "full" {
+		fmt.Fprintln(os.Stderr, "-mode must be smoke, bot-smoke, or full")
 		return 2
 	}
 	if *timeLimit == 0 {
@@ -160,6 +160,9 @@ func (r *runner) run(explicitBrowser string) error {
 	if err != nil {
 		return err
 	}
+	if r.mode == "bot-smoke" {
+		return r.botSmoke()
+	}
 	r.bob, err = r.browser.newPage(r.ctx, "bob", address)
 	if err != nil {
 		return err
@@ -195,12 +198,16 @@ func (r *runner) run(explicitBrowser string) error {
 	return r.full()
 }
 
-func (r *runner) join(p *page, name string) error {
+func (r *runner) join(p *page, name string, botCount ...int) error {
 	if err := r.waitPage(p, name+" join form", 25*time.Second, func(s uiState) bool { return s.Connection == "Offline" && s.Hand == 0 }); err != nil {
 		return err
 	}
 	quoted, _ := json.Marshal(name)
-	expression := `(() => { const name = document.querySelector('input[name=name]'); const form = document.querySelector('form'); if (!name || !form) return false; name.value = ` + string(quoted) + `; form.requestSubmit(); return true; })()`
+	count := 0
+	if len(botCount) > 0 {
+		count = botCount[0]
+	}
+	expression := fmt.Sprintf(`(() => { const name = document.querySelector('input[name=name]'); const bots = document.querySelector('select[name=bots]'); const form = document.querySelector('form'); if (!name || !bots || !form) return false; name.value = %s; bots.value = %q; form.requestSubmit(); return true; })()`, string(quoted), fmt.Sprint(count))
 	var submitted bool
 	if err := p.eval(r.ctx, expression, &submitted); err != nil {
 		return err
@@ -209,6 +216,43 @@ func (r *runner) join(p *page, name string) error {
 		return fmt.Errorf("%s join form was absent", name)
 	}
 	return r.waitPage(p, name+" connected", 25*time.Second, func(s uiState) bool { return s.Connection == "Connected" && s.SeatTiles > 0 })
+}
+
+func (r *runner) botSmoke() error {
+	if err := r.join(r.alice, "Alice", 1); err != nil {
+		return err
+	}
+	if err := r.waitPage(r.alice, "human and bot lobby", 20*time.Second, func(s uiState) bool {
+		return s.SeatTiles == 2 && len(s.ScoreNames) == 2 && s.ScoreNames[1] == "Bot 1"
+	}); err != nil {
+		return err
+	}
+	if err := r.alice.click(r.ctx, "Start game"); err != nil {
+		return err
+	}
+	if err := r.waitPage(r.alice, "bot first deal", 20*time.Second, func(s uiState) bool {
+		return s.Hand == 1 && s.HandCards == 5 && s.Revision >= 1
+	}); err != nil {
+		return err
+	}
+	if err := r.alice.startAutoplay(r.ctx, 3); err != nil {
+		return err
+	}
+	if err := r.waitPage(r.alice, "first human-bot trick", 20*time.Second, func(s uiState) bool {
+		return s.Revision >= 3 && totalPoints(s.Scores) >= 1
+	}); err != nil {
+		return err
+	}
+	if err := r.alice.stopAutoplay(r.ctx); err != nil {
+		return err
+	}
+	final, err := r.state(r.alice)
+	if err != nil {
+		return err
+	}
+	r.result.Final = final
+	r.steps = append(r.steps, "one browser created a bot room and completed a scored trick without a second WebSocket seat")
+	return r.checkConsole()
 }
 
 func (r *runner) state(p *page) (uiState, error) {
@@ -424,6 +468,9 @@ func reflectScores(a, b []scoreLine) bool {
 
 func (r *runner) checkConsole() error {
 	for _, p := range []*page{r.alice, r.bob} {
+		if p == nil {
+			continue
+		}
 		var drain bool
 		if err := p.eval(r.ctx, `true`, &drain); err != nil {
 			return err

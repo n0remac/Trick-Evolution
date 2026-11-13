@@ -29,6 +29,12 @@ StarCoaster on this Pi uses **systemd user services** for its game and a separat
 
 **D2 implementation status (2026-11-12): deployed with public HTTPS.** See [D2_DEV_DEPLOYMENT.md](D2_DEV_DEPLOYMENT.md) for the public-hostname override, main-only automatic release policy, installed topology, rollback test, Porkbun DNS correction, TLS/WebSocket evidence, and remaining reboot verification limit. The original private-URL and manual-only preferences above were superseded by the user's approved public HTTPS and automatic `origin/main` requirements.
 
+## A1 and A2 — opponents before sandbox expansion
+
+**A1 heuristic opponents:** Implemented on `feature/a1-heuristic-opponents`; see [A1_HEURISTIC_OPPONENTS.md](A1_HEURISTIC_OPPONENTS.md) for tokenless server bot seats, transparent rule-aware choices, cancellation, complete-game and browser evidence, and limitations. The public D2 deployment remains on its previous tested commit; this A1 branch is not pushed, merged, or deployed.
+
+**A2 Monte Carlo rollouts:** [A2_MONTE_CARLO_DESIGN.md](A2_MONTE_CARLO_DESIGN.md) specifies the observation boundary, hidden-hand sampling, void inference, pure `domain.Step` rollout, objectives, budgets, deterministic replay, cancellation, and tests. A2 is design only; no sampler or search engine is implemented yet. Opponent work precedes S1/S2 sandbox expansion.
+
 ## D3 — stabilize and playtest the initial experience
 
 - Short manual playtesting with 2–4 players; refine readability of active rules, whose turn it is, rule reveals, end-of-hand pacing, and accessibility/mobile layout.

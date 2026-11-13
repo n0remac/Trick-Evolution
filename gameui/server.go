@@ -35,6 +35,7 @@ type Server struct {
 	catalog   domain.Catalog
 	config    domain.Config
 	shuffle   shuffleFactory
+	botDelay  time.Duration
 	now       func() time.Time
 	done      chan struct{}
 	closeOnce sync.Once
@@ -44,19 +45,24 @@ type participant struct {
 	ID    domain.SeatID
 	Name  string
 	Token string
+	Bot   bool
 }
 
 type room struct {
-	mu           sync.Mutex
-	dispatchMu   sync.Mutex // Serializes accepted actions and snapshot delivery for this room.
-	id           string
-	seats        []participant
-	clients      map[domain.SeatID]*client
-	state        *domain.MatchState
-	lastEvents   []domain.Event
-	seen         map[domain.SeatID]map[string]acceptedCommand
-	lastActivity time.Time
-	server       *Server
+	mu            sync.Mutex
+	dispatchMu    sync.Mutex // Serializes accepted actions and snapshot delivery for this room.
+	id            string
+	seats         []participant
+	clients       map[domain.SeatID]*client
+	state         *domain.MatchState
+	lastEvents    []domain.Event
+	seen          map[domain.SeatID]map[string]acceptedCommand
+	lastActivity  time.Time
+	server        *Server
+	botWake       chan struct{}
+	done          chan struct{}
+	closed        bool
+	workerStarted bool
 }
 
 type acceptedCommand struct {
@@ -78,6 +84,7 @@ type seatSummary struct {
 	Name   string        `json:"name"`
 	Online bool          `json:"online"`
 	Host   bool          `json:"host"`
+	Bot    bool          `json:"bot"`
 }
 
 type serverMessage struct {
@@ -119,14 +126,25 @@ func NewServerWithConfig(config domain.Config, shuffle func() domain.ShuffleSour
 	if shuffle == nil {
 		return nil, fmt.Errorf("shuffle factory is required")
 	}
-	s := &Server{rooms: make(map[string]*room), catalog: catalog, config: config, shuffle: shuffle, now: time.Now, done: make(chan struct{})}
+	s := &Server{rooms: make(map[string]*room), catalog: catalog, config: config, shuffle: shuffle, botDelay: defaultBotDelay, now: time.Now, done: make(chan struct{})}
 	go s.cleanupLoop()
 	return s, nil
 }
 
 // Close stops periodic room cleanup. Active connections are closed by their
 // HTTP server or clients; production normally keeps Server for process life.
-func (s *Server) Close() { s.closeOnce.Do(func() { close(s.done) }) }
+func (s *Server) Close() {
+	s.closeOnce.Do(func() {
+		close(s.done)
+		s.mu.Lock()
+		for _, gameRoom := range s.rooms {
+			gameRoom.mu.Lock()
+			gameRoom.closeLocked()
+			gameRoom.mu.Unlock()
+		}
+		s.mu.Unlock()
+	})
+}
 
 func (s *Server) cleanupLoop() {
 	ticker := time.NewTicker(10 * time.Minute)
@@ -176,7 +194,10 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1024)
-	var request struct{ Room, Name, Token string }
+	var request struct {
+		Room, Name, Token string
+		Bots              int
+	}
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
@@ -196,6 +217,10 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name must be 1–32 characters", http.StatusBadRequest)
 		return
 	}
+	if request.Bots < 0 || request.Bots > 3 {
+		http.Error(w, "bots must be 0–3", http.StatusBadRequest)
+		return
+	}
 	newID, err := randomToken(8)
 	if err != nil {
 		http.Error(w, "could not create seat", http.StatusInternalServerError)
@@ -210,14 +235,20 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	s.pruneLocked()
 	gameRoom := s.rooms[request.Room]
 	if gameRoom == nil {
-		gameRoom = &room{id: request.Room, clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand), lastActivity: s.now(), server: s}
+		gameRoom = &room{id: request.Room, clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand), lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{})}
 		s.rooms[request.Room] = gameRoom
 	}
 	gameRoom.mu.Lock()
+	if gameRoom.closed {
+		gameRoom.mu.Unlock()
+		s.mu.Unlock()
+		http.Error(w, "room is closed", http.StatusGone)
+		return
+	}
 	var seat participant
 	if request.Token != "" {
 		for _, existing := range gameRoom.seats {
-			if existing.Token == request.Token {
+			if !existing.Bot && existing.Token == request.Token {
 				seat = existing
 				break
 			}
@@ -228,8 +259,20 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid session", http.StatusUnauthorized)
 			return
 		}
+		if request.Bots > 0 && gameRoom.seats[0].ID != seat.ID {
+			gameRoom.mu.Unlock()
+			s.mu.Unlock()
+			http.Error(w, "only the host can add bots", http.StatusForbidden)
+			return
+		}
 	} else {
-		if gameRoom.state != nil || len(gameRoom.seats) >= 4 {
+		if request.Bots > 0 && len(gameRoom.seats) != 0 {
+			gameRoom.mu.Unlock()
+			s.mu.Unlock()
+			http.Error(w, "only the host can add bots", http.StatusForbidden)
+			return
+		}
+		if gameRoom.state != nil || len(gameRoom.seats)+1+request.Bots > 4 {
 			gameRoom.mu.Unlock()
 			s.mu.Unlock()
 			http.Error(w, "room is full or already started", http.StatusConflict)
@@ -237,6 +280,24 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		}
 		seat = participant{ID: domain.SeatID(newID), Name: request.Name, Token: newToken}
 		gameRoom.seats = append(gameRoom.seats, seat)
+	}
+	if request.Bots > 0 {
+		if gameRoom.state != nil || len(gameRoom.seats)+request.Bots > 4 {
+			gameRoom.mu.Unlock()
+			s.mu.Unlock()
+			http.Error(w, "room is full or already started", http.StatusConflict)
+			return
+		}
+		count := 0
+		for _, existing := range gameRoom.seats {
+			if existing.Bot {
+				count++
+			}
+		}
+		for i := 0; i < request.Bots; i++ {
+			count++
+			gameRoom.seats = append(gameRoom.seats, participant{ID: domain.SeatID(fmt.Sprintf("bot:%d", count)), Name: fmt.Sprintf("Bot %d", count), Bot: true})
+		}
 	}
 	gameRoom.lastActivity = s.now()
 	host := gameRoom.seats[0].ID == seat.ID
@@ -258,10 +319,11 @@ func (s *Server) pruneLocked() {
 	for id, gameRoom := range s.rooms {
 		gameRoom.mu.Lock()
 		stale := len(gameRoom.clients) == 0 && s.now().Sub(gameRoom.lastActivity) > roomIdleTTL
-		gameRoom.mu.Unlock()
 		if stale {
+			gameRoom.closeLocked()
 			delete(s.rooms, id)
 		}
+		gameRoom.mu.Unlock()
 	}
 }
 
@@ -306,9 +368,14 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	gameRoom.mu.Lock()
+	if gameRoom.closed {
+		gameRoom.mu.Unlock()
+		http.Error(w, "room is closed", http.StatusGone)
+		return
+	}
 	var seat domain.SeatID
 	for _, p := range gameRoom.seats {
-		if p.Token == token {
+		if !p.Bot && p.Token == token {
 			seat = p.ID
 			break
 		}
@@ -324,6 +391,11 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	}
 	c := &client{conn: conn, send: make(chan []byte, 16), done: make(chan struct{}), room: gameRoom, seat: seat}
 	gameRoom.mu.Lock()
+	if gameRoom.closed {
+		gameRoom.mu.Unlock()
+		c.stop()
+		return
+	}
 	previous := gameRoom.clients[seat]
 	gameRoom.clients[seat] = c
 	gameRoom.lastActivity = s.now()
@@ -431,7 +503,7 @@ func (r *room) publishLocked() {
 		clients[id] = c
 	}
 	for i, p := range r.seats {
-		seats[i] = seatSummary{ID: p.ID, Name: p.Name, Online: clients[p.ID] != nil, Host: i == 0}
+		seats[i] = seatSummary{ID: p.ID, Name: p.Name, Online: p.Bot || clients[p.ID] != nil, Host: i == 0, Bot: p.Bot}
 	}
 	state := r.state
 	events := append([]domain.Event(nil), r.lastEvents...)
@@ -456,6 +528,11 @@ func (r *room) handleCommand(c *client, cmd command) {
 	r.dispatchMu.Lock()
 	defer r.dispatchMu.Unlock()
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: "room_closed", Message: "room is closed"})
+		return
+	}
 	if r.clients[c.seat] != c {
 		r.mu.Unlock()
 		c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: "stale_session", Message: "reconnect to continue"})
@@ -543,6 +620,11 @@ func (r *room) handleCommand(c *client, cmd command) {
 	r.state = &next
 	r.lastEvents = events
 	r.lastActivity = r.server.now()
+	launchWorker := false
+	if !r.workerStarted && r.hasBotLocked() {
+		r.workerStarted = true
+		launchWorker = true
+	}
 	if r.seen[c.seat] == nil {
 		r.seen[c.seat] = make(map[string]acceptedCommand)
 	}
@@ -550,4 +632,8 @@ func (r *room) handleCommand(c *client, cmd command) {
 	r.mu.Unlock()
 	c.enqueue(serverMessage{Type: "ack", ID: cmd.ID, Revision: next.Revision})
 	r.publishLocked()
+	if launchWorker {
+		go r.runBots()
+	}
+	r.signalBot()
 }

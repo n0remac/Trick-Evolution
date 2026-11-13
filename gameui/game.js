@@ -36,7 +36,7 @@
 
   function showJoin() {
     const panel = element('section', 'panel join');
-    panel.append(element('h2', '', 'Join a room'), element('p', 'muted', 'Share the room code with 1–3 friends. The first player hosts.'));
+    panel.append(element('h2', '', 'Join a room'), element('p', 'muted', 'Share the room code with friends, or add computer opponents when creating a room. The first player hosts.'));
     const form = element('form', 'form-grid');
     const roomLabel = element('label', '', 'Room code');
     const roomInput = element('input');
@@ -47,9 +47,18 @@
     nameInput.name = 'name'; nameInput.required = true; nameInput.maxLength = 32;
     nameInput.value = sessionStorage.getItem(`${key()}:name`) || '';
     nameLabel.append(nameInput);
+    const botsLabel = element('label', '', 'Computer opponents (new room)');
+    const botsSelect = element('select');
+    botsSelect.name = 'bots';
+    for (let count = 0; count <= 3; count++) {
+      const option = element('option', '', String(count));
+      option.value = String(count);
+      botsSelect.append(option);
+    }
+    botsLabel.append(botsSelect);
     const submit = button('Join room', () => {});
     submit.type = 'submit';
-    form.append(roomLabel, nameLabel, submit);
+    form.append(roomLabel, nameLabel, botsLabel, submit);
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const chosenRoom = roomInput.value.trim();
@@ -57,18 +66,18 @@
       room = chosenRoom;
       history.replaceState(null, '', `/game?room=${encodeURIComponent(room)}`);
       submit.disabled = true;
-      try { await join(nameInput.value.trim()); }
+      try { await join(nameInput.value.trim(), '', Number(botsSelect.value)); }
       finally { submit.disabled = false; }
     });
     panel.append(form);
     screen.replaceChildren(panel);
   }
 
-  async function join(name, token = '') {
+  async function join(name, token = '', bots = 0) {
     try {
       const response = await fetch('/game/join', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({room, name, token})
+        body: JSON.stringify({room, name, token, bots})
       });
       if (!response.ok) {
         const message = (await response.text()).trim();
@@ -81,6 +90,16 @@
       revision = -1;
       setNotice('');
       connect();
+    } catch (error) { setNotice(error.message); }
+  }
+
+  async function addBot() {
+    try {
+      const response = await fetch('/game/join', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({room, name: session.name, token: session.token, bots: 1})
+      });
+      if (!response.ok) throw new Error((await response.text()).trim() || `Add bot failed (${response.status})`);
     } catch (error) { setNotice(error.message); }
   }
 
@@ -119,16 +138,19 @@
 
   function renderLobby(message) {
     const panel = element('section', 'panel');
-    panel.append(element('h2', '', `Room ${message.room}`), element('p', 'muted', 'Invite friends with this page URL. Two to four players can join.'));
+    panel.append(element('h2', '', `Room ${message.room}`), element('p', 'muted', 'Invite friends with this page URL or add bots. Two to four seats can play.'));
     const scores = element('div', 'scoreboard');
     for (const seat of message.seats || []) {
       const tile = element('div', 'seat');
-      tile.append(element('strong', '', seat.name), element('span', 'tag', `${seat.host ? 'Host · ' : ''}${seat.online ? 'Online' : 'Offline'}`));
+      tile.append(element('strong', '', seat.name), element('span', 'tag', `${seat.host ? 'Host · ' : ''}${seat.bot ? 'Bot' : seat.online ? 'Online' : 'Offline'}`));
       scores.append(tile);
     }
     panel.append(scores);
     const mine = (message.seats || []).find(seat => seat.id === session.seat);
-    if (mine?.host) panel.append(button('Start game', () => send('start'), message.seats.length < 2));
+    if (mine?.host) {
+      if (message.seats.length < 4) panel.append(button('Add bot', addBot));
+      panel.append(button('Start game', () => send('start'), message.seats.length < 2));
+    }
     else panel.append(element('p', 'muted', 'Waiting for the host to start.'));
     screen.replaceChildren(panel);
   }
