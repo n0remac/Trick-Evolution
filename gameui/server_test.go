@@ -115,6 +115,115 @@ func readRevision(t *testing.T, conn *websocket.Conn, revision uint64) serverMes
 	return serverMessage{}
 }
 
+func TestLobbyAddBotAndHostEndGame(t *testing.T) {
+	s, web := testServer(t)
+	host := joinRoom(t, web.URL, "control", "Host", "", http.StatusOK)
+	guest := joinRoom(t, web.URL, "control", "Guest", "", http.StatusOK)
+	a, b := dialRoom(t, web.URL, host), dialRoom(t, web.URL, guest)
+	_ = readMessage(t, a, "lobby")
+	_ = readMessage(t, b, "lobby")
+
+	sendCommand(t, b, command{Type: "add_bot", ID: "guest-bot"})
+	if got := readMessage(t, b, "error"); got.Code != "not_host" {
+		t.Fatalf("guest added bot: %+v", got)
+	}
+	sendCommand(t, a, command{Type: "add_bot", ID: "first-bot"})
+	if got := readMessage(t, a, "ack"); got.Revision != 0 {
+		t.Fatalf("bot ack: %+v", got)
+	}
+	for _, conn := range []*websocket.Conn{a, b} {
+		lobby := readMessage(t, conn, "lobby")
+		if len(lobby.Seats) != 3 || !lobby.Seats[2].Bot || lobby.Seats[2].ID != "bot:1" || lobby.Seats[2].Online != true {
+			t.Fatalf("bot missing from lobby: %+v", lobby.Seats)
+		}
+	}
+	sendCommand(t, a, command{Type: "add_bot", ID: "first-bot"})
+	if got := readMessage(t, a, "ack"); got.Revision != 0 {
+		t.Fatalf("duplicate bot ack: %+v", got)
+	}
+	s.mu.Lock()
+	count := len(s.rooms["control"].seats)
+	s.mu.Unlock()
+	if count != 3 {
+		t.Fatalf("duplicate bot action added seat: %d", count)
+	}
+	sendCommand(t, a, command{Type: "add_bot", ID: "second-bot"})
+	_ = readMessage(t, a, "ack")
+	for _, conn := range []*websocket.Conn{a, b} {
+		if lobby := readMessage(t, conn, "lobby"); len(lobby.Seats) != 4 || lobby.Seats[3].ID != "bot:2" {
+			t.Fatalf("four-seat lobby: %+v", lobby.Seats)
+		}
+	}
+	sendCommand(t, a, command{Type: "add_bot", ID: "too-many"})
+	if got := readMessage(t, a, "error"); got.Code != "room_full" {
+		t.Fatalf("overfull bot room: %+v", got)
+	}
+
+	sendCommand(t, a, command{Type: "start", ID: "start"})
+	_ = readMessage(t, a, "ack")
+	firstA, firstB := readRevision(t, a, 1), readRevision(t, b, 1)
+	if firstA.View == nil || firstB.View == nil || len(firstA.View.Hand) != 5 || len(firstB.View.Hand) != 5 {
+		t.Fatal("start omitted private hands")
+	}
+	sendCommand(t, a, command{Type: "add_bot", ID: "late-bot"})
+	if got := readMessage(t, a, "error"); got.Code != "wrong_phase" {
+		t.Fatalf("bot added after start: %+v", got)
+	}
+	sendCommand(t, b, command{Type: "end", ID: "guest-end"})
+	if got := readMessage(t, b, "error"); got.Code != string(domain.ErrNotHost) {
+		t.Fatalf("guest ended match: %+v", got)
+	}
+	sendCommand(t, a, command{Type: "end", ID: "host-end"})
+	if got := readMessage(t, a, "ack"); got.Revision != 2 {
+		t.Fatalf("end ack: %+v", got)
+	}
+	finalA, finalB := readRevision(t, a, 2), readRevision(t, b, 2)
+	for _, final := range []serverMessage{finalA, finalB} {
+		if final.View == nil || final.View.Public.Phase != domain.PhaseGameComplete || !final.View.Public.EndedEarly || final.View.Public.EndedBy != host.Seat || len(final.Events) != 2 || final.Events[0].Kind != domain.EventGameEnded {
+			t.Fatalf("wrong final projection: %+v", final)
+		}
+	}
+	if reflect.DeepEqual(finalA.View.Hand, finalB.View.Hand) {
+		t.Fatal("private hands crossed seats")
+	}
+	sendCommand(t, a, command{Type: "end", ID: "host-end"})
+	if got := readMessage(t, a, "ack"); got.Revision != 2 {
+		t.Fatalf("duplicate end not idempotent: %+v", got)
+	}
+	sendCommand(t, a, command{Type: "next", ID: "after-end"})
+	if got := readMessage(t, a, "error"); got.Revision != 2 {
+		t.Fatalf("post-end command advanced match: %+v", got)
+	}
+	reconnected := dialRoom(t, web.URL, host)
+	if snapshot := readRevision(t, reconnected, 2); snapshot.View == nil || !snapshot.View.Public.EndedEarly || snapshot.View.Public.EndedBy != host.Seat {
+		t.Fatalf("reconnect lost early end: %+v", snapshot)
+	}
+}
+
+func TestEndCancelsPendingBotTurn(t *testing.T) {
+	s, web := testServer(t)
+	s.botDelay = 180 * time.Millisecond
+	host := joinRoom(t, web.URL, "stop-bot", "Host", "", http.StatusOK)
+	conn := dialRoom(t, web.URL, host)
+	_ = readMessage(t, conn, "lobby")
+	sendCommand(t, conn, command{Type: "add_bot", ID: "bot"})
+	_ = readMessage(t, conn, "ack")
+	_ = readMessage(t, conn, "lobby")
+	sendCommand(t, conn, command{Type: "start", ID: "start"})
+	_ = readMessage(t, conn, "ack")
+	_ = readRevision(t, conn, 1)
+	sendCommand(t, conn, command{Type: "end", ID: "end"})
+	_ = readMessage(t, conn, "ack")
+	_ = readRevision(t, conn, 2)
+	time.Sleep(250 * time.Millisecond)
+	r := s.rooms["stop-bot"]
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state.Revision != 2 || r.state.Phase != domain.PhaseGameComplete || r.ctx.Err() == nil {
+		t.Fatalf("bot moved after end: %+v", r.state)
+	}
+}
+
 func TestConfiguredHTTPSWebSocketOrigin(t *testing.T) {
 	t.Setenv("TRICK_EVOLUTION_PUBLIC_ORIGIN", "https://trick.noremac.dev")
 	request := httptest.NewRequest(http.MethodGet, "http://trick.noremac.dev/ws/game", nil)

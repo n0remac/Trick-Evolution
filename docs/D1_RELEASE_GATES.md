@@ -16,10 +16,11 @@ With Chromium or Chrome installed, choose **one** browser mode for a run:
 
 ```sh
 scripts/test-release.sh --browser-smoke
+scripts/test-release.sh --browser-bot-smoke
 scripts/test-release.sh --browser-full
 ```
 
-The fast smoke joins two isolated browser contexts and plays the first trick. Full mode uses the actual UI to finish all ten hands, checks the rule reveals and scoreboard after every hand, and reloads the guest during hand 5 and after game completion. It has a 150-second overall bound; smoke has 45 seconds. Both launch headless Chromium with background timer throttling disabled. Use `--browser-bin /path/to/chrome` or `BROWSER_BIN=/path/to/chrome` if auto-detection does not find the browser. Use `--artifacts DIR` to choose where reports and failure files go. The runner can also be invoked directly:
+The fast smoke joins two isolated browser contexts and plays the first trick. The bot smoke joins alone, adds a bot from the lobby, scores a trick, ends the game from the UI, reloads the terminal state, and returns to join. Full mode uses the actual UI to finish all ten hands, checks the rule reveals and scoreboard after every hand, and reloads the guest during hand 5 and after game completion. It has a 150-second overall bound; smoke modes have 45 seconds. All launch headless Chromium with background timer throttling disabled. Use `--browser-bin /path/to/chrome` or `BROWSER_BIN=/path/to/chrome` if auto-detection does not find the browser. Use `--artifacts DIR` to choose where reports and failure files go. The runner can also be invoked directly:
 
 ```sh
 go run ./cmd/browser-e2e -mode full -browser /usr/bin/chromium

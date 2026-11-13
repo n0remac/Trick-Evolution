@@ -1,6 +1,6 @@
 # A2 bounded Monte Carlo opponents
 
-A2 is implemented on `feature/a2-monte-carlo-rollouts`. The normal server constructor selects A2 for bot seats; `NewServerWithBotOptions` can select the A1 heuristic for fixtures or supply an A2 budget and seed factory. A1 remains the fallback and the policy used by simulated players. The local `main` branch was fast-forwarded to A1 commit `44c8529` before this branch was created. GitHub `origin/main` and the public D2 deployment were not changed.
+A2 was first implemented on `feature/a2-monte-carlo-rollouts`. The normal server constructor selects A2 for bot seats; `NewServerWithBotOptions` can select the A1 heuristic for fixtures or supply an A2 budget and seed factory. A1 remains the fallback and the policy used by simulated players. The local `main` branch was fast-forwarded to A1 commit `44c8529` before the A2 branch was created. Its later production rollout follows the D2 main-only deployment policy.
 
 ## Information boundary
 

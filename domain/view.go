@@ -22,6 +22,8 @@ type PublicView struct {
 	HandNumber     int
 	TrickNumber    int
 	CompletedHands int
+	EndedEarly     bool
+	EndedBy        SeatID
 	Rules          []ResolvedRule
 	RulesRemaining int
 	Winners        []SeatID
@@ -44,6 +46,7 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 	}
 	view := PublicView{Revision: state.Revision, Phase: state.Phase, HandSize: state.Config.HandSize, MaxHands: state.Config.MaxHands, RevealEvery: state.Config.RevealEvery, Dealer: state.Dealer, Leader: state.Leader,
 		Turn: state.Turn, HandNumber: state.HandNumber, TrickNumber: state.TrickNumber, CompletedHands: state.CompletedHands,
+		EndedEarly: state.EndedEarly, EndedBy: state.EndedBy,
 		Rules: rules, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...),
 		Seats: make([]PublicSeat, len(state.Seats))}
 	if state.Phase == PhaseGameComplete {

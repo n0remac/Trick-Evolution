@@ -34,6 +34,7 @@ const (
 	EventTrickWon      EventKind = "trick_won"
 	EventHandCompleted EventKind = "hand_completed"
 	EventRuleRevealed  EventKind = "rule_revealed"
+	EventGameEnded     EventKind = "game_ended"
 	EventGameCompleted EventKind = "game_completed"
 )
 
@@ -71,9 +72,33 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 		return stepPlay(state, action, seatIndex, catalog)
 	case ActionStartHand:
 		return stepStartHand(state, action, seatIndex)
+	case ActionEndGame:
+		return stepEndGame(state, action, seatIndex)
 	default:
 		return state, nil, transitionError(ErrUnknownAction, "action kind is not supported")
 	}
+}
+
+// stepEndGame closes a started match at its current score. An unfinished
+// trick earns no point; its public plays and private hands remain in the
+// terminal snapshot for audit and reconnect.
+func stepEndGame(state MatchState, action Action, seatIndex int) (MatchState, []Event, error) {
+	if state.Phase != PhasePlayingTrick && state.Phase != PhaseHandComplete {
+		return state, nil, transitionError(ErrWrongPhase, "game is not active")
+	}
+	if seatIndex != 0 {
+		return state, nil, transitionError(ErrNotHost, "only the host may end the game")
+	}
+	next := cloneState(state)
+	next.Revision++
+	next.Phase = PhaseGameComplete
+	next.Turn = ""
+	next.EndedEarly = true
+	next.EndedBy = action.Seat
+	return next, []Event{
+		{Kind: EventGameEnded, Revision: next.Revision, Hand: next.HandNumber, Seat: action.Seat},
+		{Kind: EventGameCompleted, Revision: next.Revision, Hand: next.HandNumber, Winners: gameWinners(next.Seats)},
+	}, nil
 }
 
 func stepStartHand(state MatchState, action Action, seatIndex int) (MatchState, []Event, error) {

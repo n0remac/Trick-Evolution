@@ -53,6 +53,7 @@ type ActionKind string
 const (
 	ActionStartHand ActionKind = "start_hand"
 	ActionPlayCard  ActionKind = "play_card"
+	ActionEndGame   ActionKind = "end_game"
 )
 
 // Action is the future Step input. Seat is always supplied by a trusted adapter.
@@ -129,6 +130,8 @@ type MatchState struct {
 	HandNumber     int
 	TrickNumber    int
 	CompletedHands int
+	EndedEarly     bool
+	EndedBy        SeatID
 	Field          []RuleInstance
 	Shuffles       []ShuffleRecord
 }

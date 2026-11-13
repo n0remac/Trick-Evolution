@@ -93,14 +93,31 @@
     } catch (error) { setNotice(error.message); }
   }
 
-  async function addBot() {
-    try {
-      const response = await fetch('/game/join', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({room, name: session.name, token: session.token, bots: 1})
-      });
-      if (!response.ok) throw new Error((await response.text()).trim() || `Add bot failed (${response.status})`);
-    } catch (error) { setNotice(error.message); }
+  function addBot() { send('add_bot'); }
+
+  function endGameControl() {
+    const row = element('div', 'row');
+    const first = button('End game', () => {
+      row.replaceChildren(
+        element('span', 'muted', 'End this game for everyone? An unfinished trick will not score.'),
+        button('Confirm end game', () => send('end')),
+        button('Cancel', () => row.replaceChildren(first))
+      );
+    });
+    row.append(first);
+    return row;
+  }
+
+  function leaveRoom() {
+    clearTimeout(reconnectTimer);
+    sessionStorage.removeItem(key());
+    session = null;
+    revision = -1;
+    socket?.close();
+    socket = null;
+    setConnection(false);
+    showJoin();
+    setNotice('Choose a new room code to play again.');
   }
 
   function connect() {
@@ -180,7 +197,8 @@
     panel.append(heading);
     const status = publicState.Phase === 'playing_trick'
       ? `${names[publicState.Turn] || 'Player'} to play · Trick ${publicState.TrickNumber}`
-      : publicState.Phase === 'hand_complete' ? 'Hand complete' : 'Game complete';
+      : publicState.Phase === 'hand_complete' ? 'Hand complete'
+      : publicState.EndedEarly ? `Game ended by ${names[publicState.EndedBy] || 'the host'}` : 'Game complete';
     panel.append(element('p', 'status', status));
 
     const scoreboard = element('div', 'scoreboard');
@@ -231,7 +249,11 @@
     } else if (publicState.Phase === 'game_complete') {
       const winners = (publicState.Winners || []).map(id => names[id] || id).join(' and ');
       panel.append(element('h2', '', `Winner${publicState.Winners?.length > 1 ? 's' : ''}: ${winners}`));
+      if (publicState.EndedEarly) panel.append(element('p', 'muted', 'Scores include completed tricks only.'));
+      panel.append(button('Return to join', leaveRoom));
     }
+
+    if (session.host && publicState.Phase !== 'game_complete') panel.append(endGameControl());
 
     const result = [...(message.events || [])].reverse().find(event => event.Kind === 'rule_revealed' || event.Kind === 'trick_won');
     if (result?.Kind === 'rule_revealed') setNotice(`${ruleNames[result.Rule] || result.Rule} revealed after hand ${result.Hand}.`);

@@ -576,6 +576,38 @@ func (r *room) handleCommand(c *client, cmd command) {
 		}
 		return
 	}
+	if cmd.Type == "add_bot" {
+		code, detail := "", ""
+		switch {
+		case r.state != nil:
+			code, detail = "wrong_phase", "bots can only be added in the lobby"
+		case r.seats[0].ID != c.seat:
+			code, detail = "not_host", "only the host can add bots"
+		case len(r.seats) >= 4:
+			code, detail = "room_full", "room already has four seats"
+		}
+		if code != "" {
+			r.mu.Unlock()
+			c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: code, Message: detail})
+			return
+		}
+		botNumber := 1
+		for _, seat := range r.seats {
+			if seat.Bot {
+				botNumber++
+			}
+		}
+		r.seats = append(r.seats, participant{ID: domain.SeatID(fmt.Sprintf("bot:%d", botNumber)), Name: fmt.Sprintf("Bot %d", botNumber), Bot: true})
+		r.lastActivity = r.server.now()
+		if r.seen[c.seat] == nil {
+			r.seen[c.seat] = make(map[string]acceptedCommand)
+		}
+		r.seen[c.seat][cmd.ID] = acceptedCommand{fingerprint: fingerprint}
+		r.mu.Unlock()
+		c.enqueue(serverMessage{Type: "ack", ID: cmd.ID})
+		r.publishLocked()
+		return
+	}
 	var next domain.MatchState
 	var events []domain.Event
 	var err error
@@ -628,6 +660,12 @@ func (r *room) handleCommand(c *client, cmd command) {
 			order[i] = card.ID
 		}
 		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionStartHand, Seat: c.seat, DeckOrder: order}, r.server.catalog)
+	case "end":
+		if r.state == nil {
+			err = errors.New("game has not started")
+			break
+		}
+		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionEndGame, Seat: c.seat}, r.server.catalog)
 	default:
 		err = errors.New("unknown command")
 	}
@@ -647,6 +685,9 @@ func (r *room) handleCommand(c *client, cmd command) {
 	}
 	r.recordPublicEventsLocked(r.state, events)
 	r.state = &next
+	if next.EndedEarly {
+		r.cancel()
+	}
 	r.lastEvents = events
 	r.lastActivity = r.server.now()
 	launchWorker := false

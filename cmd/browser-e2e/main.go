@@ -219,7 +219,13 @@ func (r *runner) join(p *page, name string, botCount ...int) error {
 }
 
 func (r *runner) botSmoke() error {
-	if err := r.join(r.alice, "Alice", 1); err != nil {
+	if err := r.join(r.alice, "Alice"); err != nil {
+		return err
+	}
+	if err := r.waitPage(r.alice, "one-seat lobby", 20*time.Second, func(s uiState) bool { return s.SeatTiles == 1 }); err != nil {
+		return err
+	}
+	if err := r.alice.click(r.ctx, "Add bot"); err != nil {
 		return err
 	}
 	if err := r.waitPage(r.alice, "human and bot lobby", 20*time.Second, func(s uiState) bool {
@@ -246,12 +252,39 @@ func (r *runner) botSmoke() error {
 	if err := r.alice.stopAutoplay(r.ctx); err != nil {
 		return err
 	}
+	if err := r.alice.click(r.ctx, "End game"); err != nil {
+		return err
+	}
+	if err := r.alice.click(r.ctx, "Confirm end game"); err != nil {
+		return err
+	}
+	if err := r.waitPage(r.alice, "host-ended match", 20*time.Second, func(s uiState) bool {
+		return s.Status == "Game ended by Alice" && s.Winner != "" && totalPoints(s.Scores) >= 1
+	}); err != nil {
+		return err
+	}
 	final, err := r.state(r.alice)
 	if err != nil {
 		return err
 	}
+	if err := r.alice.cdp.call(r.ctx, "Page.reload", map[string]any{}, nil); err != nil {
+		return err
+	}
+	if err := r.waitPage(r.alice, "ended-game reload", 20*time.Second, func(s uiState) bool {
+		return s.Status == "Game ended by Alice" && s.Revision == final.Revision && s.Connection == "Connected"
+	}); err != nil {
+		return err
+	}
+	if err := r.alice.click(r.ctx, "Return to join"); err != nil {
+		return err
+	}
+	if err := r.waitPage(r.alice, "return to join", 10*time.Second, func(s uiState) bool {
+		return s.Hand == 0 && s.Connection == "Offline"
+	}); err != nil {
+		return err
+	}
 	r.result.Final = final
-	r.steps = append(r.steps, "one browser created a bot room and completed a scored trick without a second WebSocket seat")
+	r.steps = append(r.steps, "one browser added a bot from the lobby, scored a trick, ended the game, reloaded its final state, and returned to join")
 	return r.checkConsole()
 }
 

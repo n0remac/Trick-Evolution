@@ -77,6 +77,9 @@ func (r *room) runBots() {
 			case <-r.done:
 				timer.Stop()
 				return
+			case <-r.ctx.Done():
+				timer.Stop()
+				return
 			case <-timer.C:
 			}
 			decision := BotDecision{Reason: "heuristic"}

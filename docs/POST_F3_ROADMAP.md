@@ -31,9 +31,9 @@ StarCoaster on this Pi uses **systemd user services** for its game and a separat
 
 ## A1 and A2 — opponents before sandbox expansion
 
-**A1 heuristic opponents:** Implemented on `feature/a1-heuristic-opponents` and fast-forwarded into local `main` at `44c8529`; see [A1_HEURISTIC_OPPONENTS.md](A1_HEURISTIC_OPPONENTS.md) for tokenless server bot seats, transparent rule-aware choices, cancellation, complete-game and browser evidence, and limitations. GitHub `origin/main` and the public D2 deployment remain unchanged.
+**A1 heuristic opponents:** Implemented on `feature/a1-heuristic-opponents` and fast-forwarded into local `main` at `44c8529`; see [A1_HEURISTIC_OPPONENTS.md](A1_HEURISTIC_OPPONENTS.md) for tokenless server bot seats, transparent rule-aware choices, cancellation, complete-game and browser evidence, and limitations. At A1 completion, GitHub `origin/main` and the public D2 deployment were unchanged; later releases follow the D2 main-only policy.
 
-**A2 Monte Carlo rollouts:** Implemented on `feature/a2-monte-carlo-rollouts`; [A2_MONTE_CARLO_DESIGN.md](A2_MONTE_CARLO_DESIGN.md) documents the observation boundary, constraint-based hidden-hand sampling, void inference, pure `domain.Step` rollout, objectives, bounded budgets, deterministic replay, cancellation, test evidence, and limitations. Opponent work precedes S1/S2 sandbox expansion. This branch is local only and is not deployed.
+**A2 Monte Carlo rollouts:** Implemented on `feature/a2-monte-carlo-rollouts`; [A2_MONTE_CARLO_DESIGN.md](A2_MONTE_CARLO_DESIGN.md) documents the observation boundary, constraint-based hidden-hand sampling, void inference, pure `domain.Step` rollout, objectives, bounded budgets, deterministic replay, cancellation, test evidence, and limitations. This work is included in the lobby/end-game release candidate described in [LOBBY_AND_END_GAME.md](LOBBY_AND_END_GAME.md). Opponent work precedes S1/S2 sandbox expansion.
 
 ## D3 — stabilize and playtest the initial experience
 

@@ -62,6 +62,41 @@ func assertCardConservation(t *testing.T, state MatchState) {
 	}
 }
 
+func TestHostEndsStartedGameAtCurrentScore(t *testing.T) {
+	state := mustMatch(t)
+	_, _, err := Step(state, Action{Kind: ActionEndGame, Seat: "b"}, DefaultCatalog())
+	requireCode(t, err, ErrNotHost)
+	state, _ = mustStep(t, state, Action{Kind: ActionPlayCard, Seat: "b", Card: state.Hands["b"][0]})
+	previous := state
+	next, events := mustStep(t, state, Action{Kind: ActionEndGame, Seat: "a"})
+	if next.Phase != PhaseGameComplete || !next.EndedEarly || next.EndedBy != "a" || next.Turn != "" ||
+		next.Revision != previous.Revision+1 || next.CompletedHands != 0 || len(next.CurrentTrick) != 1 {
+		t.Fatalf("early end changed match incorrectly: %+v", next)
+	}
+	if len(events) != 2 || events[0].Kind != EventGameEnded || events[0].Seat != "a" ||
+		events[1].Kind != EventGameCompleted || !reflect.DeepEqual(events[1].Winners, []SeatID{"a", "b"}) {
+		t.Fatalf("wrong end events: %+v", events)
+	}
+	assertCardConservation(t, next)
+	public, err := ProjectPublic(next, DefaultCatalog())
+	if err != nil || !public.EndedEarly || public.EndedBy != "a" || !reflect.DeepEqual(public.Winners, []SeatID{"a", "b"}) {
+		t.Fatalf("end projection: %+v %v", public, err)
+	}
+	_, _, err = Step(next, Action{Kind: ActionPlayCard, Seat: "a", Card: next.Hands["a"][0]}, DefaultCatalog())
+	requireCode(t, err, ErrWrongPhase)
+	_, _, err = Step(next, Action{Kind: ActionEndGame, Seat: "a"}, DefaultCatalog())
+	requireCode(t, err, ErrWrongPhase)
+
+	state = mustMatch(t)
+	for state.Phase == PhasePlayingTrick {
+		state, _ = mustStep(t, state, Action{Kind: ActionPlayCard, Seat: state.Turn, Card: state.Hands[state.Turn][0]})
+	}
+	next, _ = mustStep(t, state, Action{Kind: ActionEndGame, Seat: "a"})
+	if next.CompletedHands != 1 || next.Seats[0].Score+next.Seats[1].Score != 5 || next.Phase != PhaseGameComplete {
+		t.Fatalf("end between hands changed scoring: %+v", next)
+	}
+}
+
 func TestFixedCompleteHand(t *testing.T) {
 	state := mustMatch(t)
 	assertCardConservation(t, state)
