@@ -2,6 +2,7 @@ package gameui
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -30,15 +31,16 @@ var actionPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
 type shuffleFactory func() domain.ShuffleSource
 
 type Server struct {
-	mu        sync.Mutex
-	rooms     map[string]*room
-	catalog   domain.Catalog
-	config    domain.Config
-	shuffle   shuffleFactory
-	botDelay  time.Duration
-	now       func() time.Time
-	done      chan struct{}
-	closeOnce sync.Once
+	mu         sync.Mutex
+	rooms      map[string]*room
+	catalog    domain.Catalog
+	config     domain.Config
+	shuffle    shuffleFactory
+	botDelay   time.Duration
+	botOptions BotOptions
+	now        func() time.Time
+	done       chan struct{}
+	closeOnce  sync.Once
 }
 
 type participant struct {
@@ -56,11 +58,15 @@ type room struct {
 	clients       map[domain.SeatID]*client
 	state         *domain.MatchState
 	lastEvents    []domain.Event
+	publicPlays   []ObservedPlay
+	publicTricks  []ObservedTrick
 	seen          map[domain.SeatID]map[string]acceptedCommand
 	lastActivity  time.Time
 	server        *Server
 	botWake       chan struct{}
 	done          chan struct{}
+	ctx           context.Context
+	cancel        context.CancelFunc
 	closed        bool
 	workerStarted bool
 }
@@ -116,6 +122,12 @@ func NewServer() *Server {
 }
 
 func NewServerWithConfig(config domain.Config, shuffle func() domain.ShuffleSource) (*Server, error) {
+	return NewServerWithBotOptions(config, shuffle, BotOptions{Mode: BotModeRollout, Budget: DefaultRolloutBudget()})
+}
+
+// NewServerWithBotOptions selects the bot policy and its bounded rollout
+// budget. A seed factory is injectable for reproducible decisions in tests.
+func NewServerWithBotOptions(config domain.Config, shuffle func() domain.ShuffleSource, options BotOptions) (*Server, error) {
 	if err := config.Validate(2); err != nil {
 		return nil, err
 	}
@@ -126,7 +138,18 @@ func NewServerWithConfig(config domain.Config, shuffle func() domain.ShuffleSour
 	if shuffle == nil {
 		return nil, fmt.Errorf("shuffle factory is required")
 	}
-	s := &Server{rooms: make(map[string]*room), catalog: catalog, config: config, shuffle: shuffle, botDelay: defaultBotDelay, now: time.Now, done: make(chan struct{})}
+	if options.Mode != BotModeHeuristic && options.Mode != BotModeRollout {
+		return nil, fmt.Errorf("unknown bot mode %q", options.Mode)
+	}
+	if options.Mode == BotModeRollout {
+		if err := options.Budget.validate(); err != nil {
+			return nil, err
+		}
+	}
+	if options.SeedFactory == nil {
+		options.SeedFactory = randomSeed
+	}
+	s := &Server{rooms: make(map[string]*room), catalog: catalog, config: config, shuffle: shuffle, botDelay: defaultBotDelay, botOptions: options, now: time.Now, done: make(chan struct{})}
 	go s.cleanupLoop()
 	return s, nil
 }
@@ -162,6 +185,10 @@ func (s *Server) cleanupLoop() {
 }
 
 func randomShuffle() domain.ShuffleSource {
+	return domain.SeededShuffle(randomSeed())
+}
+
+func randomSeed() int64 {
 	var seed [8]byte
 	if _, err := rand.Read(seed[:]); err != nil {
 		panic(err)
@@ -170,7 +197,7 @@ func randomShuffle() domain.ShuffleSource {
 	for _, b := range seed {
 		value = value<<8 | int64(b)
 	}
-	return domain.SeededShuffle(value)
+	return value
 }
 
 func randomToken(size int) (string, error) {
@@ -235,7 +262,8 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	s.pruneLocked()
 	gameRoom := s.rooms[request.Room]
 	if gameRoom == nil {
-		gameRoom = &room{id: request.Room, clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand), lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{})}
+		roomContext, cancel := context.WithCancel(context.Background())
+		gameRoom = &room{id: request.Room, clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand), lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{}), ctx: roomContext, cancel: cancel}
 		s.rooms[request.Room] = gameRoom
 	}
 	gameRoom.mu.Lock()
@@ -617,6 +645,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 		c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: code, Message: err.Error(), Revision: revision})
 		return
 	}
+	r.recordPublicEventsLocked(r.state, events)
 	r.state = &next
 	r.lastEvents = events
 	r.lastActivity = r.server.now()

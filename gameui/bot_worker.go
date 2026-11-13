@@ -11,6 +11,7 @@ import (
 func (r *room) closeLocked() {
 	if !r.closed {
 		r.closed = true
+		r.cancel()
 		close(r.done)
 	}
 }
@@ -45,7 +46,7 @@ func (r *room) signalBot() {
 }
 
 // One worker per started bot room prevents overlapping decisions. Projection
-// is copied under room.mu, but delay and heuristic computation hold no room
+// is copied under room.mu, but delay and decision computation hold no room
 // locks. The revision is checked again before Step commits a bot move.
 func (r *room) runBots() {
 	for {
@@ -65,7 +66,7 @@ func (r *room) runBots() {
 				break
 			}
 			seat, revision := r.state.Turn, r.state.Revision
-			view, err := domain.ProjectForSeat(*r.state, r.server.catalog, seat)
+			observation, err := r.botObservationLocked(seat)
 			r.mu.Unlock()
 			if err != nil {
 				log.Printf("bot projection in room %s: %v", r.id, err)
@@ -78,7 +79,13 @@ func (r *room) runBots() {
 				return
 			case <-timer.C:
 			}
-			card, err := chooseBotCard(view, r.server.catalog)
+			decision := BotDecision{Reason: "heuristic"}
+			if r.server.botOptions.Mode == BotModeRollout {
+				seed := r.server.botOptions.SeedFactory()
+				decision, err = decideRollout(r.ctx, observation, r.server.catalog, seed, r.server.botOptions.Budget)
+			} else {
+				decision.Card, err = chooseBotCard(observation.View, r.server.catalog)
+			}
 			if err != nil {
 				log.Printf("bot choice in room %s: %v", r.id, err)
 				return
@@ -95,16 +102,20 @@ func (r *room) runBots() {
 				r.dispatchMu.Unlock()
 				continue
 			}
-			next, events, err := domain.Step(*r.state, domain.Action{Kind: domain.ActionPlayCard, Seat: seat, Card: card}, r.server.catalog)
+			next, events, err := domain.Step(*r.state, domain.Action{Kind: domain.ActionPlayCard, Seat: seat, Card: decision.Card}, r.server.catalog)
 			if err != nil {
 				r.mu.Unlock()
 				r.dispatchMu.Unlock()
 				log.Printf("bot play in room %s: %v", r.id, err)
 				return
 			}
+			r.recordPublicEventsLocked(r.state, events)
 			r.state = &next
 			r.lastEvents = events
 			r.lastActivity = r.server.now()
+			if r.server.botOptions.Mode == BotModeRollout {
+				log.Printf("bot decision room=%s revision=%d seat=%s card=%s seed=%d objective=%s samples=%d steps=%d reason=%s scores=%v", r.id, revision, seat, decision.Card, decision.Seed, r.server.botOptions.Budget.Objective, decision.CompletedSamples, decision.Steps, decision.Reason, decision.Scores)
+			}
 			r.mu.Unlock()
 			r.publishLocked()
 			r.dispatchMu.Unlock()

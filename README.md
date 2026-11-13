@@ -10,7 +10,7 @@ GOCACHE=/tmp/trick-evolution-go-cache GOMODCACHE=/tmp/trick-evolution-mod-cache 
 
 Open `http://localhost:8080/game?room=demo` in two separate browser contexts. The first player hosts; once both have joined, the host starts the game. The printable card catalog is at `http://localhost:8080/cards`. Set `TRICK_EVOLUTION_ADDR` to use a different listen address.
 
-To play alone, choose one to three computer opponents when creating a room; the host can also add bots before starting. See [A1 heuristic opponents](docs/A1_HEURISTIC_OPPONENTS.md) for behavior and tests, and [A2 rollout design](docs/A2_MONTE_CARLO_DESIGN.md) for the later search plan.
+To play alone, choose one to three computer opponents when creating a room; the host can also add bots before starting. Bots use bounded [A2 Monte Carlo rollouts](docs/A2_MONTE_CARLO_DESIGN.md), with the [A1 heuristic](docs/A1_HEURISTIC_OPPONENTS.md) as fallback.
 
 See [the F3 multiplayer guide](docs/F3_MULTIPLAYER.md) for reconnect policy, game controls, and focused tests.
 

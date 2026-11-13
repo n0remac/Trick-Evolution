@@ -34,13 +34,27 @@ type botWireMessage struct {
 }
 
 func TestBotCompleteGameBlackBox(t *testing.T) {
-	for _, bots := range []int{1, 3} {
-		t.Run(fmt.Sprintf("human_plus_%d_bots", bots), func(t *testing.T) {
+	fixtures := []struct {
+		name       string
+		bots       int
+		options    gameui.BotOptions
+		wantScores []int
+	}{
+		{"heuristic_two_seats", 1, gameui.BotOptions{Mode: gameui.BotModeHeuristic}, []int{17, 33}},
+		{"heuristic_four_seats", 3, gameui.BotOptions{Mode: gameui.BotModeHeuristic}, []int{5, 22, 12, 11}},
+		{"rollout_two_seats", 1, gameui.BotOptions{Mode: gameui.BotModeRollout, Budget: gameui.RolloutBudget{SamplesPerCard: 2, MaxSteps: 1000, MaxSampleNodes: 3000, MaxWallTime: time.Second, Objective: gameui.ObjectiveMatchMargin}}, []int{17, 33}},
+		{"rollout_four_seats", 3, gameui.BotOptions{Mode: gameui.BotModeRollout, Budget: gameui.RolloutBudget{SamplesPerCard: 2, MaxSteps: 1000, MaxSampleNodes: 3000, MaxWallTime: time.Second, Objective: gameui.ObjectiveMatchMargin}}, []int{10, 16, 16, 8}},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			bots := fixture.bots
 			var deals atomic.Int64
+			var decisions atomic.Int64
 			catalog := domain.DefaultCatalog()
-			server, err := gameui.NewServerWithConfig(domain.DefaultConfig(), func() domain.ShuffleSource {
+			fixture.options.SeedFactory = func() int64 { return 7200 + decisions.Add(1) }
+			server, err := gameui.NewServerWithBotOptions(domain.DefaultConfig(), func() domain.ShuffleSource {
 				return domain.SeededShuffle(5100 + deals.Add(1))
-			})
+			}, fixture.options)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -194,9 +208,9 @@ func TestBotCompleteGameBlackBox(t *testing.T) {
 					for i, seat := range expected.Seats {
 						scores[i] = seat.Score
 					}
-					wantScores := map[int][]int{1: {17, 33}, 3: {5, 22, 12, 11}}[bots]
-					if !reflect.DeepEqual(scores, wantScores) {
-						t.Fatalf("final scores %v, want %v", scores, wantScores)
+					t.Logf("final scores: %v", scores)
+					if fixture.wantScores != nil && !reflect.DeepEqual(scores, fixture.wantScores) {
+						t.Fatalf("final scores %v, want %v", scores, fixture.wantScores)
 					}
 					if expected.CompletedHands != 10 || revision != uint64(10*5*(bots+1)+10) {
 						t.Fatalf("incomplete match: hand=%d revision=%d", expected.CompletedHands, revision)
