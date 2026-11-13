@@ -27,7 +27,7 @@ StarCoaster on this Pi uses **systemd user services** for its game and a separat
 
 **Acceptance:** app starts on Pi boot, restarts after crash, is reachable at stable dev URL, deploys only a tested revision, and can roll back; StarCoaster remains unaffected. Important distinction: **permanent service** does not yet mean **persistent matches**.
 
-**D2 implementation status (2026-11-12): deployed with public HTTPS.** See [D2_DEV_DEPLOYMENT.md](D2_DEV_DEPLOYMENT.md) for the public-hostname override, main-only automatic release policy, installed topology, rollback test, Porkbun DNS correction, TLS/WebSocket evidence, and remaining reboot and cache-propagation limits. The original private-URL and manual-only preferences above were superseded by the user's approved public HTTPS and automatic `origin/main` requirements.
+**D2 implementation status (2026-11-12): deployed with public HTTPS.** See [D2_DEV_DEPLOYMENT.md](D2_DEV_DEPLOYMENT.md) for the public-hostname override, main-only automatic release policy, installed topology, rollback test, Porkbun DNS correction, TLS/WebSocket evidence, and remaining reboot verification limit. The original private-URL and manual-only preferences above were superseded by the user's approved public HTTPS and automatic `origin/main` requirements.
 
 ## D3 — stabilize and playtest the initial experience
 
