@@ -20,6 +20,7 @@ h2 { margin: 0 0 .75rem; }
 .muted { color: #b3c8b9; }
 .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; }
 .scoreboard { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .65rem; }
+.actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: .8rem; }
 .seat { border: 1px solid #648775; border-radius: .65rem; padding: .65rem; background: #294637; }
 .seat.current { outline: 2px solid #eec976; }
 .seat strong { display: block; }

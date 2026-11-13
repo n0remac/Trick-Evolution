@@ -73,13 +73,14 @@ fi
 
 export GOCACHE=${GOCACHE:-/tmp/trick-evolution-go-cache}
 export GOMODCACHE=${GOMODCACHE:-/tmp/trick-evolution-mod-cache}
-mkdir -p "$GOCACHE" "$GOMODCACHE"
+export GOPATH=${GOPATH:-/tmp/trick-evolution-gopath}
+mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOPATH"
 
 build_dir=$(mktemp -d /tmp/trick-evolution-release.XXXXXX)
 trap 'rm -rf -- "$build_dir"' EXIT
 
 printf '[D1] Focused Go packages and ten-hand HTTP/WebSocket fixtures\n'
-"$go_cmd" test ./domain ./cards ./websocket ./html ./gameui -count=1 -timeout=60s
+"$go_cmd" test ./domain ./cards ./websocket ./gameui -count=1 -timeout=60s
 
 printf '[D1] Root build\n'
 "$go_cmd" build -o "$build_dir/trick-evolution" .

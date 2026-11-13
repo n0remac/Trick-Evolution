@@ -96,8 +96,9 @@ if [[ ! -d $release ]]; then
   cd "$stage/source"
   export GOCACHE=${GOCACHE:-/tmp/trick-evolution-go-cache}
   export GOMODCACHE=${GOMODCACHE:-/tmp/trick-evolution-mod-cache}
+  export GOPATH=${GOPATH:-/tmp/trick-evolution-gopath}
   export GOFLAGS="${GOFLAGS:+$GOFLAGS }-buildvcs=false"
-  mkdir -p "$GOCACHE" "$GOMODCACHE"
+  mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOPATH"
   echo "Running D1 gate once for $target"
   bash scripts/test-release.sh
   "$go_cmd" build -ldflags "-X main.buildCommit=$target" -o "$stage/bin/trick-evolution" .

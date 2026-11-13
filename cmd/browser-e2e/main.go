@@ -28,6 +28,7 @@ type scoreLine struct {
 }
 
 type uiState struct {
+	Ready      bool        `json:"ready"`
 	Heading    string      `json:"heading"`
 	Status     string      `json:"status"`
 	Notice     string      `json:"notice"`
@@ -72,6 +73,7 @@ const stateExpression = `(() => {
 	const scoreTiles = [...document.querySelectorAll('.panel > .scoreboard .seat')];
 	const revision = document.querySelector('.panel .row .tag')?.textContent || '';
 	return {
+		ready: Boolean(window.__trickUIReady),
 		heading, status: document.querySelector('.status')?.textContent || '',
 		notice: document.querySelector('#notice')?.textContent || '',
 		connection: document.querySelector('#connection')?.textContent || '',
@@ -199,7 +201,7 @@ func (r *runner) run(explicitBrowser string) error {
 }
 
 func (r *runner) join(p *page, name string, botCount ...int) error {
-	if err := r.waitPage(p, name+" join form", 25*time.Second, func(s uiState) bool { return s.Connection == "Offline" && s.Hand == 0 }); err != nil {
+	if err := r.waitPage(p, name+" join form", 25*time.Second, func(s uiState) bool { return s.Ready && s.Connection == "Offline" && s.Hand == 0 }); err != nil {
 		return err
 	}
 	quoted, _ := json.Marshal(name)
@@ -327,7 +329,7 @@ func (r *runner) waitPage(p *page, label string, duration time.Duration, ready f
 		} else {
 			lastErr = err
 		}
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for %s: last state %+v; last CDP error %v; overall %v", label, last, lastErr, r.ctx.Err())
 }
@@ -348,7 +350,7 @@ func (r *runner) waitBoth(label string, duration time.Duration, ready func(uiSta
 		if err != nil {
 			lastErr = err
 		}
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
 	return a, b, fmt.Errorf("timed out waiting for %s: Alice=%+v Bob=%+v last CDP error=%v overall=%v", label, a, b, lastErr, r.ctx.Err())
 }

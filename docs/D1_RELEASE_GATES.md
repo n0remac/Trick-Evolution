@@ -4,13 +4,13 @@ D1 is a verification milestone. It does not change game rules or deploy the serv
 
 ## Run the gates
 
-From a clean checkout with Go 1.24 or newer:
+From a clean checkout with Go 1.25 or newer:
 
 ```sh
 scripts/test-release.sh
 ```
 
-This runs the focused `domain`, `cards`, `websocket`, `html`, and `gameui` Go packages once, including the ten-hand black-box WebSocket fixtures, then builds the root server and browser runner. The script defaults Go build and module caches to writable `/tmp/trick-evolution-*-cache` directories. It exits on the first failed assertion or build.
+This runs the focused `domain`, `cards`, `websocket`, and `gameui` Go packages once, including the ten-hand black-box WebSocket fixtures and GoDom HTML checks, then builds the root server and browser runner. The script defaults Go build and module caches and GOPATH to writable `/tmp/trick-evolution-*` directories. It exits on the first failed assertion or build.
 
 With Chromium or Chrome installed, choose **one** browser mode for a run:
 

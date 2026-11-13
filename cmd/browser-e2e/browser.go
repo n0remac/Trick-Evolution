@@ -46,6 +46,7 @@ func launchBrowser(ctx context.Context, executable, artifacts string) (*browser,
 	}
 	args := []string{
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+		"--disable-background-networking", "--disable-component-update", "--disable-default-apps", "--disable-sync",
 		"--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
 		"--disable-renderer-backgrounding", "--disable-features=IntensiveWakeUpThrottling",
 		"--remote-debugging-port=0", "--remote-allow-origins=*", "--no-first-run", "--no-default-browser-check",
@@ -59,7 +60,7 @@ func launchBrowser(ctx context.Context, executable, artifacts string) (*browser,
 		return nil, fmt.Errorf("start Chromium: %w", err)
 	}
 	b := &browser{command: command, profile: profile, logFile: logFile}
-	deadline := time.Now().Add(12 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	activePort := filepath.Join(profile, "DevToolsActivePort")
 	var wsPath string
 	for time.Now().Before(deadline) && ctx.Err() == nil {
@@ -78,7 +79,7 @@ func launchBrowser(ctx context.Context, executable, artifacts string) (*browser,
 	}
 	if wsPath == "" {
 		b.close()
-		return nil, fmt.Errorf("Chromium did not publish DevToolsActivePort within 12 seconds; see chromium.log")
+		return nil, fmt.Errorf("Chromium did not publish DevToolsActivePort within 30 seconds; see chromium.log")
 	}
 	b.control, err = dialCDP(fmt.Sprintf("ws://127.0.0.1:%d%s", b.port, wsPath))
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +70,7 @@ type room struct {
 	cancel        context.CancelFunc
 	closed        bool
 	workerStarted bool
+	sequence      uint64 // Monotonic for lobby changes and same-revision reconnects.
 }
 
 type acceptedCommand struct {
@@ -83,6 +85,7 @@ type client struct {
 	stopOnce sync.Once
 	room     *room
 	seat     domain.SeatID
+	html     bool
 }
 
 type seatSummary struct {
@@ -103,12 +106,14 @@ type serverMessage struct {
 	Seats    []seatSummary      `json:"seats,omitempty"`
 	View     *domain.PlayerView `json:"view,omitempty"`
 	Events   []domain.Event     `json:"events,omitempty"`
+	Sequence uint64             `json:"-"`
 }
 
 type command struct {
-	Type string        `json:"type"`
-	ID   string        `json:"id"`
-	Card domain.CardID `json:"card,omitempty"`
+	Type             string        `json:"type"`
+	ID               string        `json:"id"`
+	Card             domain.CardID `json:"card,omitempty"`
+	ExpectedRevision *uint64       `json:"-"`
 }
 
 // NewServer uses independent cryptographic seeds for each deal. Deck orders are
@@ -214,6 +219,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /game/", serveGamePage)
 	mux.HandleFunc("GET /game/game.js", serveGameJS)
 	mux.HandleFunc("GET /game/style.css", serveGameCSS)
+	mux.HandleFunc("GET /game/vendor/htmx-2.0.11.min.js", serveHTMX)
+	mux.HandleFunc("GET /game/vendor/htmx-ext-ws-2.0.4.min.js", serveHTMXWS)
 	mux.HandleFunc("POST /game/join", s.join)
 	mux.HandleFunc("GET /ws/game", s.websocket)
 	return mux
@@ -384,6 +391,11 @@ var upgrader = websocket.Upgrader{
 
 func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	roomID, token := r.URL.Query().Get("room"), r.URL.Query().Get("token")
+	format := r.URL.Query().Get("format")
+	if format != "" && format != "html" {
+		http.Error(w, "invalid format", http.StatusBadRequest)
+		return
+	}
 	if !roomPattern.MatchString(roomID) || token == "" {
 		http.Error(w, "invalid session", http.StatusUnauthorized)
 		return
@@ -417,7 +429,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	c := &client{conn: conn, send: make(chan []byte, 16), done: make(chan struct{}), room: gameRoom, seat: seat}
+	c := &client{conn: conn, send: make(chan []byte, 16), done: make(chan struct{}), room: gameRoom, seat: seat, html: format == "html"}
 	gameRoom.mu.Lock()
 	if gameRoom.closed {
 		gameRoom.mu.Unlock()
@@ -439,10 +451,23 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 func (c *client) stop() { c.stopOnce.Do(func() { close(c.done); _ = c.conn.Close() }) }
 
 func (c *client) enqueue(message serverMessage) {
-	data, err := json.Marshal(message)
-	if err != nil {
-		log.Printf("encode game message: %v", err)
-		return
+	var data []byte
+	if c.html {
+		switch message.Type {
+		case "lobby", "state":
+			data = []byte(renderScreen(message, c.seat, c.room.server.catalog))
+		case "error":
+			data = []byte(noticeNode(message.Message).Render())
+		default: // Acknowledgements have no visual update.
+			return
+		}
+	} else {
+		var err error
+		data, err = json.Marshal(message)
+		if err != nil {
+			log.Printf("encode game message: %v", err)
+			return
+		}
 	}
 	select {
 	case <-c.done:
@@ -486,14 +511,8 @@ func (c *client) readPump() {
 		if err != nil {
 			return
 		}
-		var cmd command
-		decoder := json.NewDecoder(bytes.NewReader(data))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&cmd); err != nil {
-			c.enqueue(serverMessage{Type: "error", Code: "bad_command", Message: "invalid command"})
-			continue
-		}
-		if err := decoder.Decode(new(any)); err != io.EOF {
+		cmd, err := decodeCommand(data, c.html)
+		if err != nil {
 			c.enqueue(serverMessage{Type: "error", Code: "bad_command", Message: "invalid command"})
 			continue
 		}
@@ -503,6 +522,50 @@ func (c *client) readPump() {
 		}
 		c.room.handleCommand(c, cmd)
 	}
+}
+
+// HTMX's WS extension adds HEADERS to form JSON. Decode that envelope only
+// for HTML clients; legacy JSON clients retain their strict command contract.
+func decodeCommand(data []byte, html bool) (command, error) {
+	var cmd command
+	if html {
+		var envelope struct {
+			Type     string          `json:"type"`
+			ID       string          `json:"id"`
+			Card     domain.CardID   `json:"card"`
+			Revision string          `json:"revision"`
+			Headers  json.RawMessage `json:"HEADERS"`
+		}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&envelope); err != nil {
+			return cmd, err
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return cmd, fmt.Errorf("trailing command data")
+		}
+		if len(envelope.Headers) != 0 && envelope.Headers[0] != '{' {
+			return cmd, fmt.Errorf("invalid HTMX headers")
+		}
+		if envelope.Revision == "" {
+			return cmd, fmt.Errorf("missing revision")
+		}
+		revision, err := strconv.ParseUint(envelope.Revision, 10, 64)
+		if err != nil {
+			return cmd, fmt.Errorf("invalid revision: %w", err)
+		}
+		cmd = command{Type: envelope.Type, ID: envelope.ID, Card: envelope.Card, ExpectedRevision: &revision}
+		return cmd, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cmd); err != nil {
+		return cmd, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return cmd, fmt.Errorf("trailing command data")
+	}
+	return cmd, nil
 }
 
 func (r *room) detach(c *client) {
@@ -525,6 +588,8 @@ func (r *room) publish() {
 // projection, JSON encoding, and network queueing after releasing that lock.
 func (r *room) publishLocked() {
 	r.mu.Lock()
+	r.sequence++
+	sequence := r.sequence
 	seats := make([]seatSummary, len(r.seats))
 	clients := make(map[domain.SeatID]*client, len(r.clients))
 	for id, c := range r.clients {
@@ -537,7 +602,7 @@ func (r *room) publishLocked() {
 	events := append([]domain.Event(nil), r.lastEvents...)
 	r.mu.Unlock()
 	for seat, c := range clients {
-		message := serverMessage{Room: r.id, Seats: seats}
+		message := serverMessage{Room: r.id, Seats: seats, Sequence: sequence}
 		if state == nil {
 			message.Type = "lobby"
 		} else {
@@ -575,6 +640,17 @@ func (r *room) handleCommand(c *client, cmd command) {
 			c.enqueue(serverMessage{Type: "ack", ID: cmd.ID, Revision: existing.revision})
 		}
 		return
+	}
+	if cmd.ExpectedRevision != nil {
+		current := uint64(0)
+		if r.state != nil {
+			current = r.state.Revision
+		}
+		if *cmd.ExpectedRevision != current {
+			r.mu.Unlock()
+			c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: "stale_revision", Message: "Game changed. Use the updated controls.", Revision: current})
+			return
+		}
 	}
 	if cmd.Type == "add_bot" {
 		code, detail := "", ""

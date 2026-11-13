@@ -23,7 +23,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	. "github.com/n0remac/trick-evolution/html"
+	. "github.com/n0remac/GoDom/html"
 )
 
 // -----------------------------------------------------------------------------

@@ -51,7 +51,7 @@ func (c *cdpClient) call(ctx context.Context, method string, params any, result 
 		return fmt.Errorf("%s send: %w", method, err)
 	}
 	for {
-		deadline := time.Now().Add(8 * time.Second)
+		deadline := time.Now().Add(15 * time.Second)
 		if limit, ok := ctx.Deadline(); ok && limit.Before(deadline) {
 			deadline = limit
 		}
@@ -183,7 +183,7 @@ func (p *page) startAutoplay(ctx context.Context, maximumRevision int) error {
 			last = revision;
 			const card = document.querySelector('.hand .card:not(:disabled)');
 			if (card) card.click();
-		}, 40);
+		}, 120);
 		return true;
 	})()`, maximumRevision, maximumRevision)
 	var started bool

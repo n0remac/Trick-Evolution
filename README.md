@@ -1,6 +1,6 @@
 # trick-evolution
 
-See [the UI and GoDom roadmap](docs/UI_GODOM_3D_ROADMAP.md) for the next milestone, starting with [U1: shared GoDom migration](docs/U1_GODOM_MIGRATION.md). The [revival plan](docs/REVIVAL_PLAN.md) records the earlier architecture and stages.
+The current game interface is rendered with shared GoDom and updated through HTMX WebSockets. See [U1: shared GoDom migration](docs/U1_GODOM_MIGRATION.md) and [the UI roadmap](docs/UI_GODOM_3D_ROADMAP.md). The [revival plan](docs/REVIVAL_PLAN.md) records the earlier architecture and stages.
 
 ## Play locally
 
