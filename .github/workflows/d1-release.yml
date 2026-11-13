@@ -27,7 +27,7 @@ jobs:
         run: scripts/test-release.sh
 
   full-browser:
-    if: github.event_name == 'workflow_dispatch' && inputs.full_browser
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.full_browser)
     needs: lightweight
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -42,10 +42,12 @@ jobs:
         with:
           chrome-version: stable
           install-dependencies: true
-      - name: Full browser and supported-host race gate
+      - name: Full browser, 3D interaction, and supported-host race gate
         env:
           BROWSER_BIN: ${{ steps.chrome.outputs.chrome-path }}
-        run: scripts/test-release.sh --browser-full --race
+        run: |
+          scripts/test-release.sh --browser-full --race
+          go run ./cmd/browser-e2e -mode 3d-smoke -browser "$BROWSER_BIN"
       - uses: actions/upload-artifact@v6
         if: failure()
         with:

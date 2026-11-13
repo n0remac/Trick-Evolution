@@ -45,7 +45,7 @@ The browser runner asserts the two-seat UI's exact 28–22 outcome, ten hand bou
 
 ## CI and current evidence
 
-`.github/workflows/d1-release.yml` runs the lightweight gate on pushes and pull requests. A manually triggered workflow with `full_browser=true` runs the full Chromium gate and targeted race check on an Ubuntu x64 runner. Browser artifacts are uploaded when that job fails. This workflow has been committed but has **not run remotely** because this branch was not pushed.
+`.github/workflows/d1-release.yml` runs the lightweight gate on pushes and pull requests. Pull requests also run the full Chromium gate and targeted race check on an Ubuntu x64 runner. A manually triggered workflow with `full_browser=true` runs the same full gate. Browser artifacts are uploaded when that job fails.
 
 Local evidence on 2026-11-12:
 

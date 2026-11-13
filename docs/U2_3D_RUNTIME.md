@@ -1,6 +1,6 @@
 # U2 — local 3D runtime and card-play slice
 
-Status: implemented and committed on `feature/u2-3d-runtime`; **dev rollout blocked by the full browser gate**. Baseline is deployed U1/main `2d10ae869ac98363caef7b33b97bfee0ea57c1b1`. U2 follows [the UI roadmap](UI_GODOM_3D_ROADMAP.md), [D1](D1_RELEASE_GATES.md), and [D2](D2_DEV_DEPLOYMENT.md).
+Status: implemented on `feature/u2-3d-runtime`; awaiting a passing full browser gate before main integration. Baseline is deployed U1/main `2d10ae869ac98363caef7b33b97bfee0ea57c1b1`. U2 follows [the UI roadmap](UI_GODOM_3D_ROADMAP.md), [D1](D1_RELEASE_GATES.md), and [D2](D2_DEV_DEPLOYMENT.md).
 
 ## Scope and design
 

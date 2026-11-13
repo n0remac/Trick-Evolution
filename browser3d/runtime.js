@@ -41,13 +41,20 @@ export function createRuntime(canvas, onPick) {
   const raycaster = new THREE.Raycaster();
   let disposed = false, frame = 0, motion = null, generation = 0, revision = -1;
   let createCount = 0, maxTravel = 0;
+  let lastWidth = 0, lastHeight = 0, lastRatio = 0;
   const render = () => { if (!disposed && !frame) frame = requestAnimationFrame(() => { frame = 0; renderer.render(world, camera); }); };
   const resize = () => {
     const box = canvas.getBoundingClientRect();
     if (!box.width || !box.height || disposed) return;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2, 960 / box.width, 600 / box.height));
-    renderer.setSize(box.width, box.height, false);
-    camera.aspect = box.width / box.height; camera.updateProjectionMatrix(); render();
+    const ratio = Math.min(window.devicePixelRatio || 1, 2, 960 / box.width, 600 / box.height);
+    if (box.width !== lastWidth || box.height !== lastHeight || ratio !== lastRatio) {
+      renderer.setPixelRatio(ratio);
+      renderer.setSize(box.width, box.height, false);
+      camera.aspect = box.width / box.height;
+      camera.updateProjectionMatrix();
+      lastWidth = box.width; lastHeight = box.height; lastRatio = ratio;
+    }
+    render();
   };
   const observer = new ResizeObserver(resize);
   observer.observe(canvas);
