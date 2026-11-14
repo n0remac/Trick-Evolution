@@ -38,6 +38,7 @@ type Node struct {
 	ID        string    `json:"id"`
 	Parent    string    `json:"parent,omitempty"`
 	Kind      string    `json:"kind"` // group or box
+	Radius    float64   `json:"radius,omitempty"`
 	Size      Vec3      `json:"size,omitempty"`
 	Material  Material  `json:"material,omitempty"`
 	Transform Transform `json:"transform"`
@@ -80,7 +81,8 @@ func (d Description) Validate() error {
 			return fmt.Errorf("unsupported node kind %q", n.Kind)
 		}
 		if n.Kind == "box" {
-			if !validVec(n.Size) || n.Size[0] <= 0 || n.Size[1] <= 0 || n.Size[2] <= 0 ||
+			if !finite(n.Radius) || n.Radius < 0 || n.Radius > math.Min(n.Size[0], n.Size[2])/2 ||
+				!validVec(n.Size) || n.Size[0] <= 0 || n.Size[1] <= 0 || n.Size[2] <= 0 ||
 				!colorPattern.MatchString(n.Material.Color) || (n.Material.Ink != "" && !colorPattern.MatchString(n.Material.Ink)) || len(n.Material.Text) > 32 {
 				return fmt.Errorf("invalid mesh %q", n.ID)
 			}

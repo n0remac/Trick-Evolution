@@ -17,12 +17,14 @@ type Selection struct {
 	Animation animation.Description `json:"animation"`
 }
 type Seat struct {
-	ID    domain.SeatID `json:"id"`
-	Name  string        `json:"name"`
-	Count int           `json:"count"`
-	Score int           `json:"score"`
-	Turn  bool          `json:"turn"`
-	Self  bool          `json:"self"`
+	ID            domain.SeatID `json:"id"`
+	Name          string        `json:"name"`
+	Count         int           `json:"count"`
+	Score         int           `json:"score"`
+	Tricks        int           `json:"tricks"`
+	LabelPosition scene.Vec3    `json:"labelPosition"`
+	Turn          bool          `json:"turn"`
+	Self          bool          `json:"self"`
 }
 type Presentation struct {
 	ID       string                `json:"id"`
@@ -72,7 +74,7 @@ func cardNode(id string, card domain.StandardCard, position scene.Vec3, rotation
 	t := scene.Identity()
 	t.Position = position
 	t.Rotation = rotation
-	return scene.Node{ID: id, Parent: "table", Kind: "box", Size: scene.Vec3{.86, .035, 1.22}, Material: scene.Material{Color: "#fffdf4", Text: cardLabel(card), Ink: ink}, Transform: t, PickID: pick}
+	return scene.Node{ID: id, Parent: "table", Kind: "box", Radius: .055, Size: scene.Vec3{.86, .035, 1.22}, Material: scene.Material{Color: "#fffdf4", Text: cardLabel(card), Ink: ink}, Transform: t, PickID: pick}
 }
 func landingMotion(id string, target scene.Transform) animation.Description {
 	above := target
@@ -103,11 +105,11 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 	nodes := []scene.Node{{ID: "table", Kind: "group", Transform: scene.Identity()}}
 	surface := scene.Identity()
 	surface.Position[1] = -.09
-	nodes = append(nodes, scene.Node{ID: "surface", Parent: "table", Kind: "box", Size: scene.Vec3{4.5, .16, 9.5}, Material: scene.Material{Color: "#225a43"}, Transform: surface})
+	nodes = append(nodes, scene.Node{ID: "surface", Parent: "table", Kind: "box", Radius: .46, Size: scene.Vec3{4.5, .16, 9.5}, Material: scene.Material{Color: "#225a43"}, Transform: surface})
 	// The center inlay makes the valid release region legible even without hover.
 	zone := scene.Identity()
 	zone.Position[1] = .003
-	nodes = append(nodes, scene.Node{ID: "dropzone", Parent: "table", Kind: "box", Size: scene.Vec3{3.3, .008, 2.65}, Material: scene.Material{Color: "#326d50"}, Transform: zone})
+	nodes = append(nodes, scene.Node{ID: "dropzone", Parent: "table", Kind: "box", Radius: .24, Size: scene.Vec3{3.3, .008, 2.65}, Material: scene.Material{Color: "#326d50"}, Transform: zone})
 	seats := make([]Seat, 0, len(view.Public.Seats))
 	ownIndex := 0
 	for i, s := range view.Public.Seats {
@@ -119,7 +121,12 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 	for offset := 0; offset < len(view.Public.Seats); offset++ {
 		s := view.Public.Seats[(ownIndex+offset)%len(view.Public.Seats)]
 		pos := seatPosition(offset, len(view.Public.Seats))
-		seats = append(seats, Seat{ID: s.ID, Count: s.HandCount, Score: s.Score, Turn: s.ID == view.Public.Turn, Self: s.ID == view.Seat})
+		label := scene.Vec3{pos[0], .08, pos[2] - .75}
+		if offset == 0 {
+			label[2] = 4.95
+		}
+		seats = append(seats, Seat{ID: s.ID, Count: s.HandCount, Score: s.Score, Tricks: s.TricksWon,
+			LabelPosition: label, Turn: view.Public.Phase == domain.PhasePlayingTrick && s.ID == view.Public.Turn, Self: s.ID == view.Seat})
 		if offset == 0 {
 			continue
 		}
@@ -129,11 +136,11 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 		if s.ID == view.Public.Turn {
 			color = "#eec976"
 		}
-		nodes = append(nodes, scene.Node{ID: fmt.Sprintf("seat_%d", offset), Parent: "table", Kind: "box", Size: scene.Vec3{1.05, .04, .42}, Material: scene.Material{Color: color}, Transform: marker})
+		nodes = append(nodes, scene.Node{ID: fmt.Sprintf("seat_%d", offset), Parent: "table", Kind: "box", Radius: .09, Size: scene.Vec3{1.05, .04, .42}, Material: scene.Material{Color: color}, Transform: marker})
 		for j := 0; j < s.HandCount && j < 13; j++ {
 			back := scene.Identity()
 			back.Position = scene.Vec3{pos[0] + (float64(j)-float64(s.HandCount-1)/2)*.22, .055, pos[2] - .15}
-			nodes = append(nodes, scene.Node{ID: fmt.Sprintf("back_%d_%d", offset, j), Parent: "table", Kind: "box", Size: scene.Vec3{.6, .025, .82}, Material: scene.Material{Color: "#e2c783"}, Transform: back})
+			nodes = append(nodes, scene.Node{ID: fmt.Sprintf("back_%d_%d", offset, j), Parent: "table", Kind: "box", Radius: .045, Size: scene.Vec3{.6, .025, .82}, Material: scene.Material{Color: "#e2c783"}, Transform: back})
 		}
 	}
 	selections := make([]Selection, 0, len(view.Hand))
@@ -150,7 +157,8 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 		x := (float64(i) - float64(len(view.Hand)-1)/2) * spread
 		z := 3.25 + .13*math.Abs(float64(i)-float64(len(view.Hand)-1)/2)
 		rotation := scene.Vec3{-.35, (float64(i) - float64(len(view.Hand)-1)/2) * -.12, 0}
-		node := cardNode(id, card, scene.Vec3{x, .13, z}, rotation, id)
+		// Keep the lowered edge of the tilted card above the felt.
+		node := cardNode(id, card, scene.Vec3{x, .34 + .012*float64(i), z}, rotation, id)
 		nodes = append(nodes, node)
 		lift := node.Transform
 		lift.Position[1] += .35

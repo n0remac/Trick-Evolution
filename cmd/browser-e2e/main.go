@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -29,17 +28,15 @@ type scoreLine struct {
 
 type uiState struct {
 	Ready      bool        `json:"ready"`
-	Heading    string      `json:"heading"`
 	Status     string      `json:"status"`
 	Notice     string      `json:"notice"`
 	Connection string      `json:"connection"`
 	Revision   int         `json:"revision"`
 	Hand       int         `json:"hand"`
 	Rules      []string    `json:"rules"`
-	ScoreNames []string    `json:"scoreNames"`
-	ScoreText  []string    `json:"scoreText"`
 	Scores     []scoreLine `json:"scores"`
 	HandCards  int         `json:"handCards"`
+	LobbyNames []string    `json:"lobbyNames"`
 	SeatTiles  int         `json:"seatTiles"`
 	Winner     string      `json:"winner"`
 }
@@ -66,25 +63,26 @@ type runner struct {
 	steps      []string
 }
 
-var scorePattern = regexp.MustCompile(`^(\d+) points · (\d+) tricks · (\d+) cards$`)
-
 const stateExpression = `(() => {
-	const heading = document.querySelector('.panel .row h2')?.textContent || '';
-	const scoreTiles = [...document.querySelectorAll('.panel > .scoreboard .seat')];
-	const revision = document.querySelector('.panel .row .tag')?.textContent || '';
+	const screen = document.querySelector('#screen');
+	const bytes = screen?.dataset.scene && Uint8Array.from(atob(screen.dataset.scene), c => c.charCodeAt(0));
+	const payload = bytes && JSON.parse(new TextDecoder().decode(bytes));
+	const seats = payload?.seats || [];
+	const turn = seats.find(seat => seat.turn);
 	return {
 		ready: Boolean(window.__trickUIReady),
-		heading, status: document.querySelector('.status')?.textContent || '',
+		status: document.querySelector('.status')?.textContent || (turn ? turn.name + ' to play' : ''),
 		notice: document.querySelector('#notice')?.textContent || '',
 		connection: document.querySelector('#connection')?.textContent || '',
-		revision: Number(revision.replace('Revision ', '')) || 0,
-		hand: Number(heading.match(/Hand (\d+) of/)?.[1]) || 0,
+		revision: Number(screen?.dataset.revision) || 0,
+		hand: Number(document.querySelector('.game-panel')?.dataset.hand) || 0,
 		rules: [...document.querySelectorAll('.rules .rule')].map(x => x.textContent),
-		scoreNames: scoreTiles.map(x => x.querySelector('strong')?.textContent || ''),
-		scoreText: scoreTiles.map(x => x.querySelector('span')?.textContent || ''),
-		handCards: document.querySelectorAll('.hand .card').length,
+		scores: seats.map(s => ({name:s.name, points:s.score, tricks:s.tricks, cards:s.count}))
+			.sort((a,b) => a.name.localeCompare(b.name)),
+		handCards: payload?.selections?.length || 0,
+		lobbyNames: [...document.querySelectorAll('.scoreboard .seat strong')].map(x => x.textContent),
 		seatTiles: document.querySelectorAll('.scoreboard .seat').length,
-		winner: [...document.querySelectorAll('h2')].find(x => x.textContent.startsWith('Winner'))?.textContent || ''
+		winner: document.querySelector('.game-results h2')?.textContent || ''
 	};
 })()`
 
@@ -241,7 +239,7 @@ func (r *runner) botSmoke() error {
 		return err
 	}
 	if err := r.waitPage(r.alice, "human and bot lobby", 20*time.Second, func(s uiState) bool {
-		return s.SeatTiles == 2 && len(s.ScoreNames) == 2 && s.ScoreNames[1] == "Bot 1"
+		return s.SeatTiles == 2 && len(s.LobbyNames) == 2 && s.LobbyNames[1] == "Bot 1"
 	}); err != nil {
 		return err
 	}
@@ -304,23 +302,6 @@ func (r *runner) state(p *page) (uiState, error) {
 	var state uiState
 	if err := p.eval(r.ctx, stateExpression, &state); err != nil {
 		return state, err
-	}
-	for i, line := range state.ScoreText {
-		matches := scorePattern.FindStringSubmatch(line)
-		if matches == nil {
-			if state.Hand == 0 {
-				continue
-			}
-			return state, fmt.Errorf("%s scoreboard row %d has unexpected text %q", p.name, i, line)
-		}
-		var score scoreLine
-		_, _ = fmt.Sscanf(matches[1], "%d", &score.Points)
-		_, _ = fmt.Sscanf(matches[2], "%d", &score.Tricks)
-		_, _ = fmt.Sscanf(matches[3], "%d", &score.Cards)
-		if i < len(state.ScoreNames) {
-			score.Name = state.ScoreNames[i]
-		}
-		state.Scores = append(state.Scores, score)
 	}
 	return state, nil
 }

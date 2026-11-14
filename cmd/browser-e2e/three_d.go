@@ -56,7 +56,7 @@ func (r *runner) threeDSmoke() error {
 		return fmt.Errorf("initial bot landing did not settle")
 	}
 	var framed bool
-	const framingJS = `(() => { const b = document.querySelector('#table3d-canvas').getBoundingClientRect(); const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(document.querySelector('#screen').dataset.scene), c => c.charCodeAt(0)))); const points = payload.selections.map(s => window.__trick3d.project(s.pickId)); return b.height >= innerHeight - 2 && points.length === 5 && points.every(p => p && p.x > b.left + 40 && p.x < b.right - 40 && p.y > b.top + b.height * .55 && p.y < b.bottom - b.height * .08) && document.getElementById('end-confirm').getClientRects().length === 0; })()`
+	const framingJS = `(() => { const b = document.querySelector('#table3d-canvas').getBoundingClientRect(); const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(document.querySelector('#screen').dataset.scene), c => c.charCodeAt(0)))); const points = payload.selections.map(s => window.__trick3d.project(s.pickId)); return b.height >= innerHeight - 2 && points.length === 5 && points.every(p => p && p.x > b.left + 40 && p.x < b.right - 40 && p.y > b.top + b.height * .55 && p.y < b.bottom - b.height * .08) && document.getElementById('end-confirm').getClientRects().length === 0 && !document.querySelector('#table3d-play, .hand-fallback') && document.querySelectorAll('.table-seat').length === 2 && document.querySelector('.table-seat.current').textContent.includes('Alice') && document.querySelector('.end-game').getBoundingClientRect().right > innerWidth - 16 && !document.querySelector('#game-rules').open; })()`
 	if err := page.eval(r.ctx, framingJS, &framed); err != nil {
 		return err
 	}
@@ -86,32 +86,6 @@ func (r *runner) threeDSmoke() error {
 	if target.ID == "" {
 		return fmt.Errorf("no legal visible 3D card")
 	}
-	for _, kind := range []string{"mousePressed", "mouseReleased"} {
-		if err := page.cdp.call(r.ctx, "Input.dispatchMouseEvent", map[string]any{"type": kind, "x": target.X, "y": target.Y, "button": "left", "clickCount": 1}, nil); err != nil {
-			return err
-		}
-	}
-	var selected bool
-	if err := page.eval(r.ctx, `!document.querySelector('#table3d-play').disabled && !!window.__trick3d.stats().motion`, &selected); err != nil {
-		return err
-	}
-	if !selected {
-		return fmt.Errorf("pointer did not select and animate a legal rendered card")
-	}
-	var moved bool
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		if err := page.eval(r.ctx, `window.__trick3d.stats().maxTravel > 0.1`, &moved); err != nil {
-			return err
-		}
-		if moved {
-			break
-		}
-	}
-	if !moved {
-		var stats map[string]any
-		_ = page.eval(r.ctx, `window.__trick3d.stats()`, &stats)
-		return fmt.Errorf("selected 3D card did not move: %+v", stats)
-	}
 	// Release outside the legal center. The local hand and revision must stay put.
 	if err := page.cdp.call(r.ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": target.X, "y": target.Y, "button": "left", "clickCount": 1}, nil); err != nil {
 		return err
@@ -129,8 +103,11 @@ func (r *runner) threeDSmoke() error {
 	if !rejected {
 		return fmt.Errorf("invalid drag did not return to hand")
 	}
-	if err := page.click(r.ctx, "Play selected card"); err != nil {
-		return err
+	// A click on the card itself plays it after the invalid drag.
+	for _, kind := range []string{"mousePressed", "mouseReleased"} {
+		if err := page.cdp.call(r.ctx, "Input.dispatchMouseEvent", map[string]any{"type": kind, "x": target.X, "y": target.Y, "button": "left", "clickCount": 1}, nil); err != nil {
+			return err
+		}
 	}
 	if err := r.waitPage(page, "accepted 3D play and bot reply", 20*time.Second, func(s uiState) bool { return s.Revision >= 3 && s.HandCards == 4 }); err != nil {
 		return err
@@ -203,7 +180,7 @@ func (r *runner) threeDSmoke() error {
 	}
 	var resized bool
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		if err := page.eval(r.ctx, fmt.Sprintf(`window.__trick3d.stats().width <= 960 && window.__trick3d.stats().height <= 600 && window.__trick3d.stats().width > 0 && window.__trick3d.stats().width !== %d`, initialWidth), &resized); err != nil {
+		if err := page.eval(r.ctx, fmt.Sprintf(`window.__trick3d.stats().width <= 960 && window.__trick3d.stats().height <= 1400 && window.__trick3d.stats().width > 0 && window.__trick3d.stats().width !== %d`, initialWidth), &resized); err != nil {
 			return err
 		}
 		if resized {

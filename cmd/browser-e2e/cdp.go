@@ -194,11 +194,10 @@ func (p *page) startAutoplay(ctx context.Context, maximumRevision int) error {
 		clearInterval(window.__trickE2EAutoplay);
 		let last = -1;
 		window.__trickE2EAutoplay = setInterval(() => {
-			const raw = document.querySelector('.panel .row .tag')?.textContent;
-			const revision = raw ? Number(raw.replace('Revision ', '')) : NaN;
+			const revision = Number(document.querySelector('#screen')?.dataset.revision);
 			if (!Number.isFinite(revision) || revision === last || (%d > 0 && revision >= %d)) return;
 			last = revision;
-			const card = document.querySelector('.hand .card:not(:disabled)');
+			const card = document.querySelector('.play-commands .card:not(:disabled)');
 			if (card) card.click();
 		}, 120);
 		return true;
