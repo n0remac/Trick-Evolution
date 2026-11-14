@@ -1,9 +1,11 @@
 package cardtable
 
 import (
+	"math"
 	"testing"
 
 	"github.com/n0remac/trick-evolution/domain"
+	"github.com/n0remac/trick-evolution/scene"
 )
 
 func TestTableSceneAndCompletedTrickPresentation(t *testing.T) {
@@ -87,5 +89,39 @@ func TestTableSceneAndCompletedTrickPresentation(t *testing.T) {
 	}
 	if len(payload.PresentationScene.Nodes) != len(payload.Scene.Nodes)+2 {
 		t.Fatalf("completed cards were not retained for collection")
+	}
+}
+
+func TestHandSortAndStack(t *testing.T) {
+	view := domain.PlayerView{Hand: []domain.CardID{"std:S:04", "std:H:14", "std:H:02", "std:C:09", "std:D:03"}}
+	want := []domain.CardID{"std:H:02", "std:H:14", "std:D:03", "std:C:09", "std:S:04"}
+	payload, err := Build(view, domain.DefaultCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := make(map[string]scene.Node)
+	for _, node := range payload.Scene.Nodes {
+		nodes[node.ID] = node
+	}
+	frontDepth := math.Inf(-1)
+	for i, card := range payload.Selections {
+		node := nodes[card.PickID]
+		if card.Card != want[i] {
+			t.Fatalf("slot %d has %s, want %s", i, card.Card, want[i])
+		}
+		pitch := node.Transform.Rotation[0]
+		depth := func(p scene.Vec3) float64 { return p[1]*math.Cos(pitch) + p[2]*math.Sin(pitch) }
+		current := depth(node.Transform.Position)
+		if current-frontDepth <= node.Size[1] {
+			t.Fatalf("card %s intersects its left neighbor", card.Card)
+		}
+		frontDepth = current
+	}
+	for _, card := range payload.Selections {
+		lift := card.Animation.Steps[0].To
+		depth := lift.Position[1]*math.Cos(lift.Rotation[0]) + lift.Position[2]*math.Sin(lift.Rotation[0])
+		if depth-frontDepth <= nodes[card.PickID].Size[1] {
+			t.Fatalf("lifted card %s intersects the top of the stack", card.Card)
+		}
 	}
 }

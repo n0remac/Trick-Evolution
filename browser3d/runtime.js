@@ -71,7 +71,9 @@ export function createRuntime(canvas, callbacks) {
   world.add(sun);
   const camera = new THREE.PerspectiveCamera(44, 1, .1, 100);
   const objects = new Map(), signatures = new Map(), bases = new Map(), legal = new Set();
+  const lifts = new Map();
   const raycaster = new THREE.Raycaster(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -.35);
+  const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0));
   let disposed = false, frame = 0, motion = null, generation = 0, revision = -1, active = null, hover = null;
   let createCount = 0, maxTravel = 0, lastWidth = 0, lastHeight = 0, lastRatio = 0;
   let baseCamera = [0, 6.4, 7.1], targetCamera = [0, 0, 0];
@@ -99,6 +101,8 @@ export function createRuntime(canvas, callbacks) {
   function apply(description, cards = []) {
     if (description.version !== 1 || !Array.isArray(description.nodes)) throw new Error('Unsupported 3D scene');
     cancel(); revision = description.revision; legal.clear(); cards.filter(c => c.legal).forEach(c => legal.add(c.pickId));
+    lifts.clear();
+    for (const card of cards) lifts.set(card.pickId, card.animation.steps[0].to);
     world.background = new THREE.Color(description.background);
     camera.fov = description.camera.fov; baseCamera = description.camera.position; targetCamera = description.camera.target;
     // A light fog and felt plane give the shallow cards readable depth.
@@ -123,7 +127,7 @@ export function createRuntime(canvas, callbacks) {
     if (hover === id || active) return;
     if (hover && objects.has(hover) && bases.has(hover)) transform(objects.get(hover), bases.get(hover));
     hover = id;
-    if (id && objects.has(id)) { objects.get(id).position.y += .16; canvas.style.cursor = 'pointer'; }
+    if (id && lifts.has(id)) { transform(objects.get(id), lifts.get(id)); canvas.style.cursor = 'pointer'; }
     else canvas.style.cursor = 'default';
     render();
   }
@@ -159,7 +163,7 @@ export function createRuntime(canvas, callbacks) {
     if (!ray(event)) return null;
     return raycaster.intersectObjects([...objects.values()].filter(o => o.userData.pickId), false)[0]?.object.userData.pickId || null;
   }
-  function planePoint(event) { if (!ray(event)) return null; return raycaster.ray.intersectPlane(plane, new THREE.Vector3()); }
+  function planePoint(event, surface = plane) { if (!ray(event)) return null; return raycaster.ray.intersectPlane(surface, new THREE.Vector3()); }
   const validPoint = p => !!p && Math.abs(p.x) < 1.55 && Math.abs(p.z) < 1.2;
   function resetDrag() {
     if (!active) return;
@@ -171,10 +175,17 @@ export function createRuntime(canvas, callbacks) {
     if (active || callbacks.inputBlocked?.() || event.button !== 0) return;
     const id = hit(event); if (!id) return;
     cancel();
-    const point = planePoint(event), object = objects.get(id); if (!point || !object) return;
+    const object = objects.get(id);
     setHover(null);
+    const lifted = lifts.get(id);
+    if (!object || !lifted) return;
+    dragPlane.constant = -lifted.position[1];
+    const point = planePoint(event, dragPlane);
+    if (!point) return;
     active = {pointerId:event.pointerId, id, startX:event.clientX, startY:event.clientY, moved:false,
       offsetX:object.position.x-point.x, offsetZ:object.position.z-point.z};
+    transform(object, lifted);
+    render();
     canvas.setPointerCapture(event.pointerId);
     event.preventDefault();
   }
@@ -183,10 +194,10 @@ export function createRuntime(canvas, callbacks) {
     if (event.pointerId !== active.pointerId) return;
     if (!active.moved && Math.hypot(event.clientX-active.startX,event.clientY-active.startY) < 8) return;
     active.moved = true;
-    const point = planePoint(event), object = objects.get(active.id); if (!point || !object) return;
-    object.position.set(point.x+active.offsetX,.39,point.z+active.offsetZ);
-    object.rotation.x = -.12;
-    const valid = legal.has(active.id) && validPoint(point);
+    const point = planePoint(event, dragPlane), object = objects.get(active.id); if (!point || !object) return;
+    object.position.x = point.x + active.offsetX;
+    object.position.z = point.z + active.offsetZ;
+    const valid = legal.has(active.id) && validPoint(planePoint(event));
     callbacks.onDragState?.(valid); render(); event.preventDefault();
   }
   function up(event) {
@@ -217,9 +228,9 @@ export function createRuntime(canvas, callbacks) {
   return {apply,animate,cancel,resetDrag,
     stats: () => ({objects:objects.size,created:createCount,revision,motion,maxTravel,width:canvas.width,height:canvas.height,dragging:!!active}),
     projectPoint: position => projectPoint(vec(position)),
-    project: id => {
+    project: (id, offset = [0, 0, 0]) => {
       const object = objects.get(id);
-      return object ? projectPoint(object.getWorldPosition(new THREE.Vector3())) : null;
+      return object ? projectPoint(object.localToWorld(vec(offset))) : null;
     },
     dispose: () => { if(disposed)return;disposed=true;cancel();observer.disconnect();
       canvas.removeEventListener('pointerdown',down);canvas.removeEventListener('pointermove',move);canvas.removeEventListener('pointerup',up);

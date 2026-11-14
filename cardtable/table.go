@@ -4,6 +4,7 @@ package cardtable
 import (
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/n0remac/trick-evolution/animation"
 	"github.com/n0remac/trick-evolution/domain"
@@ -143,32 +144,51 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 			nodes = append(nodes, scene.Node{ID: fmt.Sprintf("back_%d_%d", offset, j), Parent: "table", Kind: "box", Radius: .045, Size: scene.Vec3{.6, .025, .82}, Material: scene.Material{Color: "#e2c783"}, Transform: back})
 		}
 	}
-	selections := make([]Selection, 0, len(view.Hand))
-	for i, cardID := range view.Hand {
-		card, ok := domain.CardDetails(cardID)
+	hand := make([]domain.StandardCard, 0, len(view.Hand))
+	for _, id := range view.Hand {
+		card, ok := domain.CardDetails(id)
 		if !ok {
-			return Payload{}, fmt.Errorf("unknown card %q", cardID)
+			return Payload{}, fmt.Errorf("unknown card %q", id)
 		}
+		hand = append(hand, card)
+	}
+	suitOrder := map[domain.Suit]int{domain.Hearts: 0, domain.Diamonds: 1, domain.Clubs: 2, domain.Spades: 3}
+	sort.Slice(hand, func(i, j int) bool {
+		if hand[i].Suit != hand[j].Suit {
+			return suitOrder[hand[i].Suit] < suitOrder[hand[j].Suit]
+		}
+		return hand[i].Rank < hand[j].Rank
+	})
+
+	const pitch = .61
+	const layerGap = .041 // Greater than card thickness so neighboring cards cannot intersect.
+	normalY, normalZ := math.Cos(pitch), math.Sin(pitch)
+	spread := .43
+	if len(hand) > 5 {
+		spread = 1.72 / float64(len(hand)-1)
+	}
+	selections := make([]Selection, 0, len(hand))
+	for i, card := range hand {
 		id := "hand_" + cardIDString(card)
-		spread := .43
-		if len(view.Hand) > 7 {
-			spread = 2.4 / float64(len(view.Hand)-1)
-		}
-		x := (float64(i) - float64(len(view.Hand)-1)/2) * spread
-		z := 3.25 + .13*math.Abs(float64(i)-float64(len(view.Hand)-1)/2)
-		// Pitch the face normal toward the camera at the near edge of the table.
-		rotation := scene.Vec3{.61, (float64(i) - float64(len(view.Hand)-1)/2) * -.12, 0}
-		// Keep the lowered edge of the tilted card above the felt.
-		node := cardNode(id, card, scene.Vec3{x, .48 + .012*float64(i), z}, rotation, id)
+		offset := float64(i) - float64(len(hand)-1)/2
+		layer := float64(i) * layerGap
+		// Parallel faces overlap from left to right. The slight downward step exposes
+		// the upper-left corner even when the hand is tightly packed.
+		node := cardNode(id, card, scene.Vec3{
+			offset * spread,
+			.49 + layer*normalY - offset*.025*normalZ,
+			3.42 + layer*normalZ + offset*.025*normalY,
+		}, scene.Vec3{pitch, 0, 0}, id)
 		nodes = append(nodes, node)
 		lift := node.Transform
-		lift.Position[1] += .35
-		lift.Position[2] -= .14
+		liftDistance := float64(len(hand)-i)*layerGap + .14
+		lift.Position[1] += liftDistance*normalY + .12*normalZ
+		lift.Position[2] += liftDistance*normalZ - .12*normalY
 		motion := animation.New(id, animation.Step{To: lift, DurationMS: 160, Easing: "easeOutCubic"})
 		if err := motion.Validate(); err != nil {
 			return Payload{}, err
 		}
-		selections = append(selections, Selection{PickID: id, Card: cardID, Legal: allowed[cardID], Animation: motion})
+		selections = append(selections, Selection{PickID: id, Card: card.ID, Legal: allowed[card.ID], Animation: motion})
 	}
 	for _, play := range view.Public.CurrentTrick {
 		card, ok := domain.CardDetails(play.Card)

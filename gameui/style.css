@@ -81,12 +81,19 @@ h2 { margin: 0 0 .75rem; }
   pointer-events: auto; touch-action: pan-x;
 }
 .rule {
-  flex: 0 0 auto; width: max-content; max-width: min(14rem, 75vw);
-  padding: .32rem .55rem; border: 1px solid #719484; border-radius: .45rem;
-  background: #102b21ed; font-size: clamp(.68rem, 2.4vw, .8rem);
+  flex: 0 0 auto; display: grid; place-items: center;
+  width: clamp(3.3rem, 13vw, 4.2rem); aspect-ratio: 5 / 7;
+  min-height: 44px; padding: .25rem; border: 1px solid #c9b77e; border-radius: .45rem;
+  background: #e6d8af; color: #243728; font-size: clamp(.63rem, 2.4vw, .76rem);
+  line-height: 1.15; text-wrap: balance; overflow-wrap: anywhere;
 }
-.rule p { margin: .15rem 0 0; }
-.rule.inactive { color: #b3c8b9; }
+.rule.inactive { background: #b6beb0; color: #314237; }
+.rule:hover, .rule:focus-visible { border-color: #fff2c6; background: #fff2c6; }
+#rule-details {
+  width: min(26rem, 90vw); padding: 1.15rem; border: 1px solid #c9b77e;
+  border-radius: .7rem; background: #102b21; color: #edf3e7;
+}
+#rule-details::backdrop { background: #07140eb8; }
 @media (min-width: 700px) {
   .game-hud { left: calc(var(--hud-left) + 6rem); }
 }

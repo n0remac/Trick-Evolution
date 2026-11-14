@@ -37,6 +37,11 @@ func pageNode(room string) *h.Node {
 				h.Div(h.Id("table3d-drop-hint"), h.Class("table3d-drop-hint"), h.T("Release here to play")),
 				h.Div(h.Id("table3d-seats"), h.Class("table3d-seats")),
 			),
+			h.NewNode("dialog", []*h.Node{h.Id("rule-details"), h.Attr("aria-labelledby", "rule-title"),
+				h.H2(h.Id("rule-title")),
+				h.P(h.Id("rule-text")),
+				h.Form(h.Attr("method", "dialog"), h.Button(h.Type("submit"), h.T("Close"))),
+			}),
 			h.Div(h.Id("live"), h.Attr("hx-ext", "ws"),
 				joinScreen(room),
 			),
@@ -174,8 +179,8 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			class += " inactive"
 			title += " · overridden"
 		}
-		rules = append(rules, h.Div(h.Class(class),
-			h.NewNode("strong", []*h.Node{h.T(title)}), h.P(h.T(definition.Text))))
+		rules = append(rules, h.Button(h.Type("button"), h.Class(class),
+			h.Attr("data-rule-text", definition.Text), h.Attr("aria-haspopup", "dialog"), h.T(title)))
 	}
 	next := ""
 	switch public.Phase {

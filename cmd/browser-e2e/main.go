@@ -217,7 +217,7 @@ func (r *runner) join(p *page, name string, botCount ...int) error {
 	if len(botCount) > 0 {
 		count = botCount[0]
 	}
-	expression := fmt.Sprintf(`(() => { const name = document.querySelector('input[name=name]'); const bots = document.querySelector('select[name=bots]'); const form = document.querySelector('form'); if (!name || !bots || !form) return false; name.value = %s; bots.value = %q; form.requestSubmit(); return true; })()`, string(quoted), fmt.Sprint(count))
+	expression := fmt.Sprintf(`(() => { const name = document.querySelector('input[name=name]'); const bots = document.querySelector('select[name=bots]'); const form = document.getElementById('join-form'); if (!name || !bots || !form) return false; name.value = %s; bots.value = %q; form.requestSubmit(); return true; })()`, string(quoted), fmt.Sprint(count))
 	var submitted bool
 	if err := p.eval(r.ctx, expression, &submitted); err != nil {
 		return err

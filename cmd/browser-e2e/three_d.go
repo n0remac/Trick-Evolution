@@ -63,6 +63,21 @@ func (r *runner) threeDSmoke() error {
 	if !framed {
 		return fmt.Errorf("portrait hand framing or hidden confirmation failed")
 	}
+	var ruleOpened bool
+	if err := page.eval(r.ctx, `(() => {
+		const rule = document.querySelector('button.rule');
+		rule.click();
+		const dialog = document.querySelector('#rule-details');
+		const open = dialog.open && !!dialog.querySelector('#rule-text').textContent;
+		dialog.close();
+		return open;
+	})()`, &ruleOpened); err != nil {
+		return err
+	}
+	if !ruleOpened {
+		return fmt.Errorf("rule card did not open its details")
+	}
+
 	var initialWidth int
 	if err := page.eval(r.ctx, `window.__trick3d.stats().width`, &initialWidth); err != nil {
 		return err
@@ -79,7 +94,7 @@ func (r *runner) threeDSmoke() error {
 		X  float64 `json:"x"`
 		Y  float64 `json:"y"`
 	}
-	const targetJS = `(() => { const bytes = Uint8Array.from(atob(document.querySelector('#screen').dataset.scene), c => c.charCodeAt(0)); const payload = JSON.parse(new TextDecoder().decode(bytes)); const card = payload.selections.find(s => s.legal); if (!card) return null; const point = window.__trick3d.project(card.pickId); return {id: card.pickId, x: point.x, y: point.y}; })()`
+	const targetJS = `(() => { const bytes = Uint8Array.from(atob(document.querySelector('#screen').dataset.scene), c => c.charCodeAt(0)); const payload = JSON.parse(new TextDecoder().decode(bytes)); const card = payload.selections.find(s => s.legal); if (!card) return null; const point = window.__trick3d.project(card.pickId, [-.36, .02, -.46]); return {id: card.pickId, x: point.x, y: point.y}; })()`
 	if err := page.eval(r.ctx, targetJS, &target); err != nil {
 		return err
 	}

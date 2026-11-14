@@ -216,6 +216,18 @@
     finally { submit.disabled = false; }
   });
 
+  const ruleDetails = document.getElementById('rule-details');
+  ruleDetails.addEventListener('click', event => {
+    if (event.target === ruleDetails) ruleDetails.close();
+  });
+  live.addEventListener('click', event => {
+    const rule = event.target.closest('.rule');
+    if (!rule) return;
+    ruleDetails.querySelector('#rule-title').textContent = rule.textContent;
+    ruleDetails.querySelector('#rule-text').textContent = rule.dataset.ruleText;
+    ruleDetails.showModal();
+  });
+
   document.addEventListener('click', event => {
     const action = event.target.closest('[data-action]')?.dataset.action;
     if (action === 'leave') {
