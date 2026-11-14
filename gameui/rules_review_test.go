@@ -2,6 +2,7 @@ package gameui
 
 import (
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -74,7 +75,8 @@ func TestRulesReviewPreviewMatchesActualConfiguration(t *testing.T) {
 			t.Fatalf("starting explanation missing %q", label)
 		}
 	}
-	if !strings.Contains(html, `id="review-start-form"`) || !strings.Contains(html, `name="type" value="start"`) {
+	startInput := regexp.MustCompile(`<input[^>]*(name="type"[^>]*value="start"|value="start"[^>]*name="type")`)
+	if !strings.Contains(html, `id="review-start-form"`) || !startInput.MatchString(html) {
 		t.Fatal("host start action missing")
 	}
 	guest := reviewHTML(t, reviewMessage(nil), "guest", catalog, config)
