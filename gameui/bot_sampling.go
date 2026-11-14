@@ -137,8 +137,8 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 	for i, rule := range public.Rules {
 		prepared.field[i] = rule.Instance
 	}
-	resolved, err := domain.ResolveField(prepared.field, catalog)
-	if err != nil || !reflect.DeepEqual(resolved, public.Rules) {
+	resolved, err := domain.ResolveRules(prepared.field, catalog, config)
+	if err != nil || !reflect.DeepEqual(resolved.History, public.Rules) || !reflect.DeepEqual(resolved.ActiveField, public.ActiveField) || !reflect.DeepEqual(resolved.Effective, public.Effective) {
 		return preparedObservation{}, fmt.Errorf("public rule projection mismatch")
 	}
 	revealed := make(map[domain.RuleID]bool)

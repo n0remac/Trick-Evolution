@@ -20,21 +20,21 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 	if len(legal) == 0 {
 		return "", fmt.Errorf("bot has no legal card")
 	}
-	var effect domain.EffectKind
-	for _, rule := range view.Public.Rules {
-		if !rule.Active {
-			continue
-		}
-		definition, ok := catalog.Definition(rule.Instance.DefinitionID)
-		if !ok {
-			return "", fmt.Errorf("unknown active rule %s", rule.Instance.DefinitionID)
-		}
-		if definition.WinnerEffect != "" {
-			if effect != "" {
-				return "", fmt.Errorf("multiple winner effects")
-			}
-			effect = definition.WinnerEffect
-		}
+	resolved, err := domain.EffectiveForView(view.Public, catalog)
+	if err != nil {
+		return "", err
+	}
+	rank, err := resolved.Effect(domain.MechanicRankComparison)
+	if err != nil {
+		return "", err
+	}
+	eligibility, err := resolved.Effect(domain.MechanicWinnerEligibility)
+	if err != nil {
+		return "", err
+	}
+	effect := domain.EffectHighLead
+	if rank.Value == domain.ValueLow {
+		effect = domain.EffectLowLead
 	}
 	if effect != domain.EffectHighLead && effect != domain.EffectLowLead {
 		return "", fmt.Errorf("unsupported winner effect %s", effect)
@@ -71,7 +71,7 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 	winningStrength := -1
 	for _, play := range view.Public.CurrentTrick {
 		card := cardFor(play.Card)
-		if card.Suit == lead && strength(card) > winningStrength {
+		if (eligibility.Value != domain.ValueLeadSuit || card.Suit == lead) && strength(card) > winningStrength {
 			winningStrength = strength(card)
 		}
 	}
@@ -79,7 +79,7 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 	var cheapestWin domain.CardID
 	for _, id := range legal {
 		card := cardFor(id)
-		if card.Suit == lead && strength(card) > winningStrength &&
+		if (eligibility.Value != domain.ValueLeadSuit || card.Suit == lead) && strength(card) > winningStrength &&
 			(cheapestWin == "" || strength(card) < strength(cardFor(cheapestWin))) {
 			cheapestWin = id
 		}

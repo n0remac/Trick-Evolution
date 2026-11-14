@@ -1,5 +1,7 @@
 # D1 complete-game verification and release gates
 
+> Historical pre-Stage-1 behavior and evidence. See [Basic Play and Rule Field Stage 1](BASIC_RULES_STAGE1.md) for current rules and default deck.
+
 D1 is a verification milestone. It does not change game rules or deploy the service. All complete-game tests use a fixed shuffle sequence in a test server; the production server still chooses its own random seeds.
 
 ## Run the gates

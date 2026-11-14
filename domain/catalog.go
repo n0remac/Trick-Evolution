@@ -6,12 +6,78 @@ type RuleID string
 type EffectKind string
 type RuleTiming string
 type RuleStatus string
+type FieldCategory string
+type Mechanic string
+type EffectValue string
+type ConfigKey string
+
+const (
+	FieldPlay                 FieldCategory   = "play"
+	FieldTrick                FieldCategory   = "trick"
+	FieldScoreVictory         FieldCategory   = "score_victory"
+	FieldHand                 FieldCategory   = "hand"
+	Visible                   FieldVisibility = "visible"
+	Hidden                    FieldVisibility = "hidden"
+	NotStarting               FieldVisibility = "not_starting"
+	MechanicDeck              Mechanic        = "deck"
+	MechanicHandSize          Mechanic        = "hand_size"
+	MechanicUnused            Mechanic        = "unused_cards"
+	MechanicScoreOwnership    Mechanic        = "score_ownership"
+	MechanicTurnOrder         Mechanic        = "turn_order"
+	MechanicFirstLeader       Mechanic        = "first_leader"
+	MechanicNextLeader        Mechanic        = "next_leader"
+	MechanicTrump             Mechanic        = "trump"
+	MechanicPlayRestriction   Mechanic        = "play_restriction"
+	MechanicWinnerEligibility Mechanic        = "winner_eligibility"
+	MechanicRankComparison    Mechanic        = "rank_comparison"
+	MechanicTieBreak          Mechanic        = "tie_break"
+	MechanicTrickPoints       Mechanic        = "trick_points"
+	MechanicHandLimit         Mechanic        = "hand_limit"
+	MechanicVictory           Mechanic        = "victory"
+	MechanicReveal            Mechanic        = "reveal"
+	ValueStandardDeck         EffectValue     = "standard_52"
+	ValueConfigured           EffectValue     = "configured"
+	ValueOutOfPlay            EffectValue     = "out_of_play"
+	ValueIndividual           EffectValue     = "individual"
+	ValueClockwise            EffectValue     = "clockwise"
+	ValueLeftOfDealer         EffectValue     = "left_of_dealer_rotating"
+	ValueWinnerLeads          EffectValue     = "winner_leads"
+	ValueNoTrump              EffectValue     = "none"
+	ValueFollow               EffectValue     = "follow_suit"
+	ValueAnySuit              EffectValue     = "any_suit"
+	ValueLeadSuit             EffectValue     = "lead_suit"
+	ValueHigh                 EffectValue     = "high_ace_to_two"
+	ValueLow                  EffectValue     = "low_two_to_ace"
+	ValueFirstPlay            EffectValue     = "first_play"
+	ValueOnePoint             EffectValue     = "one_per_trick"
+	ValueHighestShared        EffectValue     = "highest_shared_ties"
+)
+
+type FieldVisibility string
+type TypedEffect struct {
+	Mechanic Mechanic
+	Value    EffectValue
+	Config   ConfigKey
+}
 
 const (
 	RuleHighCardWins     RuleID     = "rule.high_card_wins"
 	RuleFollowSuit       RuleID     = "rule.follow_suit"
 	RuleLowCardWins      RuleID     = "rule.low_card_wins"
 	RuleNoFollowRequired RuleID     = "rule.no_follow_required"
+	RuleDeckStandard     RuleID     = "baseline.standard_deck"
+	RuleHandSize         RuleID     = "baseline.hand_size"
+	RuleUnusedCards      RuleID     = "baseline.unused_cards"
+	RuleIndividualScore  RuleID     = "baseline.individual_score"
+	RuleClockwise        RuleID     = "baseline.clockwise"
+	RuleFirstLeader      RuleID     = "baseline.first_leader"
+	RuleWinnerLeads      RuleID     = "baseline.winner_leads"
+	RuleNoTrump          RuleID     = "baseline.no_trump"
+	RuleTieBreak         RuleID     = "baseline.tie_break"
+	RuleTrickPoint       RuleID     = "baseline.trick_point"
+	RuleHandLimit        RuleID     = "baseline.hand_limit"
+	RuleVictory          RuleID     = "baseline.victory"
+	RuleReveal           RuleID     = "baseline.reveal"
 	StatusSupported      RuleStatus = "supported"
 	StatusUnsupported    RuleStatus = "unsupported"
 	TimingPlay           RuleTiming = "play_validation"
@@ -30,18 +96,23 @@ type RuleParameters struct {
 }
 
 type RuleDefinition struct {
-	ID                RuleID
-	Title             string
-	Text              string
-	Category          string // rule or phase, matching the historical print catalog.
-	Status            RuleStatus
-	UnsupportedReason string
-	Timing            RuleTiming
-	WinnerEffect      EffectKind
-	PlayEffect        SuitEffect
-	Parameters        RuleParameters
-	Overrides         []RuleID
-	InDeck            bool
+	ID                 RuleID
+	Title              string
+	Text               string
+	Category           string // rule or phase, matching the historical print catalog.
+	Status             RuleStatus
+	UnsupportedReason  string
+	Timing             RuleTiming
+	WinnerEffect       EffectKind
+	PlayEffect         SuitEffect
+	Parameters         RuleParameters
+	Overrides          []RuleID
+	InDeck             bool
+	FieldCategory      FieldCategory
+	Effects            []TypedEffect
+	Prerequisites      []RuleID
+	StartActive        bool
+	StartingVisibility FieldVisibility
 }
 
 type Catalog struct {
@@ -49,7 +120,7 @@ type Catalog struct {
 	Definitions []RuleDefinition
 }
 
-const CatalogVersion = 1
+const CatalogVersion = 2
 
 func (c Catalog) Definition(id RuleID) (RuleDefinition, bool) {
 	for _, d := range c.Definitions {
@@ -91,20 +162,44 @@ func (c Catalog) Validate() error {
 		}
 		switch d.Status {
 		case StatusUnsupported:
-			if d.UnsupportedReason == "" || d.InDeck || d.Timing != "" || d.WinnerEffect != "" || d.PlayEffect != "" || d.Parameters != (RuleParameters{}) || len(d.Overrides) != 0 {
+			if d.UnsupportedReason == "" || d.InDeck || d.Timing != "" || d.WinnerEffect != "" || d.PlayEffect != "" || d.Parameters != (RuleParameters{}) || len(d.Overrides) != 0 || len(d.Effects) != 0 || len(d.Prerequisites) != 0 || d.StartActive {
 				return fmt.Errorf("%s: unsupported entry must have a reason and no executable behavior", d.ID)
 			}
 		case StatusSupported:
-			if d.Category != "rule" || d.UnsupportedReason != "" {
+			if d.Category != "rule" || d.UnsupportedReason != "" || len(d.Effects) == 0 || (d.InDeck && d.StartActive) ||
+				(d.StartActive && d.StartingVisibility == NotStarting) ||
+				(!d.StartActive && d.StartingVisibility != NotStarting) ||
+				(d.StartingVisibility != Visible && d.StartingVisibility != Hidden && d.StartingVisibility != NotStarting) ||
+				(d.FieldCategory != FieldPlay && d.FieldCategory != FieldTrick && d.FieldCategory != FieldHand && d.FieldCategory != FieldScoreVictory) {
 				return fmt.Errorf("%s: invalid supported entry", d.ID)
+			}
+			mechanics := map[Mechanic]bool{}
+			for _, effect := range d.Effects {
+				if !validTypedEffect(effect) || mechanics[effect.Mechanic] {
+					return fmt.Errorf("%s: invalid or duplicate typed effect", d.ID)
+				}
+				mechanics[effect.Mechanic] = true
+			}
+			if d.Timing == "" && d.WinnerEffect == "" && d.PlayEffect == "" {
+				break
 			}
 			switch d.Timing {
 			case TimingPlay:
-				if d.WinnerEffect != "" || d.Parameters != (RuleParameters{}) || (d.PlayEffect != EffectFollow && d.PlayEffect != EffectAnySuit) {
+				want := ValueFollow
+				if d.PlayEffect == EffectAnySuit {
+					want = ValueAnySuit
+				}
+				if d.WinnerEffect != "" || d.Parameters != (RuleParameters{}) || (d.PlayEffect != EffectFollow && d.PlayEffect != EffectAnySuit) ||
+					!reflectTypedEffect(d.Effects, MechanicPlayRestriction, want) || !reflectTypedEffect(d.Effects, MechanicWinnerEligibility, ValueLeadSuit) || len(d.Effects) != 2 {
 					return fmt.Errorf("%s: invalid play effect or parameters", d.ID)
 				}
 			case TimingTrick:
-				if d.PlayEffect != "" || !d.Parameters.LeadSuitOnly || (d.WinnerEffect != EffectHighLead && d.WinnerEffect != EffectLowLead) {
+				want := ValueHigh
+				if d.WinnerEffect == EffectLowLead {
+					want = ValueLow
+				}
+				if d.PlayEffect != "" || d.Parameters.LeadSuitOnly || (d.WinnerEffect != EffectHighLead && d.WinnerEffect != EffectLowLead) ||
+					!reflectTypedEffect(d.Effects, MechanicRankComparison, want) || len(d.Effects) != 1 {
 					return fmt.Errorf("%s: invalid winner effect or parameters", d.ID)
 				}
 			default:
@@ -125,21 +220,119 @@ func (c Catalog) Validate() error {
 				return fmt.Errorf("%s: self or duplicate override", d.ID)
 			}
 			seen[target] = true
-			if old.Timing != d.Timing {
-				return fmt.Errorf("%s: override target has different timing", d.ID)
+			shared := false
+			for _, a := range d.Effects {
+				for _, b := range old.Effects {
+					if a.Mechanic == b.Mechanic {
+						shared = true
+					}
+				}
 			}
+			if !shared {
+				return fmt.Errorf("%s: override target has no shared mechanic", d.ID)
+			}
+		}
+		for _, prerequisite := range d.Prerequisites {
+			old, ok := byID[prerequisite]
+			if !ok || old.Status != StatusSupported || prerequisite == d.ID {
+				return fmt.Errorf("%s: invalid prerequisite %s", d.ID, prerequisite)
+			}
+			for _, effect := range d.Effects {
+				for _, prior := range old.Effects {
+					if effect.Mechanic == prior.Mechanic {
+						return fmt.Errorf("%s: prerequisite replaces its own mechanic", d.ID)
+					}
+				}
+			}
+		}
+	}
+	visiting := map[RuleID]bool{}
+	visited := map[RuleID]bool{}
+	var checkCycle func(RuleID) error
+	checkCycle = func(id RuleID) error {
+		if visiting[id] {
+			return fmt.Errorf("prerequisite cycle at %s", id)
+		}
+		if visited[id] {
+			return nil
+		}
+		visiting[id] = true
+		for _, p := range byID[id].Prerequisites {
+			if err := checkCycle(p); err != nil {
+				return err
+			}
+		}
+		visiting[id] = false
+		visited[id] = true
+		return nil
+	}
+	for id := range byID {
+		if err := checkCycle(id); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+func reflectTypedEffect(effects []TypedEffect, mechanic Mechanic, value EffectValue) bool {
+	for _, effect := range effects {
+		if effect.Mechanic == mechanic && effect.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
 func supported(id RuleID, title, text string, timing RuleTiming, winner EffectKind, play SuitEffect, inDeck bool, overrides ...RuleID) RuleDefinition {
 	d := RuleDefinition{ID: id, Title: title, Text: text, Category: "rule", Status: StatusSupported,
-		Timing: timing, WinnerEffect: winner, PlayEffect: play, InDeck: inDeck, Overrides: overrides}
+		Timing: timing, WinnerEffect: winner, PlayEffect: play, InDeck: inDeck, Overrides: overrides, StartingVisibility: NotStarting}
 	if timing == TimingTrick {
-		d.Parameters.LeadSuitOnly = true
+		d.FieldCategory = FieldTrick
+		value := ValueHigh
+		if winner == EffectLowLead {
+			value = ValueLow
+		}
+		d.Effects = []TypedEffect{{MechanicRankComparison, value, ""}}
+	} else {
+		d.FieldCategory = FieldPlay
+		value := ValueFollow
+		if play == EffectAnySuit {
+			value = ValueAnySuit
+		}
+		d.Effects = []TypedEffect{{MechanicPlayRestriction, value, ""}, {MechanicWinnerEligibility, ValueLeadSuit, ""}}
 	}
 	return d
+}
+
+func baseline(id RuleID, title, text string, category FieldCategory, effect TypedEffect) RuleDefinition {
+	return RuleDefinition{ID: id, Title: title, Text: text, Category: "rule", Status: StatusSupported, FieldCategory: category, Effects: []TypedEffect{effect}, StartActive: true, StartingVisibility: Hidden}
+}
+
+func validTypedEffect(e TypedEffect) bool {
+	values := map[Mechanic]EffectValue{MechanicDeck: ValueStandardDeck, MechanicHandSize: ValueConfigured, MechanicUnused: ValueOutOfPlay, MechanicScoreOwnership: ValueIndividual, MechanicTurnOrder: ValueClockwise, MechanicFirstLeader: ValueLeftOfDealer, MechanicNextLeader: ValueWinnerLeads, MechanicTrump: ValueNoTrump, MechanicPlayRestriction: ValueFollow, MechanicWinnerEligibility: ValueLeadSuit, MechanicRankComparison: ValueHigh, MechanicTieBreak: ValueFirstPlay, MechanicTrickPoints: ValueOnePoint, MechanicHandLimit: ValueConfigured, MechanicVictory: ValueHighestShared, MechanicReveal: ValueConfigured}
+	want, ok := values[e.Mechanic]
+	if !ok {
+		return false
+	}
+	if e.Mechanic == MechanicPlayRestriction {
+		return (e.Value == ValueFollow || e.Value == ValueAnySuit) && e.Config == ""
+	}
+	if e.Mechanic == MechanicRankComparison {
+		return (e.Value == ValueHigh || e.Value == ValueLow) && e.Config == ""
+	}
+	if e.Value != want {
+		return false
+	}
+	switch e.Mechanic {
+	case MechanicHandSize:
+		return e.Config == "hand_size"
+	case MechanicHandLimit:
+		return e.Config == "max_hands"
+	case MechanicReveal:
+		return e.Config == "reveal_every"
+	default:
+		return e.Config == ""
+	}
 }
 
 func unsupported(id RuleID, title, text, category, reason string) RuleDefinition {
@@ -151,14 +344,31 @@ func unsupported(id RuleID, title, text, category, reason string) RuleDefinition
 func DefaultCatalog() Catalog {
 	const unmodeled = "requires rule semantics or state outside the F1 subset"
 	const bids = "requires bids or team state not modeled in F1"
+	follow := supported(RuleFollowSuit, "Follow Suit", "You must play the lead suit if able. Only lead-suit cards can win without trump.", TimingPlay, "", EffectFollow, false, RuleNoFollowRequired)
+	follow.StartActive, follow.StartingVisibility = true, Visible
+	high := supported(RuleHighCardWins, "High Card Wins", "Among eligible cards, highest rank wins (ace high).", TimingTrick, EffectHighLead, "", false, RuleLowCardWins)
+	high.StartActive, high.StartingVisibility = true, Visible
 	return Catalog{Version: CatalogVersion, Definitions: []RuleDefinition{
-		supported(RuleFollowSuit, "Follow Suit", "You must play the lead suit if able.", TimingPlay, "", EffectFollow, true),
-		supported(RuleNoFollowRequired, "No Follow Required", "Play any card even if you hold the lead suit.", TimingPlay, "", EffectAnySuit, true, RuleFollowSuit),
+		baseline(RuleDeckStandard, "Standard Deck", "Use a standard 52-card deck.", FieldHand, TypedEffect{MechanicDeck, ValueStandardDeck, ""}),
+		baseline(RuleHandSize, "Hand Size", "Deal the configured number of cards to each player.", FieldHand, TypedEffect{MechanicHandSize, ValueConfigured, "hand_size"}),
+		baseline(RuleUnusedCards, "Unused Cards", "Cards not dealt are out of play for this hand.", FieldHand, TypedEffect{MechanicUnused, ValueOutOfPlay, ""}),
+		baseline(RuleIndividualScore, "Individual Scores", "Each player has an individual score.", FieldScoreVictory, TypedEffect{MechanicScoreOwnership, ValueIndividual, ""}),
+		baseline(RuleClockwise, "Clockwise Play", "Play proceeds clockwise.", FieldPlay, TypedEffect{MechanicTurnOrder, ValueClockwise, ""}),
+		baseline(RuleFirstLeader, "First Leader", "Player left of the dealer leads; dealer rotates each hand.", FieldPlay, TypedEffect{MechanicFirstLeader, ValueLeftOfDealer, ""}),
+		baseline(RuleWinnerLeads, "Winner Leads", "Trick winner leads the next trick.", FieldTrick, TypedEffect{MechanicNextLeader, ValueWinnerLeads, ""}),
+		baseline(RuleNoTrump, "No Trump", "No suit is trump.", FieldTrick, TypedEffect{MechanicTrump, ValueNoTrump, ""}),
+		baseline(RuleTieBreak, "Deterministic Ties", "Earlier play wins an equal-rank tie.", FieldTrick, TypedEffect{MechanicTieBreak, ValueFirstPlay, ""}),
+		baseline(RuleTrickPoint, "One Point per Trick", "Each captured trick scores one point.", FieldScoreVictory, TypedEffect{MechanicTrickPoints, ValueOnePoint, ""}),
+		baseline(RuleHandLimit, "Fixed Hand Limit", "End after the configured number of hands.", FieldScoreVictory, TypedEffect{MechanicHandLimit, ValueConfigured, "max_hands"}),
+		baseline(RuleVictory, "Highest Score Wins", "Highest score wins; tied leaders share victory.", FieldScoreVictory, TypedEffect{MechanicVictory, ValueHighestShared, ""}),
+		baseline(RuleReveal, "Rule Reveal", "Reveal at the configured interval between hands if an eligible card remains.", FieldPlay, TypedEffect{MechanicReveal, ValueConfigured, "reveal_every"}),
+		follow,
+		supported(RuleNoFollowRequired, "No Follow Required", "Play any card even if you hold the lead suit. Only lead-suit cards can win without trump.", TimingPlay, "", EffectAnySuit, false, RuleFollowSuit),
 		unsupported("rule.must_underplay", "Must Underplay", "If able, you must play a lower card than the lead.", "rule", unmodeled),
 		unsupported("rule.must_beat_lead", "Must Beat Lead", "If able, you must play a higher card than the lead.", "rule", unmodeled),
 		unsupported("rule.reverse_play_order", "Reverse Play Order", "Play proceeds counter-clockwise this round.", "rule", unmodeled),
-		supported(RuleHighCardWins, "High Card Wins", "Highest card of the lead suit wins the trick.", TimingTrick, EffectHighLead, "", false),
-		supported(RuleLowCardWins, "Low Card Wins", "Lowest card of the lead suit wins the trick.", TimingTrick, EffectLowLead, "", true, RuleHighCardWins),
+		high,
+		supported(RuleLowCardWins, "Low Card Wins", "Among eligible cards, lowest rank wins.", TimingTrick, EffectLowLead, "", false, RuleHighCardWins),
 		unsupported("rule.even_card_wins", "Even Card Wins", "Highest even‑ranked card wins the trick.", "rule", unmodeled),
 		unsupported("rule.odd_card_wins", "Odd Card Wins", "Highest odd‑ranked card wins the trick.", "rule", unmodeled),
 		unsupported("rule.hidden_tricks", "Hidden Tricks", "Tricks are kept face-down and revealed at round end.", "rule", unmodeled),

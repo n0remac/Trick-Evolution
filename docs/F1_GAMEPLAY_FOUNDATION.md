@@ -1,5 +1,7 @@
 # F1 gameplay foundation (provisional)
 
+> Historical pre-Stage-1 behavior and evidence. See [Basic Play and Rule Field Stage 1](BASIC_RULES_STAGE1.md) for current rules and default deck.
+
 This records the F1 starting contract; [F2_ENGINE.md](F2_ENGINE.md) documents the implemented transitions and resolved choices. The existing multiplayer prototype and physical card catalog remain separate.
 
 ## Vocabulary and first playable rules

@@ -349,7 +349,7 @@ func TestCompleteGameBlackBox(t *testing.T) {
 				if hand == 10 {
 					wantPhase = domain.PhaseGameComplete
 				}
-				if public.Phase != wantPhase || public.CompletedHands != hand || len(public.Rules) != 1+hand/3 {
+				if public.Phase != wantPhase || public.CompletedHands != hand || len(public.ActiveField) != 2 || len(public.Rules) != 15 {
 					t.Fatalf("hand %d boundary: phase=%s completed=%d rules=%d", hand, public.Phase, public.CompletedHands, len(public.Rules))
 				}
 				score, tricks, captured := 0, 0, 0
@@ -369,7 +369,7 @@ func TestCompleteGameBlackBox(t *testing.T) {
 					}
 				}
 			}
-			if !reflect.DeepEqual(revealHands, []int{3, 6, 9}) {
+			if len(revealHands) != 0 {
 				t.Fatalf("reveal hands: %v", revealHands)
 			}
 			wantRevision := uint64(1 + 10*5*players + 9)
@@ -378,7 +378,7 @@ func TestCompleteGameBlackBox(t *testing.T) {
 			}
 			for kind, count := range map[domain.EventKind]int{
 				domain.EventHandStarted: 10, domain.EventCardPlayed: 50 * players, domain.EventTrickWon: 50,
-				domain.EventHandCompleted: 10, domain.EventRuleRevealed: 3, domain.EventGameCompleted: 1,
+				domain.EventHandCompleted: 10, domain.EventRuleRevealed: 0, domain.EventGameCompleted: 1,
 			} {
 				if f.counts[kind] != count {
 					t.Fatalf("event %s count %d, want %d", kind, f.counts[kind], count)
@@ -402,7 +402,7 @@ func TestCompleteGameBlackBox(t *testing.T) {
 			if !reflect.DeepEqual(final.Winners, winners) {
 				t.Fatalf("winner projection %v, expected %v", final.Winners, winners)
 			}
-			wantScores := map[int][]int{2: {28, 22}, 4: {10, 13, 16, 11}}[players]
+			wantScores := map[int][]int{2: {24, 26}, 4: {8, 27, 10, 5}}[players]
 			if !reflect.DeepEqual(scores, wantScores) {
 				t.Fatalf("final scores %v, expected %v", scores, wantScores)
 			}

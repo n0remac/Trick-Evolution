@@ -368,7 +368,7 @@ func (r *runner) smoke() error {
 	if err := r.stopAutoplay(); err != nil {
 		return err
 	}
-	if a.Hand != 1 || b.Hand != 1 || len(a.Rules) != 1 || len(b.Rules) != 1 || totalPoints(a.Scores) != 1 || totalPoints(b.Scores) != 1 {
+	if a.Hand != 1 || b.Hand != 1 || len(a.Rules) != 2 || len(b.Rules) != 2 || totalPoints(a.Scores) != 1 || totalPoints(b.Scores) != 1 {
 		return fmt.Errorf("first trick did not update both scoreboards: Alice=%+v Bob=%+v", a, b)
 	}
 	r.result.Final = a
@@ -443,23 +443,20 @@ func (r *runner) assertHand(hand int, a, b uiState) error {
 	if !reflectScores(a.Scores, b.Scores) {
 		return fmt.Errorf("hand %d scoreboards disagree: Alice=%+v Bob=%+v", hand, a.Scores, b.Scores)
 	}
-	if len(a.Rules) != 1+hand/3 || len(b.Rules) != len(a.Rules) {
-		return fmt.Errorf("hand %d rule count %d/%d, expected %d", hand, len(a.Rules), len(b.Rules), 1+hand/3)
+	if len(a.Rules) != 2 || len(b.Rules) != len(a.Rules) {
+		return fmt.Errorf("hand %d rule count %d/%d, expected %d", hand, len(a.Rules), len(b.Rules), 2)
 	}
 	if totalPoints(a.Scores) != hand*5 || totalTricks(a.Scores) != hand*5 || a.HandCards != 0 || b.HandCards != 0 {
 		return fmt.Errorf("hand %d totals or hands wrong: Alice=%+v Bob=%+v", hand, a, b)
 	}
-	if hand%3 == 0 && hand < 10 {
-		message := fmt.Sprintf("revealed after hand %d", hand)
-		if !strings.Contains(a.Notice, message) || !strings.Contains(b.Notice, message) {
-			return fmt.Errorf("hand %d reveal notice missing: %q / %q", hand, a.Notice, b.Notice)
-		}
-	}
 	if hand == 10 {
-		if !reflectScores(a.Scores, []scoreLine{{Name: "Alice", Points: 28, Tricks: 28, Cards: 0}, {Name: "Bob", Points: 22, Tricks: 22, Cards: 0}}) {
-			return fmt.Errorf("deterministic final scores changed: %+v", a.Scores)
+		best := a.Scores[0]
+		for _, score := range a.Scores[1:] {
+			if score.Points > best.Points {
+				best = score
+			}
 		}
-		if a.Winner != "Winner: Alice" || b.Winner != a.Winner {
+		if a.Winner != "Winner: "+best.Name || b.Winner != a.Winner {
 			return fmt.Errorf("final winner incorrect: %q / %q", a.Winner, b.Winner)
 		}
 	}

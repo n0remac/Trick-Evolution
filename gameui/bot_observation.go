@@ -41,12 +41,8 @@ func (r *room) recordPublicEventsLocked(previous *domain.MatchState, events []do
 			}
 			lead, _ := domain.CardDetails(leadID) // Accepted Step validated the card.
 			follow := false
-			resolved, _ := domain.ResolveField(previous.Field, r.server.catalog)
-			for _, rule := range resolved {
-				if rule.Active && rule.Instance.DefinitionID == domain.RuleFollowSuit {
-					follow = true
-				}
-			}
+			resolved, _ := domain.ResolveRules(previous.Field, r.server.catalog, previous.Config)
+			if effect, err := resolved.Effect(domain.MechanicPlayRestriction); err == nil { follow = effect.Value == domain.ValueFollow }
 			r.publicPlays = append(r.publicPlays, ObservedPlay{Seat: event.Seat, Card: event.Card, LeadSuit: lead.Suit, FollowRequired: follow})
 		case domain.EventTrickWon:
 			r.publicTricks = append(r.publicTricks, ObservedTrick{Winner: event.Seat, Plays: append([]domain.Play(nil), event.Plays...)})

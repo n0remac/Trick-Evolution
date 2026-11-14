@@ -122,7 +122,7 @@ func TestFixedCompleteHand(t *testing.T) {
 	if trickWins != 5 || state.CompletedHands != 1 || state.Phase != PhaseHandComplete || state.Seats[0].Score != 5 || state.Seats[0].TricksWon != 5 || state.Seats[1].Score != 0 || state.Turn != "" {
 		t.Fatalf("incorrect completed hand: %+v", state)
 	}
-	if len(state.Field) != 1 {
+	if len(state.Field) != 15 {
 		t.Fatal("rule revealed before cadence boundary")
 	}
 	public, err := ProjectPublic(state, DefaultCatalog())
@@ -152,54 +152,61 @@ func mixedState(t *testing.T, rules ...RuleID) MatchState {
 	for i, id := range order {
 		stringsOrder[i] = string(id)
 	}
-	ruleOrder := []string{string(RuleFollowSuit), string(RuleNoFollowRequired), string(RuleLowCardWins)}
-	state, err := ReplayMatch([]SeatID{"a", "b"}, DefaultConfig(), DefaultCatalog(), []ShuffleRecord{{Kind: StandardDeckKind, Order: stringsOrder}, {Kind: RuleDeckKind, Order: ruleOrder}})
+	state, err := ReplayMatch([]SeatID{"a", "b"}, DefaultConfig(), DefaultCatalog(), []ShuffleRecord{{Kind: StandardDeckKind, Order: stringsOrder}, {Kind: RuleDeckKind}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range rules {
-		state.Field = append(state.Field, RuleInstance{InstanceID: string(id), DefinitionID: id, Sequence: len(state.Field)})
+		state.Field = appendRule(state.Field, id)
 	}
 	return state
 }
 
 func TestFollowSuitAndExplicitOverride(t *testing.T) {
-	state := mixedState(t, RuleFollowSuit)
+	state := mixedState(t)
 	state, _ = mustStep(t, state, Action{Kind: ActionPlayCard, Seat: "b", Card: "std:H:02"})
 	before := cloneState(state)
 	action := Action{Kind: ActionPlayCard, Seat: "a", Card: "std:S:02"}
 	returned, events, err := Step(state, action, DefaultCatalog())
 	requireCode(t, err, ErrMustFollowSuit)
 	if len(events) != 0 || !reflect.DeepEqual(state, before) || !reflect.DeepEqual(returned, before) {
-		t.Fatal("rejected play mutated state or emitted events")
+		t.Fatal("rejected play mutated state")
 	}
 	legal, _ := mustStep(t, state, Action{Kind: ActionPlayCard, Seat: "a", Card: "std:H:03"})
 	if legal.Seats[0].Score != 1 {
-		t.Fatal("legal follow-suit play awarded wrong seat")
+		t.Fatal("high card did not win")
 	}
-	state.Field = append(state.Field, RuleInstance{InstanceID: "no-follow", DefinitionID: RuleNoFollowRequired, Sequence: len(state.Field)})
+	state.Field = appendRule(state.Field, RuleNoFollowRequired)
 	next, events := mustStep(t, state, action)
 	if next.Seats[1].Score != 1 || events[1].Seat != "b" {
-		t.Fatal("off-suit card won or override failed")
+		t.Fatal("off-suit high won or override failed")
 	}
-	resolved, _ := ResolveField(next.Field, DefaultCatalog())
-	if resolved[1].Active || !resolved[2].Active || !resolved[0].Active {
-		t.Fatalf("incorrect active rules: %+v", resolved)
+	resolved, _ := ResolveRules(next.Field, DefaultCatalog(), next.Config)
+	follow := len(mixedState(t).Field) - 2
+	if resolved.History[follow].Active || !resolved.History[len(next.Field)-1].Active {
+		t.Fatal("follow replacement projection wrong")
 	}
 }
 
-func TestOverrideDrawnBeforeTarget(t *testing.T) {
+func TestSequentialReplacementBothDirections(t *testing.T) {
 	state := mixedState(t, RuleNoFollowRequired, RuleFollowSuit)
-	resolved, err := ResolveField(state.Field, DefaultCatalog())
+	r, err := ResolveRules(state.Field, DefaultCatalog(), state.Config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !resolved[1].Active || resolved[2].Active || !reflect.DeepEqual(resolved[2].OverriddenBy, []string{string(RuleNoFollowRequired)}) {
-		t.Fatalf("earlier explicit override did not disable its target: %+v", resolved)
+	play, _ := r.Effect(MechanicPlayRestriction)
+	if play.Value != ValueFollow || r.History[len(state.Field)-2].Active {
+		t.Fatal("follow did not replace no-follow")
 	}
-	state, _ = mustStep(t, state, Action{Kind: ActionPlayCard, Seat: "b", Card: "std:H:02"})
-	if _, _, err := Step(state, Action{Kind: ActionPlayCard, Seat: "a", Card: "std:S:02"}, DefaultCatalog()); err != nil {
-		t.Fatalf("overridden follow-suit rule still blocked play: %v", err)
+	state.Field = appendRule(state.Field, RuleLowCardWins)
+	state.Field = appendRule(state.Field, RuleHighCardWins)
+	r, err = ResolveRules(state.Field, DefaultCatalog(), state.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rank, _ := r.Effect(MechanicRankComparison)
+	if rank.Value != ValueHigh || r.History[len(state.Field)-2].Active {
+		t.Fatal("high did not replace low")
 	}
 }
 
@@ -208,16 +215,16 @@ func TestLowCardWinsAndHighIsInactive(t *testing.T) {
 	base, _ = mustStep(t, base, Action{Kind: ActionPlayCard, Seat: "b", Card: "std:H:02"})
 	high, _ := mustStep(t, base, Action{Kind: ActionPlayCard, Seat: "a", Card: "std:H:03"})
 	if high.Seats[0].Score != 1 {
-		t.Fatal("baseline high card failed")
+		t.Fatal("high baseline failed")
 	}
-	base.Field = append(base.Field, RuleInstance{InstanceID: "low", DefinitionID: RuleLowCardWins, Sequence: 1})
+	base.Field = appendRule(base.Field, RuleLowCardWins)
 	low, events := mustStep(t, base, Action{Kind: ActionPlayCard, Seat: "a", Card: "std:H:03"})
 	if low.Seats[1].Score != 1 || events[1].Seat != "b" {
-		t.Fatal("low card did not override high")
+		t.Fatal("low comparison failed")
 	}
-	resolved, _ := ResolveField(low.Field, DefaultCatalog())
-	if resolved[0].Active || !reflect.DeepEqual(resolved[0].OverriddenBy, []string{"low"}) || !resolved[1].Active {
-		t.Fatalf("bad override bookkeeping: %+v", resolved)
+	r, _ := ResolveRules(low.Field, DefaultCatalog(), low.Config)
+	if r.History[len(r.History)-2].Active || !r.History[len(r.History)-1].Active {
+		t.Fatal("rank replacement history wrong")
 	}
 }
 
@@ -299,7 +306,7 @@ func TestCompleteGameReplayAndCadence(t *testing.T) {
 		}
 		assertCardConservation(t, state)
 	}
-	if !reflect.DeepEqual(revealHands, []int{3, 6, 9}) || state.CompletedHands != 10 || len(state.Field) != 4 || state.Revision != uint64(len(actions)) {
+	if len(revealHands) != 0 || state.CompletedHands != 10 || len(state.Field) != 15 || state.Revision != uint64(len(actions)) {
 		t.Fatalf("incorrect game boundary or cadence: reveals=%v, state=%+v", revealHands, state)
 	}
 	if state.Seats[0].Score+state.Seats[1].Score != 50 {
@@ -390,5 +397,67 @@ func TestEmptyPrivateHandProjectsAsArray(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), `"Hand":[]`) {
 		t.Fatalf("empty hand was not a JSON array: %s", encoded)
+	}
+}
+
+func TestBoundedFullGameRevealAppliesBetweenHands(t *testing.T) {
+	catalog := DefaultCatalog()
+	for i := range catalog.Definitions {
+		if catalog.Definitions[i].ID == RuleLowCardWins {
+			catalog.Definitions[i].InDeck = true
+		}
+	}
+	cfg := Config{HandSize: 1, RevealEvery: 3, MaxHands: 4}
+	state, err := NewMatch([]SeatID{"a", "b"}, cfg, catalog, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reveals []int
+	var lastWinner SeatID
+	for state.Phase != PhaseGameComplete {
+		if state.Phase == PhaseHandComplete {
+			state, _, err = Step(state, Action{Kind: ActionStartHand, Seat: "a", DeckOrder: canonicalOrder()}, catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		view, err := ProjectForSeat(state, catalog, state.Turn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		legal, err := LegalCards(view, catalog)
+		if err != nil || len(legal) != 1 {
+			t.Fatalf("legal cards %v %v", legal, err)
+		}
+		var events []Event
+		state, events, err = Step(state, Action{Kind: ActionPlayCard, Seat: state.Turn, Card: legal[0]}, catalog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if event.Kind == EventRuleRevealed {
+				reveals = append(reveals, event.Hand)
+			}
+			if event.Kind == EventTrickWon {
+				lastWinner = event.Seat
+			}
+		}
+		if state.CompletedHands == 3 && state.Phase == PhaseHandComplete {
+			resolved, err := ResolveRules(state.Field, catalog, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rank, _ := resolved.Effect(MechanicRankComparison)
+			if rank.Value != ValueLow {
+				t.Fatal("reveal did not activate for next hand")
+			}
+		}
+	}
+	if !reflect.DeepEqual(reveals, []int{3}) || state.CompletedHands != 4 || len(state.Field) != 16 || lastWinner != "a" {
+		t.Fatalf("bounded match: reveals=%v winner=%s field=%d", reveals, lastWinner, len(state.Field))
+	}
+	if state.Seats[0].Score+state.Seats[1].Score != 4 {
+		t.Fatal("trick scoring changed")
 	}
 }

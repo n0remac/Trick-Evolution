@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 type ErrorCode string
 
@@ -60,7 +63,11 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 	if state.CatalogVersion != catalog.Version || state.Config.Validate(len(state.Seats)) != nil {
 		return state, nil, transitionError(ErrInvalidState, "invalid match configuration or catalog version")
 	}
-	if _, err := ResolveField(state.Field, catalog); err != nil {
+	resolved, err := ResolveRules(state.Field, catalog, state.Config)
+	if err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
+	if err := resolved.ValidateMatchEffects(state.Config); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
 	seatIndex := indexOfSeat(state.Seats, action.Seat)
@@ -69,7 +76,7 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 	}
 	switch action.Kind {
 	case ActionPlayCard:
-		return stepPlay(state, action, seatIndex, catalog)
+		return stepPlay(state, action, seatIndex, catalog, resolved)
 	case ActionStartHand:
 		return stepStartHand(state, action, seatIndex)
 	case ActionEndGame:
@@ -148,7 +155,7 @@ func stepStartHand(state MatchState, action Action, seatIndex int) (MatchState, 
 	return next, []Event{{Kind: EventHandStarted, Revision: next.Revision, Hand: next.HandNumber, Seat: next.Leader}}, nil
 }
 
-func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog) (MatchState, []Event, error) {
+func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, resolvedRules RuleResolution) (MatchState, []Event, error) {
 	if state.Phase != PhasePlayingTrick {
 		return state, nil, transitionError(ErrWrongPhase, "cards can only be played during a trick")
 	}
@@ -170,7 +177,17 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog) (
 	if !ok {
 		return state, nil, transitionError(ErrInvalidState, "hand contains an unknown card")
 	}
-	playEffect, winnerEffect, err := activeEffects(state.Field, catalog)
+	playRule, _ := resolvedRules.Effect(MechanicPlayRestriction)
+	rankRule, _ := resolvedRules.Effect(MechanicRankComparison)
+	playEffect := EffectFollow
+	if playRule.Value == ValueAnySuit {
+		playEffect = EffectAnySuit
+	}
+	winnerEffect := EffectHighLead
+	if rankRule.Value == ValueLow {
+		winnerEffect = EffectLowLead
+	}
+	eligibility, err := resolvedRules.Effect(MechanicWinnerEligibility)
 	if err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
@@ -200,7 +217,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog) (
 		next.Turn = next.Seats[(seatIndex+1)%len(next.Seats)].ID
 		return next, events, nil
 	}
-	winner, err := trickWinner(next.CurrentTrick, winnerEffect)
+	winner, err := trickWinner(next.CurrentTrick, winnerEffect, eligibility.Value)
 	if err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
@@ -289,37 +306,33 @@ func cardByID(id CardID) (StandardCard, bool) {
 }
 
 func activeEffects(field []RuleInstance, catalog Catalog) (SuitEffect, EffectKind, error) {
-	resolved, err := ResolveField(field, catalog)
+	resolved, err := ResolveRules(field, catalog, DefaultConfig())
 	if err != nil {
 		return "", "", err
 	}
-	var play SuitEffect
-	var winner EffectKind
-	for _, rule := range resolved {
-		if !rule.Active {
-			continue
-		}
-		definition, _ := catalog.Definition(rule.Instance.DefinitionID)
-		if definition.PlayEffect != "" {
-			if play != "" {
-				return "", "", fmt.Errorf("multiple active play effects")
-			}
-			play = definition.PlayEffect
-		}
-		if definition.WinnerEffect != "" {
-			if winner != "" {
-				return "", "", fmt.Errorf("multiple active winner effects")
-			}
-			winner = definition.WinnerEffect
-		}
+	play, err := resolved.Effect(MechanicPlayRestriction)
+	if err != nil {
+		return "", "", err
 	}
-	if winner == "" {
-		return "", "", fmt.Errorf("no active winner effect")
+	winner, err := resolved.Effect(MechanicRankComparison)
+	if err != nil {
+		return "", "", err
 	}
-	return play, winner, nil
+	if _, err = resolved.Effect(MechanicWinnerEligibility); err != nil {
+		return "", "", err
+	}
+	playEffect := EffectFollow
+	if play.Value == ValueAnySuit {
+		playEffect = EffectAnySuit
+	}
+	winnerEffect := EffectHighLead
+	if winner.Value == ValueLow {
+		winnerEffect = EffectLowLead
+	}
+	return playEffect, winnerEffect, nil
 }
 
-func trickWinner(plays []Play, effect EffectKind) (SeatID, error) {
+func trickWinner(plays []Play, effect EffectKind, eligibility EffectValue) (SeatID, error) {
 	if len(plays) == 0 {
 		return "", fmt.Errorf("empty trick")
 	}
@@ -333,7 +346,7 @@ func trickWinner(plays []Play, effect EffectKind) (SeatID, error) {
 		if !ok {
 			return "", fmt.Errorf("unknown played card")
 		}
-		if card.Suit != lead.Suit {
+		if eligibility == ValueLeadSuit && card.Suit != lead.Suit {
 			continue
 		}
 		if (effect == EffectHighLead && card.Rank > winningRank) || (effect == EffectLowLead && card.Rank < winningRank) {
@@ -345,22 +358,22 @@ func trickWinner(plays []Play, effect EffectKind) (SeatID, error) {
 
 func cloneState(state MatchState) MatchState {
 	next := state
-	next.Seats = append([]Seat(nil), state.Seats...)
+	next.Seats = slices.Clone(state.Seats)
 	next.Hands = make(map[SeatID][]CardID, len(state.Hands))
 	for id, hand := range state.Hands {
-		next.Hands[id] = append([]CardID(nil), hand...)
+		next.Hands[id] = slices.Clone(hand)
 	}
 	next.Captured = make(map[SeatID][]CardID, len(state.Captured))
 	for id, cards := range state.Captured {
-		next.Captured[id] = append([]CardID(nil), cards...)
+		next.Captured[id] = slices.Clone(cards)
 	}
-	next.StandardDraw = append([]CardID(nil), state.StandardDraw...)
-	next.RuleDraw = append([]RuleID(nil), state.RuleDraw...)
-	next.CurrentTrick = append([]Play(nil), state.CurrentTrick...)
-	next.Field = append([]RuleInstance(nil), state.Field...)
+	next.StandardDraw = slices.Clone(state.StandardDraw)
+	next.RuleDraw = slices.Clone(state.RuleDraw)
+	next.CurrentTrick = slices.Clone(state.CurrentTrick)
+	next.Field = slices.Clone(state.Field)
 	next.Shuffles = make([]ShuffleRecord, len(state.Shuffles))
 	for i, record := range state.Shuffles {
-		next.Shuffles[i] = ShuffleRecord{Kind: record.Kind, Order: append([]string(nil), record.Order...)}
+		next.Shuffles[i] = ShuffleRecord{Kind: record.Kind, Order: slices.Clone(record.Order)}
 	}
 	return next
 }

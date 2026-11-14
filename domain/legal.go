@@ -14,23 +14,32 @@ func LegalCards(view PlayerView, catalog Catalog) ([]CardID, error) {
 	if view.Seat != view.Public.Turn {
 		return nil, transitionError(ErrNotYourTurn, "another seat has the turn")
 	}
-	var effect SuitEffect
-	for _, rule := range view.Public.Rules {
-		if !rule.Active {
-			continue
-		}
-		definition, ok := catalog.Definition(rule.Instance.DefinitionID)
-		if !ok || definition.Status != StatusSupported {
-			return nil, fmt.Errorf("unknown active rule %s", rule.Instance.DefinitionID)
-		}
-		if definition.PlayEffect != "" {
-			if effect != "" {
-				return nil, fmt.Errorf("multiple active play effects")
-			}
-			effect = definition.PlayEffect
-		}
+	effective, err := EffectiveForView(view.Public, catalog)
+	if err != nil {
+		return nil, err
+	}
+	rule, err := effective.Effect(MechanicPlayRestriction)
+	if err != nil {
+		return nil, err
+	}
+	effect := EffectFollow
+	if rule.Value == ValueAnySuit {
+		effect = EffectAnySuit
 	}
 	return legalCardsForHand(view.Hand, view.Public.CurrentTrick, effect)
+}
+
+// EffectiveForView uses the public projection; fixture views may omit the
+// effective list, in which case the same interpreter derives it from history.
+func EffectiveForView(view PublicView, catalog Catalog) (RuleResolution, error) {
+	if len(view.Effective) > 0 {
+		return RuleResolution{History: view.Rules, ActiveField: view.ActiveField, Effective: view.Effective}, nil
+	}
+	field := make([]RuleInstance, len(view.Rules))
+	for i, r := range view.Rules {
+		field[i] = r.Instance
+	}
+	return ResolveRules(field, catalog, Config{HandSize: view.HandSize, RevealEvery: view.RevealEvery, MaxHands: view.MaxHands})
 }
 
 func legalCardsForHand(hand []CardID, trick []Play, effect SuitEffect) ([]CardID, error) {

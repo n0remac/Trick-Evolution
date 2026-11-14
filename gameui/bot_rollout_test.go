@@ -197,9 +197,8 @@ func completedOffSuitObservation(t *testing.T, noFollow bool) BotObservation {
 			state.StandardDraw = append(state.StandardDraw, card.ID)
 		}
 	}
-	state.Field = append(state.Field, domain.RuleInstance{InstanceID: "rule:follow", DefinitionID: domain.RuleFollowSuit, Sequence: 1})
 	if noFollow {
-		state.Field = append(state.Field, domain.RuleInstance{InstanceID: "rule:nofollow", DefinitionID: domain.RuleNoFollowRequired, Sequence: 2})
+		state.Field = append(state.Field, domain.RuleInstance{InstanceID: "rule:nofollow", DefinitionID: domain.RuleNoFollowRequired, Sequence: len(state.Field)})
 	}
 	state.RuleDraw = nil
 	for _, rule := range catalog.RuleDeck() {

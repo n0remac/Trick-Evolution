@@ -12,64 +12,79 @@ func (identityShuffle) Shuffle(_ int, _ func(i, j int)) {}
 func TestStandardDeckUniqueAndStable(t *testing.T) {
 	deck := StandardDeck()
 	if len(deck) != 52 || !reflect.DeepEqual(deck, StandardDeck()) {
-		t.Fatal("standard deck is not stable and complete")
+		t.Fatal("standard deck changed")
 	}
 	seen := map[CardID]bool{}
 	for _, card := range deck {
 		if seen[card.ID] || card.Rank < 2 || card.Rank > 14 {
-			t.Fatalf("invalid card: %+v", card)
+			t.Fatalf("invalid card %+v", card)
 		}
 		seen[card.ID] = true
 	}
 }
 
-func TestSeededSetupAndReplay(t *testing.T) {
+func TestStage1SetupReplayAndProjection(t *testing.T) {
 	ids := []SeatID{"north", "east", "south", "west"}
+	cfg := DefaultConfig()
 	catalog := DefaultCatalog()
-	a, err := NewMatch(ids, DefaultConfig(), catalog, SeededShuffle(73))
+	a, err := NewMatch(ids, cfg, catalog, SeededShuffle(73))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := NewMatch(ids, DefaultConfig(), catalog, SeededShuffle(73))
+	b, err := NewMatch(ids, cfg, catalog, SeededShuffle(73))
 	if err != nil || !reflect.DeepEqual(a, b) {
-		t.Fatalf("same seed changed setup: %v", err)
+		t.Fatal("seeded setup diverged", err)
 	}
-	replay, err := ReplayMatch(ids, DefaultConfig(), catalog, a.Shuffles)
+	replay, err := ReplayMatch(ids, cfg, catalog, a.Shuffles)
 	if err != nil || !reflect.DeepEqual(a, replay) {
-		t.Fatalf("recorded replay changed setup: %v", err)
+		t.Fatal("replay diverged", err)
 	}
-	if a.HandNumber != 1 || a.TrickNumber != 1 || a.CompletedHands != 0 || a.Phase != PhasePlayingTrick || a.Dealer != "north" || a.Leader != "east" || a.Turn != "east" {
-		t.Fatalf("incorrect initial state: %+v", a)
+	if a.Dealer != "north" || a.Leader != "east" || a.Turn != "east" || len(a.RuleDraw) != 0 || len(a.StandardDraw) != 52-cfg.HandSize*len(ids) {
+		t.Fatalf("bad setup %+v", a)
 	}
-	if len(a.RuleDraw) != 3 || len(a.Field) != 1 || a.Field[0].DefinitionID != RuleHighCardWins {
-		t.Fatalf("incorrect rule setup: %+v", a)
-	}
-	seen := map[CardID]bool{}
 	for _, id := range ids {
-		if len(a.Hands[id]) != 5 {
-			t.Fatalf("%s has %d cards", id, len(a.Hands[id]))
-		}
-		for _, card := range a.Hands[id] {
-			if seen[card] {
-				t.Fatalf("duplicate dealt card %s", card)
-			}
-			seen[card] = true
+		if len(a.Hands[id]) != cfg.HandSize {
+			t.Fatalf("hand %s", id)
 		}
 	}
-	for _, card := range a.StandardDraw {
-		if seen[card] {
-			t.Fatalf("duplicate draw card %s", card)
-		}
-		seen[card] = true
+	view, err := ProjectPublic(a, catalog)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(seen) != 52 {
-		t.Fatalf("card conservation: %d", len(seen))
+	if len(view.ActiveField) != 2 || view.ActiveField[0].Instance.DefinitionID != RuleFollowSuit || view.ActiveField[1].Instance.DefinitionID != RuleHighCardWins {
+		t.Fatalf("visible field %+v", view.ActiveField)
+	}
+	if len(view.Rules) != 15 || len(view.Effective) != 16 {
+		t.Fatalf("baseline history/effects %d/%d", len(view.Rules), len(view.Effective))
+	}
+	for _, want := range []struct {
+		mechanic Mechanic
+		number   int
+	}{{MechanicHandSize, cfg.HandSize}, {MechanicHandLimit, cfg.MaxHands}, {MechanicReveal, cfg.RevealEvery}} {
+		r, err := ResolveRules(a.Field, catalog, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		effect, err := r.Effect(want.mechanic)
+		if err != nil || effect.Number != want.number {
+			t.Fatalf("%s = %+v %v", want.mechanic, effect, err)
+		}
 	}
 	bad := append([]ShuffleRecord(nil), a.Shuffles...)
 	bad[0].Order = append([]string(nil), bad[0].Order...)
 	bad[0].Order[0] = bad[0].Order[1]
-	if _, err := ReplayMatch(ids, DefaultConfig(), catalog, bad); err == nil {
-		t.Fatal("duplicate recorded card accepted")
+	if _, err := ReplayMatch(ids, cfg, catalog, bad); err == nil {
+		t.Fatal("duplicate card accepted")
+	}
+	old := catalog
+	old.Version = 1
+	if _, err := ReplayMatch(ids, cfg, old, a.Shuffles); err == nil {
+		t.Fatal("old catalog accepted")
+	}
+	oldRecord := append([]ShuffleRecord(nil), a.Shuffles...)
+	oldRecord[1].Order = []string{string(RuleLowCardWins)}
+	if _, err := ReplayMatch(ids, cfg, catalog, oldRecord); err == nil {
+		t.Fatal("old rule shuffle accepted")
 	}
 }
 
@@ -78,12 +93,11 @@ func TestInjectedFixtureDeal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(state.Hands["b"], []CardID{"std:H:02", "std:H:04", "std:H:06", "std:H:08", "std:H:10"}) ||
-		!reflect.DeepEqual(state.Hands["a"], []CardID{"std:H:03", "std:H:05", "std:H:07", "std:H:09", "std:H:11"}) {
-		t.Fatalf("clockwise one-at-a-time deal changed: %+v", state.Hands)
+	if !reflect.DeepEqual(state.Hands["b"], []CardID{"std:H:02", "std:H:04", "std:H:06", "std:H:08", "std:H:10"}) || !reflect.DeepEqual(state.Hands["a"], []CardID{"std:H:03", "std:H:05", "std:H:07", "std:H:09", "std:H:11"}) {
+		t.Fatalf("deal changed %+v", state.Hands)
 	}
-	if !reflect.DeepEqual(state.RuleDraw, []RuleID{RuleFollowSuit, RuleNoFollowRequired, RuleLowCardWins}) {
-		t.Fatalf("rule catalog order changed: %+v", state.RuleDraw)
+	if len(state.RuleDraw) != 0 {
+		t.Fatal("default evolution deck should be empty")
 	}
 }
 
@@ -92,123 +106,288 @@ func TestCatalogValidation(t *testing.T) {
 	if err := catalog.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Definitions) != 55 {
-		t.Fatalf("expected all 55 printed entries, got %d", len(catalog.Definitions))
+	if len(catalog.Definitions) != 68 {
+		t.Fatalf("catalog entries %d", len(catalog.Definitions))
 	}
-	for _, d := range catalog.Definitions {
-		if d.Status == StatusUnsupported && d.InDeck {
-			t.Fatalf("unsupported rule in deck: %s", d.ID)
-		}
+	if len(catalog.RuleDeck()) != 0 {
+		t.Fatal("default deck not empty")
 	}
 	cases := map[string]func(*Catalog){
-		"duplicate ID":        func(c *Catalog) { c.Definitions = append(c.Definitions, c.Definitions[0]) },
-		"unknown effect":      func(c *Catalog) { c.Definitions[0].PlayEffect = "unrecognized" },
-		"bad parameter":       func(c *Catalog) { c.Definitions[0].Parameters.LeadSuitOnly = true },
-		"unknown override":    func(c *Catalog) { c.Definitions[1].Overrides = []RuleID{"missing"} },
-		"unsupported in deck": func(c *Catalog) { c.Definitions[2].InDeck = true },
-		"unknown version":     func(c *Catalog) { c.Version++ },
+		"duplicate":        func(c *Catalog) { c.Definitions = append(c.Definitions, c.Definitions[0]) },
+		"unknown effect":   func(c *Catalog) { c.Definitions[13].Effects[0].Value = "unknown" },
+		"unknown target":   func(c *Catalog) { c.Definitions[14].Overrides = []RuleID{"missing"} },
+		"unsupported draw": func(c *Catalog) { c.Definitions[15].InDeck = true },
+		"starter in draw":  func(c *Catalog) { c.Definitions[13].InDeck = true },
+		"old version":      func(c *Catalog) { c.Version = 1 },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
-			copyCatalog := DefaultCatalog()
-			change(&copyCatalog)
-			if err := copyCatalog.Validate(); err == nil {
+			c := DefaultCatalog()
+			change(&c)
+			if err := c.Validate(); err == nil {
 				t.Fatal("invalid catalog accepted")
 			}
 		})
 	}
 }
 
-func TestRevealCadenceAndOverride(t *testing.T) {
-	for _, interval := range []int{3, 4, 5} {
-		t.Run(string(rune('0'+interval)), func(t *testing.T) {
-			cfg := DefaultConfig()
-			cfg.RevealEvery = interval
-			catalog := DefaultCatalog()
-			state, err := NewMatch([]SeatID{"a", "b"}, cfg, catalog, SeededShuffle(1))
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Fixture draw order makes the additive rule first and its explicit
-			// override second, regardless of the setup seed.
-			state.RuleDraw = []RuleID{RuleFollowSuit, RuleNoFollowRequired, RuleLowCardWins}
-			for completed := 1; completed <= 2*interval; completed++ {
-				before := state
-				var revealed *RuleInstance
-				state, revealed, err = RecordCompletedHand(state, catalog)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if before.CompletedHands != completed-1 {
-					t.Fatal("input mutated")
-				}
-				if completed%interval == 0 {
-					if revealed == nil || revealed.IntroducedAfterHand != completed {
-						t.Fatalf("missing reveal at %d", completed)
-					}
-				} else if revealed != nil {
-					t.Fatalf("early reveal at %d", completed)
-				}
-			}
-			resolved, err := ResolveField(state.Field, catalog)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(resolved) != 3 || !resolved[0].Active || resolved[1].Active || !resolved[2].Active || !reflect.DeepEqual(resolved[1].OverriddenBy, []string{resolved[2].Instance.InstanceID}) {
-				t.Fatalf("incorrect override projection: %+v", resolved)
-			}
-			if state.Field[1].DefinitionID != RuleFollowSuit {
-				t.Fatal("overridden instance removed")
-			}
-		})
-	}
+func appendRule(field []RuleInstance, id RuleID) []RuleInstance {
+	return append(field, RuleInstance{InstanceID: "test:" + string(id) + ":" + string(rune('a'+len(field))), DefinitionID: id, Sequence: len(field)})
 }
 
-func TestInvalidRevealLeavesStateUntouched(t *testing.T) {
-	catalog := DefaultCatalog()
-	state, err := NewMatch([]SeatID{"a", "b"}, DefaultConfig(), catalog, SeededShuffle(3))
+func TestOrderedReplacementAndBaselineRestoration(t *testing.T) {
+	c := DefaultCatalog()
+	s, err := NewMatch([]SeatID{"a", "b"}, DefaultConfig(), c, identityShuffle{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	state.CompletedHands = 2
-	state.RuleDraw = []RuleID{"missing"}
-	before := state
-	_, _, err = RecordCompletedHand(state, catalog)
-	if err == nil || !reflect.DeepEqual(state, before) {
-		t.Fatal("invalid reveal mutated input or succeeded")
-	}
-}
-
-func TestLowCardExplicitlyOverridesBaseline(t *testing.T) {
-	catalog := DefaultCatalog()
-	field := []RuleInstance{
-		{InstanceID: "initial", DefinitionID: RuleHighCardWins, Sequence: 0},
-		{InstanceID: "additive", DefinitionID: RuleFollowSuit, Sequence: 1},
-		{InstanceID: "low", DefinitionID: RuleLowCardWins, Sequence: 2},
-	}
-	resolved, err := ResolveField(field, catalog)
+	base := len(s.Field)
+	s.Field = appendRule(s.Field, RuleLowCardWins)
+	s.Field = appendRule(s.Field, RuleHighCardWins)
+	r, err := ResolveRules(s.Field, c, s.Config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved[0].Active || !reflect.DeepEqual(resolved[0].OverriddenBy, []string{"low"}) || !resolved[1].Active || !resolved[2].Active {
-		t.Fatalf("unexpected resolved field: %+v", resolved)
+	if r.History[base].Active || !r.History[base+1].Active || r.History[base].InactiveReason != "superseded" {
+		t.Fatalf("replacement history %+v", r.History[base:])
 	}
-	if len(field[0].InstanceID) == 0 || field[0].DefinitionID != RuleHighCardWins {
-		t.Fatal("field was mutated")
+	s.Field[base+1].Removed = true
+	r, err = ResolveRules(s.Field, c, s.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rank, _ := r.Effect(MechanicRankComparison)
+	if rank.Value != ValueHigh || rank.InstanceID != s.Field[base-1].InstanceID || r.History[base].Active {
+		t.Fatalf("removal revived older evolution %+v", r)
+	}
+	s.Field[base].Removed = true
+	r, err = ResolveRules(s.Field, c, s.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.History) != base+2 || len(r.ActiveField) != 2 {
+		t.Fatal("history was discarded")
+	}
+}
+
+func TestRevealSkipsIneligibleAndStopsOnEmptyDeck(t *testing.T) {
+	c := DefaultCatalog()
+	for i := range c.Definitions {
+		switch c.Definitions[i].ID {
+		case RuleLowCardWins:
+			c.Definitions[i].InDeck = true
+			c.Definitions[i].Prerequisites = []RuleID{RuleNoFollowRequired}
+		case RuleNoFollowRequired:
+			c.Definitions[i].InDeck = true
+		}
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewMatch([]SeatID{"a", "b"}, DefaultConfig(), c, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(s.RuleDraw, []RuleID{RuleNoFollowRequired, RuleLowCardWins}) {
+		t.Fatalf("deck %+v", s.RuleDraw)
+	}
+	s.RuleDraw = []RuleID{RuleLowCardWins, RuleNoFollowRequired}
+	for i := 0; i < 3; i++ {
+		var revealed *RuleInstance
+		s, revealed, err = RecordCompletedHand(s, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 2 && (revealed == nil || revealed.DefinitionID != RuleNoFollowRequired) {
+			t.Fatalf("first reveal %+v", revealed)
+		}
+	}
+	if !reflect.DeepEqual(s.RuleDraw, []RuleID{RuleLowCardWins}) {
+		t.Fatalf("deferred rule lost %+v", s.RuleDraw)
+	}
+	for i := 0; i < 3; i++ {
+		var revealed *RuleInstance
+		s, revealed, err = RecordCompletedHand(s, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 2 && (revealed == nil || revealed.DefinitionID != RuleLowCardWins) {
+			t.Fatalf("second reveal %+v", revealed)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		var revealed *RuleInstance
+		s, revealed, err = RecordCompletedHand(s, c)
+		if err != nil || revealed != nil {
+			t.Fatalf("empty deck reveal %+v %v", revealed, err)
+		}
+	}
+	if s.CompletedHands != 9 {
+		t.Fatal("hand count changed")
+	}
+}
+
+func TestDependentRuleBecomesInactive(t *testing.T) {
+	c := DefaultCatalog()
+	for i := range c.Definitions {
+		if c.Definitions[i].ID == RuleLowCardWins {
+			c.Definitions[i].Prerequisites = []RuleID{RuleNoFollowRequired}
+		}
+	}
+	s, err := NewMatch([]SeatID{"a", "b"}, DefaultConfig(), c, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Field = appendRule(s.Field, RuleNoFollowRequired)
+	s.Field = appendRule(s.Field, RuleLowCardWins)
+	r, err := ResolveRules(s.Field, c, s.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rank, _ := r.Effect(MechanicRankComparison)
+	if rank.Value != ValueLow {
+		t.Fatal("dependent did not activate")
+	}
+	s.Field = appendRule(s.Field, RuleFollowSuit)
+	r, err = ResolveRules(s.Field, c, s.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rank, _ = r.Effect(MechanicRankComparison)
+	if rank.Value != ValueHigh || r.History[len(s.Field)-2].InactiveReason != "prerequisite_inactive" {
+		t.Fatalf("dependency loss %+v", r)
 	}
 }
 
 func TestConfigAndSeatValidation(t *testing.T) {
-	catalog := DefaultCatalog()
+	c := DefaultCatalog()
 	for _, cfg := range []Config{{HandSize: 5, RevealEvery: 2}, {HandSize: 5, RevealEvery: 6}, {HandSize: 14, RevealEvery: 3}} {
-		if _, err := NewMatch([]SeatID{"a", "b"}, cfg, catalog, SeededShuffle(1)); err == nil {
-			t.Fatalf("accepted invalid config %+v", cfg)
+		if _, err := NewMatch([]SeatID{"a", "b"}, cfg, c, SeededShuffle(1)); err == nil {
+			t.Fatalf("accepted %+v", cfg)
 		}
 	}
-	if _, err := NewMatch([]SeatID{"a", "a"}, DefaultConfig(), catalog, SeededShuffle(1)); err == nil {
+	if _, err := NewMatch([]SeatID{"a", "a"}, DefaultConfig(), c, SeededShuffle(1)); err == nil {
 		t.Fatal("duplicate seats accepted")
 	}
-	if _, err := NewMatch([]SeatID{"a"}, DefaultConfig(), catalog, SeededShuffle(1)); err == nil {
-		t.Fatal("one seat accepted")
+}
+
+func TestHiddenPrerequisiteAndIneligibleDeckRetention(t *testing.T) {
+	c := DefaultCatalog()
+	for i := range c.Definitions {
+		if c.Definitions[i].ID == RuleLowCardWins {
+			c.Definitions[i].InDeck = true
+			c.Definitions[i].Prerequisites = []RuleID{RuleNoTrump, RuleNoFollowRequired}
+		}
+	}
+	s, err := NewMatch([]SeatID{"a", "b"}, DefaultConfig(), c, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		var revealed *RuleInstance
+		s, revealed, err = RecordCompletedHand(s, c)
+		if err != nil || revealed != nil {
+			t.Fatalf("ineligible card revealed: %+v %v", revealed, err)
+		}
+	}
+	if len(s.RuleDraw) != 1 || s.RuleDraw[0] != RuleLowCardWins {
+		t.Fatal("ineligible card was lost")
+	}
+	s.Field = appendRule(s.Field, RuleNoFollowRequired)
+	for i := 0; i < 3; i++ {
+		var revealed *RuleInstance
+		s, revealed, err = RecordCompletedHand(s, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 2 && (revealed == nil || revealed.DefinitionID != RuleLowCardWins) {
+			t.Fatal("hidden prerequisite did not satisfy reveal")
+		}
+	}
+}
+
+func TestDependentReactivatesWhenStartingPrerequisiteReturns(t *testing.T) {
+	c := DefaultCatalog()
+	for i := range c.Definitions {
+		if c.Definitions[i].ID == RuleLowCardWins {
+			c.Definitions[i].Prerequisites = []RuleID{RuleFollowSuit}
+		}
+	}
+	s, err := NewMatch([]SeatID{"a", "b"}, DefaultConfig(), c, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Field = appendRule(s.Field, RuleLowCardWins)
+	s.Field = appendRule(s.Field, RuleNoFollowRequired)
+	r, err := ResolveRules(s.Field, c, s.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rank, _ := r.Effect(MechanicRankComparison)
+	if rank.Value != ValueHigh {
+		t.Fatal("dependent stayed active after prerequisite replacement")
+	}
+	s.Field[len(s.Field)-1].Removed = true
+	r, err = ResolveRules(s.Field, c, s.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rank, _ = r.Effect(MechanicRankComparison)
+	if rank.Value != ValueLow {
+		t.Fatal("dependent failed to reactivate with starting prerequisite")
+	}
+}
+
+func TestFinalCadenceDoesNotReveal(t *testing.T) {
+	c := DefaultCatalog()
+	for i := range c.Definitions {
+		if c.Definitions[i].ID == RuleLowCardWins {
+			c.Definitions[i].InDeck = true
+		}
+	}
+	cfg := Config{HandSize: 5, RevealEvery: 3, MaxHands: 6}
+	s, err := NewMatch([]SeatID{"a", "b"}, cfg, c, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.CompletedHands = 5
+	next, revealed, err := RecordCompletedHand(s, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revealed != nil || next.CompletedHands != 6 || len(next.RuleDraw) != 1 || len(next.Field) != len(s.Field) {
+		t.Fatal("final hand introduced an unused rule")
+	}
+}
+
+func TestMechanicSpecificReplacementKeepsIndependentEffect(t *testing.T) {
+	c := DefaultCatalog()
+	const eligibility RuleID = "test.eligibility"
+	c.Definitions = append(c.Definitions, RuleDefinition{ID: eligibility, Title: "Eligibility Fixture", Text: "Lead suit remains eligible.", Category: "rule", Status: StatusSupported, FieldCategory: FieldTrick, Effects: []TypedEffect{{Mechanic: MechanicWinnerEligibility, Value: ValueLeadSuit}}, Overrides: []RuleID{RuleFollowSuit}, StartingVisibility: NotStarting})
+	s, err := NewMatch([]SeatID{"a", "b"}, DefaultConfig(), c, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Field = appendRule(s.Field, eligibility)
+	r, err := ResolveRules(s.Field, c, s.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	play, _ := r.Effect(MechanicPlayRestriction)
+	eligible, _ := r.Effect(MechanicWinnerEligibility)
+	if play.Source != RuleFollowSuit || eligible.Source != eligibility || !r.History[len(s.Field)-3].Active {
+		t.Fatalf("independent effect was lost: %+v", r)
+	}
+	if !reflect.DeepEqual(r.History[len(s.Field)-3].ActiveEffects, []Mechanic{MechanicPlayRestriction}) {
+		t.Fatalf("follow suit effects %+v", r.History[len(s.Field)-3])
+	}
+	s.Field[len(s.Field)-1].Removed = true
+	r, err = ResolveRules(s.Field, c, s.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eligible, _ = r.Effect(MechanicWinnerEligibility)
+	if eligible.Source != RuleFollowSuit || len(r.History[len(s.Field)-3].ActiveEffects) != 2 {
+		t.Fatal("partial replacement did not restore its starting effect")
 	}
 }

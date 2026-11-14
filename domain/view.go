@@ -25,6 +25,8 @@ type PublicView struct {
 	EndedEarly     bool
 	EndedBy        SeatID
 	Rules          []ResolvedRule
+	ActiveField    []ResolvedRule
+	Effective      []EffectiveEffect
 	RulesRemaining int
 	Winners        []SeatID
 }
@@ -40,14 +42,15 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 	if state.CatalogVersion != catalog.Version {
 		return PublicView{}, transitionError(ErrInvalidState, "catalog version mismatch")
 	}
-	rules, err := ResolveField(state.Field, catalog)
+	rules, err := ResolveRules(state.Field, catalog, state.Config)
 	if err != nil {
 		return PublicView{}, transitionError(ErrInvalidState, err.Error())
 	}
+	if err := rules.ValidateMatchEffects(state.Config); err != nil { return PublicView{},transitionError(ErrInvalidState,err.Error()) }
 	view := PublicView{Revision: state.Revision, Phase: state.Phase, HandSize: state.Config.HandSize, MaxHands: state.Config.MaxHands, RevealEvery: state.Config.RevealEvery, Dealer: state.Dealer, Leader: state.Leader,
 		Turn: state.Turn, HandNumber: state.HandNumber, TrickNumber: state.TrickNumber, CompletedHands: state.CompletedHands,
 		EndedEarly: state.EndedEarly, EndedBy: state.EndedBy,
-		Rules: rules, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...),
+		Rules: rules.History, ActiveField: rules.ActiveField, Effective: rules.Effective, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...),
 		Seats: make([]PublicSeat, len(state.Seats))}
 	if state.Phase == PhaseGameComplete {
 		view.Winners = gameWinners(state.Seats)

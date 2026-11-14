@@ -167,8 +167,8 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		}
 		return string(id)
 	}
-	rules := make([]*h.Node, 0, len(public.Rules))
-	for _, resolved := range public.Rules {
+	rules := make([]*h.Node, 0, len(public.ActiveField))
+	for _, resolved := range public.ActiveField {
 		definition, ok := catalog.Definition(resolved.Instance.DefinitionID)
 		title := string(resolved.Instance.DefinitionID)
 		if ok {

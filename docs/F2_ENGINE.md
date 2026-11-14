@@ -1,5 +1,7 @@
 # F2 pure game engine
 
+> Historical pre-Stage-1 behavior and evidence. See [Basic Play and Rule Field Stage 1](BASIC_RULES_STAGE1.md) for current rules and default deck.
+
 The `domain` package now runs a complete provisional match without transport or rendering. The existing `cards/` handlers still run their original prototype; F3 will replace their game mutations with `domain.Step`.
 
 ## Match and action contract

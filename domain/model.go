@@ -175,7 +175,15 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 	for i, id := range rules {
 		ruleOrder[i] = string(id)
 	}
-	return matchFromOrders(ids, cfg, catalog.Version, standardOrder, ruleOrder), nil
+	state := matchFromOrders(ids, cfg, catalog, standardOrder, ruleOrder)
+	resolved, err := ResolveRules(state.Field, catalog, cfg)
+	if err != nil {
+		return MatchState{}, err
+	}
+	if err := resolved.ValidateMatchEffects(cfg); err != nil {
+		return MatchState{}, err
+	}
+	return state, nil
 }
 
 // ReplayMatch verifies recorded deck orders and reconstructs the same first deal.
@@ -207,7 +215,15 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 		}
 		seen[id] = true
 	}
-	return matchFromOrders(ids, cfg, catalog.Version, records[0].Order, records[1].Order), nil
+	state := matchFromOrders(ids, cfg, catalog, records[0].Order, records[1].Order)
+	resolved, err := ResolveRules(state.Field, catalog, cfg)
+	if err != nil {
+		return MatchState{}, err
+	}
+	if err := resolved.ValidateMatchEffects(cfg); err != nil {
+		return MatchState{}, err
+	}
+	return state, nil
 }
 
 func standardIDs() []string {
@@ -236,12 +252,17 @@ func validateOrder(got, expected []string) error {
 	return nil
 }
 
-func matchFromOrders(ids []SeatID, cfg Config, version int, standardOrder, ruleOrder []string) MatchState {
-	s := MatchState{CatalogVersion: version, Config: cfg, Phase: PhasePlayingTrick,
+func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, ruleOrder []string) MatchState {
+	s := MatchState{CatalogVersion: catalog.Version, Config: cfg, Phase: PhasePlayingTrick,
 		Seats: make([]Seat, len(ids)), Hands: make(map[SeatID][]CardID, len(ids)), Captured: make(map[SeatID][]CardID, len(ids)),
 		RuleDraw: make([]RuleID, len(ruleOrder)), HandNumber: 1, TrickNumber: 1,
-		Field:    []RuleInstance{{InstanceID: "rule:initial:0", DefinitionID: RuleHighCardWins, Sequence: 0, IntroducedAfterHand: 0}},
+		Field:    []RuleInstance{},
 		Shuffles: []ShuffleRecord{{Kind: StandardDeckKind, Order: append([]string(nil), standardOrder...)}, {Kind: RuleDeckKind, Order: append([]string(nil), ruleOrder...)}},
+	}
+	for _, definition := range catalog.Definitions {
+		if definition.StartActive {
+			s.Field = append(s.Field, RuleInstance{InstanceID: fmt.Sprintf("rule:initial:%d", len(s.Field)), DefinitionID: definition.ID, Sequence: len(s.Field), Starting: true})
+		}
 	}
 	for i, id := range ids {
 		s.Seats[i].ID = id
