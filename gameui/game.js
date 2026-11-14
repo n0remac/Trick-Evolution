@@ -10,7 +10,9 @@
   let table = null;
   let runtimePromise = null;
   let selections = new Map();
-  let selected = null;
+  let displayedSeats = [];
+  let rulesOpen = false;
+  let submittedUpdate = 0;
   let sceneQueue = [];
   let presenting = false;
   let presentationEpoch = 0;
@@ -19,8 +21,7 @@
   const presentationLog = [];
   const tableShell = document.getElementById('table3d');
   const canvas = document.getElementById('table3d-canvas');
-  const play3d = document.getElementById('table3d-play');
-  const selectionLabel = document.getElementById('table3d-selection');
+  const seatLabels = document.getElementById('table3d-seats');
   const dropHint = document.getElementById('table3d-drop-hint');
   const markPresentation = (kind, id, ok = true) => {
     presentationLog.push({kind, id, ok, at: performance.now()});
@@ -28,29 +29,53 @@
   };
   window.__trickPresentation = () => ({pending: sceneQueue.length, presenting, history: presentationLog});
 
-  function clearSelection() {
-    selected = null;
-    play3d.disabled = true;
-    selectionLabel.textContent = 'Select a card on the table.';
+  function positionSeatLabels() {
+    if (!table) return;
+    const frame = tableShell.getBoundingClientRect();
+    displayedSeats.forEach((seat, index) => {
+      const label = seatLabels.children[index];
+      const point = table.projectPoint(seat.labelPosition);
+      const left = label.offsetWidth / 2 + 6, top = label.offsetHeight / 2 + 6;
+      label.style.left = `${Math.max(left, Math.min(frame.width - left, point.x - frame.left))}px`;
+      label.style.top = `${Math.max(top, Math.min(frame.height - top, point.y - frame.top))}px`;
+    });
   }
-  function picked(id) {
-    const entry = selections.get(id);
-    if (!entry) return;
-    selected = entry;
-    table.animate(entry.animation);
-    const form = [...document.querySelectorAll('.hand form')].find(f => f.querySelector('input[name=card]')?.value === entry.card);
-    play3d.disabled = !connected || !entry.legal || !form || !!form.querySelector('button')?.disabled;
-    selectionLabel.textContent = entry.legal ? `${entry.card.replaceAll(':', ' ')} selected.` : `${entry.card.replaceAll(':', ' ')} selected. Wait for your legal turn.`;
+
+  function showSeats(seats) {
+    displayedSeats = seats;
+    seatLabels.replaceChildren(...seats.map(seat => {
+      const label = document.createElement('div');
+      label.className = seat.turn ? 'table-seat current' : 'table-seat';
+      label.title = seat.name;
+      const name = document.createElement('strong');
+      name.textContent = seat.name;
+      const score = document.createElement('span');
+      score.textContent = `· ${seat.score} pts`;
+      label.setAttribute('aria-label', `${seat.name}, ${seat.score} points${seat.turn ? ', to play' : ''}`);
+      label.append(name, score);
+      return label;
+    }));
+    positionSeatLabels();
   }
+
+  function inputBlocked() {
+    return !connected || presenting || submittedUpdate === lastSceneUpdate;
+  }
+
   function submit(id) {
     const entry = selections.get(id);
-    if (!entry || !entry.legal || !connected) { table?.resetDrag(); return; }
-    const form = [...document.querySelectorAll('.hand form')].find(f => f.querySelector('input[name=card]')?.value === entry.card);
+    if (!entry || inputBlocked()) return;
+    if (!entry.legal) {
+      if (displayedSeats.some(seat => seat.self && seat.turn)) notice('Choose a legal card for this trick.');
+      return;
+    }
+    const screen = document.getElementById('screen');
+    if (Number(screen.dataset.update) !== lastSceneUpdate) return;
+    const form = [...screen.querySelectorAll('.play-commands form')].find(f => f.elements.card.value === entry.card);
     const button = form?.querySelector('button');
-    if (!button || button.disabled) { table?.resetDrag(); return; }
-    selected = entry;
-    button.click();
-    play3d.disabled = true;
+    if (!button || button.disabled) return;
+    submittedUpdate = lastSceneUpdate;
+    form.requestSubmit(button);
   }
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   async function drainScenes() {
@@ -64,9 +89,8 @@
         events.forEach(item => seenEvents.add(item.id));
         const cards = payload.selections || [];
         selections = new Map(cards.map(item => [item.pickId, item]));
-        clearSelection();
         tableShell.hidden = false;
-        if (!events.length || restoring || document.hidden) { table.apply(payload.scene, cards); restoring = false; continue; }
+        if (!events.length || restoring || document.hidden) { table.apply(payload.scene, cards); showSeats(payload.seats || []); restoring = false; continue; }
         table.apply(payload.presentationScene || payload.scene, cards);
         for (const event of events) {
           if (epoch !== presentationEpoch) break;
@@ -86,7 +110,10 @@
             if (event.motion?.steps?.length) await Promise.race([table.animate(event.motion), wait(1200)]);
           }
         }
-        if (epoch === presentationEpoch) table.apply(payload.scene, cards);
+        if (epoch === presentationEpoch) {
+          table.apply(payload.scene, cards);
+          showSeats(payload.seats || []);
+        }
       }
     } finally { if (epoch === presentationEpoch) { presenting = false; if (sceneQueue.length) drainScenes(); } }
   }
@@ -96,6 +123,7 @@
     presenting = false;
     restoring = true;
     seenEvents.clear();
+    submittedUpdate = 0;
     table?.cancel();
   }
   async function applyScene() {
@@ -103,9 +131,12 @@
     if (!screen) return;
     const update = Number(screen.dataset.update);
     if (!Number.isSafeInteger(update) || update <= lastSceneUpdate) return;
+    const rules = screen.querySelector("#game-rules");
+    if (rules) rules.open = rulesOpen;
     if (!screen.dataset.scene) {
+      rulesOpen = false;
+      showSeats([]);
       lastSceneUpdate = update;
-      clearSelection();
       resetPresentation();
       tableShell.hidden = true;
       selections = new Map();
@@ -120,7 +151,7 @@
         const {createRuntime} = await runtimePromise;
         if (document.querySelector('#screen[data-update]') !== screen) { applyScene(); return; }
         if (!table) {
-          table = createRuntime(canvas, {onSelect: picked, onDrop: submit, onDragState: valid => dropHint.classList.toggle('active', valid)});
+          table = createRuntime(canvas, {onSelect: submit, onDrop: submit, inputBlocked, onResize: positionSeatLabels, onDragState: valid => dropHint.classList.toggle('active', valid)});
           window.__trick3d = table; // Read-only browser smoke diagnostics.
         }
       }
@@ -135,9 +166,6 @@
     }
   }
   new MutationObserver(applyScene).observe(live, {childList: true, subtree: true});
-  play3d.addEventListener('click', () => {
-    if (selected) submit(selected.pickId); // Existing authenticated HTMX form carries revision and a fresh ID.
-  });
   window.addEventListener('pagehide', () => table?.dispose());
 
   const key = () => `trick-evolution:${room}`;
@@ -208,7 +236,6 @@
     if (event.detail.elt !== live) return;
     setConnection(false);
     resetPresentation();
-    play3d.disabled = true;
     if (session) notice('Connection lost. Reconnecting…');
   });
   document.body.addEventListener('htmx:wsConfigSend', event => {
@@ -222,7 +249,11 @@
   document.body.addEventListener('htmx:wsBeforeMessage', event => {
     const documentFragment = new DOMParser().parseFromString(event.detail.message, 'text/html');
     const screen = documentFragment.querySelector('#screen[data-update]');
-    if (!screen) return; // Errors update only the notice.
+    if (!screen) {
+      if (documentFragment.querySelector('#notice')) submittedUpdate = 0;
+      return;
+    }
+    rulesOpen = !!document.getElementById('game-rules')?.open;
     const update = Number(screen.dataset.update);
     if (!Number.isSafeInteger(update) || update <= lastUpdate) {
       event.preventDefault();

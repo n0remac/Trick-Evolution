@@ -26,71 +26,70 @@ h2 { margin: 0 0 .75rem; }
 .seat.current { outline: 2px solid #eec976; }
 .seat strong { display: block; }
 .tag { font-size: .75rem; color: #ffe09a; }
-.rules { display: flex; flex-wrap: wrap; gap: .5rem; }
-.rule { border: 1px solid #d6b878; border-radius: .6rem; padding: .55rem .7rem; background: #4c492d; }
-.rule.inactive { opacity: .55; text-decoration: line-through; }
-.table { min-height: 170px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .7rem; border: 2px dashed #6e9777; border-radius: 1rem; background: #1c4b32; margin: 1rem 0; padding: 1rem; }
-.hand { display: flex; flex-wrap: wrap; gap: .6rem; padding: .5rem 0; }
-.card { min-width: 72px; height: 108px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .2rem; border: 2px solid #d6d8d0; background: #fffdf4; color: #1c2921; border-radius: .55rem; box-shadow: 0 4px 8px #10251b77; font-size: 1.3rem; }
-.card.red { color: #ab302e; }
-.card small { font-size: .7rem; }
-.card:disabled { opacity: .65; }
-.status { margin: .7rem 0; font-weight: 650; }
-.table3d { margin: 1rem 0; border: 1px solid #759b80; border-radius: .9rem; overflow: hidden; background: #184332; }
-.table3d[hidden] { display: none; }
-.table3d canvas { display: block; width: 100%; height: clamp(240px, 48vw, 360px); touch-action: none; }
-.table3d-controls { display: flex; align-items: center; justify-content: space-between; gap: .7rem; padding: .6rem .8rem; }
-.table3d-controls span { min-width: 0; }
-@media (max-width: 600px) { .shell { padding: .75rem; } .card { min-width: 59px; height: 88px; } }
-/* The game uses the full safe viewport; the lobby keeps the document layout. */
-.shell:has(.table3d:not([hidden])) { position: relative; width: 100%; max-width: none; height: 100dvh; min-height: 420px; padding: 0; overflow: hidden; }
-.shell:has(.table3d:not([hidden])) .masthead { position: absolute; z-index: 4; top: env(safe-area-inset-top); left: max(.55rem, env(safe-area-inset-left)); right: max(.55rem, env(safe-area-inset-right)); padding: .3rem .5rem; border: 0; pointer-events: none; }
-.shell:has(.table3d:not([hidden])) .masthead h1 { font-size: clamp(.95rem, 2.5vw, 1.4rem); margin: 0; }
-.shell:has(.table3d:not([hidden])) .eyebrow { display: none; }
-.shell:has(.table3d:not([hidden])) .connection { font-size: .75rem; background: #10271fca; }
-.shell:has(.table3d:not([hidden])) #notice { position: absolute; z-index: 6; top: calc(env(safe-area-inset-top) + 2.2rem); left: .7rem; right: .7rem; padding: 0; min-height: 0; text-align: center; pointer-events: none; text-shadow: 0 1px 4px #07140e; }
-.table3d:not([hidden]) { position: absolute; inset: 0; margin: 0; border: 0; border-radius: 0; }
-.table3d canvas { width: 100%; height: 100%; touch-action: none; }
-.table3d-controls { position: absolute; z-index: 5; bottom: max(.4rem, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(96%, 440px); border: 1px solid #b5a970; border-radius: .9rem; background: #102b21e8; box-shadow: 0 5px 20px #08130ca8; }
-.table3d-controls span { font-size: .85rem; }
-.table3d-controls button { flex: none; padding: .65rem .75rem; }
-.table3d-drop-hint { display: none; position: absolute; z-index: 3; left: 50%; top: 53%; transform: translate(-50%, -50%); color: #fff1c4; background: #306b4bd9; border: 2px solid #ffe19a; border-radius: 2rem; padding: .35rem .75rem; pointer-events: none; text-align: center; box-shadow: 0 0 26px #f3d978aa; }
+
+@media (max-width: 600px) { .shell { padding: .75rem; } }
+
+/* The table fills the safe viewport during a match. */
+.shell:has(.table3d:not([hidden])) {
+  --hud-top: max(.6rem, env(safe-area-inset-top));
+  --hud-right: max(.6rem, env(safe-area-inset-right));
+  --hud-bottom: max(.6rem, env(safe-area-inset-bottom));
+  --hud-left: max(.6rem, env(safe-area-inset-left));
+  position: relative; width: 100%; max-width: none;
+  height: 100dvh; padding: 0; overflow: hidden;
+}
+.shell:has(.table3d:not([hidden])) .masthead { display: none; }
+.shell:has(.table3d:not([hidden])) #notice {
+  position: absolute; z-index: 2; top: var(--hud-top); left: 50%;
+  transform: translateX(-50%); width: max-content; max-width: min(50%, 24rem);
+  padding: .3rem .5rem; min-height: 0; text-align: center; font-size: .8rem;
+  border-radius: .55rem; background: #102b21ed; pointer-events: none;
+}
+.shell:has(.table3d:not([hidden])) #notice:empty { display: none; }
+.table3d { position: absolute; inset: 0; background: #122b23; }
+.table3d canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.table3d-seats { position: absolute; inset: 0; pointer-events: none; }
+.table-seat {
+  position: absolute; transform: translate(-50%, -50%);
+  display: flex; align-items: baseline; gap: .35rem; max-width: 42%;
+  padding: .22rem .45rem; border-radius: .45rem; background: #102b21ed;
+  border: 1px solid #719484; white-space: nowrap; font-size: clamp(.65rem, 2.8vw, .85rem);
+}
+.table-seat.current { border-color: #ffe09a; color: #ffe09a; }
+.table-seat strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.table-seat span { flex: none; }
+.table3d-drop-hint {
+  display: none; position: absolute; z-index: 1; left: 50%; top: 53%;
+  transform: translate(-50%, -50%); color: #fff1c4; background: #306b4bd9;
+  border: 2px solid #ffe19a; border-radius: 2rem; padding: .35rem .75rem;
+  pointer-events: none; text-align: center; box-shadow: 0 0 26px #f3d978aa;
+}
 .table3d-drop-hint.active { display: block; }
-.shell:has(.table3d:not([hidden])) #live { position: absolute; z-index: 3; top: calc(env(safe-area-inset-top) + 2.1rem); left: max(.5rem, env(safe-area-inset-left)); right: max(.5rem, env(safe-area-inset-right)); pointer-events: none; }
-.game-panel { background: none; border: 0; box-shadow: none; margin: 0; padding: .2rem; }
-.game-panel > .row:first-child { padding: .2rem .5rem; background: #102b21d9; border-radius: .55rem; }
-.game-panel > .row:first-child h2 { font-size: .9rem; margin: 0; }
-.game-panel > .status { display: inline-block; padding: .35rem .6rem; margin: .35rem 0; border-radius: .55rem; background: #102b21e5; color: #ffe09a; }
-.game-panel > .scoreboard { grid-template-columns: repeat(4,minmax(0,1fr)); gap: .3rem; }
-.game-panel > .scoreboard .seat { padding: .35rem; min-width: 0; background: #102b21df; font-size: .78rem; }
-.game-panel > .scoreboard .seat span { display: block; font-size: .69rem; }
-.game-panel > .panel { margin: .35rem 0; padding: .4rem .55rem; background: #102b21d9; box-shadow: none; }
-.game-panel > .panel h2 { font-size: .8rem; margin: 0 0 .25rem; }
-.game-panel > .panel .muted { display: none; }
-.game-panel .rules { flex-wrap: nowrap; overflow-x: auto; }
-.game-panel .rule { flex: none; max-width: min(240px,60vw); padding: .22rem .4rem; font-size: .73rem; cursor: pointer; pointer-events: auto; }
-.game-panel .rule summary { list-style: none; }
-.game-panel .rule summary::-webkit-details-marker { display: none; }
-.game-panel .rule p { margin: .35rem 0 0; white-space: normal; }
-.game-panel .rule.inactive { opacity: .7; text-decoration: none; border-style: dashed; }
-.game-panel .text-table { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
-.game-panel .hand-fallback { position: absolute; right: .3rem; top: calc(100dvh - 10.5rem); max-height: 8rem; overflow: auto; padding: .25rem .45rem; border-radius: .5rem; background: #102b21e3; font-size: .7rem; pointer-events: auto; }
-.game-panel .hand-fallback summary { cursor: pointer; }
-.game-panel .hand-fallback h2 { font-size: .8rem; margin: .2rem 0; }
-.game-panel .hand-fallback .card { min-width: 44px; height: 58px; font-size: .9rem; }
-.game-panel > .row:last-child, .game-panel > form, .game-panel > button { pointer-events: auto; }
-.game-panel > .row:last-child button { font-size: .68rem; padding: .3rem .55rem; }
-@media (max-width: 600px) {
- .game-panel > .scoreboard .seat { font-size: .7rem; }
- .game-panel > .scoreboard .seat span { font-size: .6rem; }
- .game-panel .rules { max-height: 3.7rem; }
- .game-panel .rule[open] { position: relative; z-index: 8; max-height: 8rem; overflow: auto; }
- .table3d-controls { font-size: .75rem; }
+.shell:has(.table3d:not([hidden])) #live { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
+.game-rules, .end-game, .next-hand, .game-results, .hand-status { position: absolute; }
+.game-rules, .end-game, .next-hand, .game-results { pointer-events: auto; }
+.game-rules { top: var(--hud-top); left: var(--hud-left); }
+.end-game { top: var(--hud-top); right: var(--hud-right); text-align: right; }
+.next-hand { right: var(--hud-right); bottom: var(--hud-bottom); }
+.game-rules summary, .end-game > button {
+  display: inline-flex; align-items: center; min-height: 44px; padding: .45rem .75rem;
+  cursor: pointer; border: 1px solid #719484; border-radius: .6rem;
+  background: #102b21ed; color: #edf3e7; font-size: .85rem; font-weight: 650;
 }
-@media (orientation: landscape) and (max-height: 600px) {
- .shell:has(.table3d:not([hidden])) #live { top: .2rem; right: .25rem; left: auto; width: 42%; }
- .game-panel > .panel { max-height: 4rem; overflow: auto; }
- .game-panel > .scoreboard { grid-template-columns: repeat(2,minmax(0,1fr)); }
- .game-panel .hand-fallback { top: auto; bottom: 1rem; }
- .table3d-controls { left: 1rem; transform: none; width: min(45%,330px); }
+.game-rules summary::after { content: "⌄"; margin-left: .5rem; }
+.game-rules[open] summary::after { content: "⌃"; }
+.rules-drawer, .end-confirm {
+  width: min(19rem, calc(100vw - var(--hud-left) - var(--hud-right)));
+  max-height: calc(100dvh - 4rem - var(--hud-top) - var(--hud-bottom));
+  margin-top: .4rem; padding: .75rem; overflow: auto;
+  border: 1px solid #719484; border-radius: .65rem; background: #102b21;
+  font-size: .85rem; box-shadow: 0 5px 20px #08130ca8;
 }
+.rules-drawer p { margin: .35rem 0; }
+.rule { border-top: 1px solid #648775; padding: .55rem 0; }
+.rule.inactive { color: #b3c8b9; }
+.end-confirm span { display: block; margin-bottom: .6rem; }
+.end-confirm form { display: inline-block; margin: 0 .35rem .35rem 0; }
+.hand-status, .game-results { top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+.hand-status { margin: 0; padding: .4rem .75rem; border-radius: .55rem; background: #102b21ed; }
+.game-results { margin: 0; width: max-content; max-width: 82%; }

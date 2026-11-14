@@ -1,6 +1,6 @@
 # UI roadmap: GoDom adoption and a mobile 3D card table
 
-Approved 2026-11-12. U1 and U2 are merged into main. The dice-inspired table (U3), followed by card motion and pacing (U4), is next.
+Approved 2026-11-12. U1 through U4 are merged into main. U5 covers table polish and release.
 
 ## Direction
 
@@ -43,7 +43,16 @@ Game authority and scoring never depend on physical positions. Physics is local 
 
 ## U5 — polish and release
 
-Phone orientation/resize, reconnect, reduced motion, keyboard/accessibility play path, rendering resolution cap, idle rendering control, GPU/physics resource cleanup, and deployment. Preserve focused engine/AI and full-game tests; add transport, sequence and lifecycle tests where meaningful. Run a bounded full-browser match for release. Use manual phone playtesting for readability, overlap, physics feel and pacing; avoid long repeated automated loops.
+Smooth the table, inlay, and card silhouettes with rounded geometry and antialiasing. Give the hand fan enough height above the felt for the entire card face to be visible. A click or tap plays a legal card directly. Dragging to the center remains available.
+
+### Match HUD
+
+- Keep one Rules control at the top left and the host's End game control at the top right. Show connection warnings and rule reveals only when relevant. Put the room code, hand count, and detailed rule list inside Rules. Keep the revision in the protocol.
+- Anchor player names and points to their seats. Mark whose turn it is on the nameplate. Keep the middle clear for played cards and show hand or match results there when play pauses.
+- Place Deal next hand at the bottom right for the host. Keep the bottom clear during play.
+- In the next layout pass, show a new rule beside the table at the hand break, with a way to reopen it under Rules. Test whether the seat highlight and the cards give players enough direction. If players miss a follow-suit restriction, show it beside the hand when it applies.
+
+Check phone orientation and safe areas, reconnect, motion preferences, rendering resolution, idle rendering, and resource cleanup. Keep the existing engine, AI, and full-game tests. Check the full hand, corner controls, and two- through four-seat layouts on a phone, including long names and rotations during play.
 
 ## Extraction gate
 

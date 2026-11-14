@@ -110,8 +110,8 @@ func TestGoDomScreensKeepHandsPrivateAndUseDomainLegality(t *testing.T) {
 	if regexp.MustCompile(`<button[^>]*disabled[^>]*>3♥</button>`).MatchString(html) {
 		t.Fatal("legal follow-suit card was disabled")
 	}
-	if !strings.Contains(html, "Follow suit: play a card matching the lead suit.") {
-		t.Fatal("legal-action explanation missing")
+	if !strings.Contains(html, `class="play-commands"`) || strings.Contains(html, "Text hand and keyboard controls") {
+		t.Fatal("card commands should be available only to the table")
 	}
 	if !strings.Contains(html, `name="revision"`) || !strings.Contains(html, `value="7"`) {
 		t.Fatal("forms lack expected revision")
@@ -173,7 +173,7 @@ func TestHTMLWebSocketEnvelopeRejectsStaleActionsAndResyncs(t *testing.T) {
 	sendCommand(t, hostConn, map[string]any{"type": "start", "id": "html-start", "revision": "0", "HEADERS": map[string]string{"HX-Request": "true"}})
 	first := readHTMLContaining(t, hostConn, `data-kind="state"`)
 	_ = readHTMLContaining(t, guestConn, `data-kind="state"`)
-	if !strings.Contains(first, "Your hand") || !strings.Contains(first, "Revision 1") {
+	if !strings.Contains(first, `data-scene="`) || !strings.Contains(first, `data-revision="1"`) {
 		t.Fatal("start did not render first hand")
 	}
 	sendCommand(t, hostConn, map[string]any{"type": "play", "id": "stale-play", "card": "std:H:02", "revision": "0", "HEADERS": map[string]string{}})
@@ -195,7 +195,7 @@ func TestHTMLWebSocketEnvelopeRejectsStaleActionsAndResyncs(t *testing.T) {
 	_ = guestConn.Close()
 	rejoined := dialHTMLRoom(t, web.URL, guest)
 	restored := readHTMLContaining(t, rejoined, `data-kind="state"`)
-	if !strings.Contains(restored, "Your hand") || !strings.Contains(restored, "Revision 1") || htmlUpdate(t, restored) <= htmlUpdate(t, first) {
+	if !strings.Contains(restored, `data-scene="`) || !strings.Contains(restored, `data-revision="1"`) || htmlUpdate(t, restored) <= htmlUpdate(t, first) {
 		t.Fatal("reconnect did not receive a fresh private projection")
 	}
 	// Legacy JSON remains strict even though HTML messages accept HEADERS.
