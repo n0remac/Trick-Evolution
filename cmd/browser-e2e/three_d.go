@@ -33,7 +33,7 @@ func (r *runner) threeDSmoke() error {
 	}
 	var ready bool
 	for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		if err := page.eval(r.ctx, `!!window.__trick3d && window.__trick3d.stats().objects === 6 && window.__trick3d.stats().width > 0`, &ready); err != nil {
+		if err := page.eval(r.ctx, `!!window.__trick3d && window.__trick3d.stats().objects >= 10 && window.__trick3d.stats().width > 0`, &ready); err != nil {
 			return err
 		}
 		if ready {
@@ -41,10 +41,34 @@ func (r *runner) threeDSmoke() error {
 		}
 	}
 	if !ready {
-		return fmt.Errorf("phone canvas did not render five private cards")
+		return fmt.Errorf("phone canvas did not render table and private cards")
+	}
+	var settled bool
+	for deadline := time.Now().Add(8 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if err := page.eval(r.ctx, `window.__trick3d.stats().revision === Number(document.querySelector('#screen').dataset.revision) && !window.__trick3d.stats().motion && !window.__trickPresentation().presenting`, &settled); err != nil {
+			return err
+		}
+		if settled {
+			break
+		}
+	}
+	if !settled {
+		return fmt.Errorf("initial bot landing did not settle")
+	}
+	var framed bool
+	const framingJS = `(() => { const b = document.querySelector('#table3d-canvas').getBoundingClientRect(); const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(document.querySelector('#screen').dataset.scene), c => c.charCodeAt(0)))); const points = payload.selections.map(s => window.__trick3d.project(s.pickId)); return b.height >= innerHeight - 2 && points.length === 5 && points.every(p => p && p.x > b.left + 40 && p.x < b.right - 40 && p.y > b.top + b.height * .55 && p.y < b.bottom - b.height * .08) && document.getElementById('end-confirm').getClientRects().length === 0; })()`
+	if err := page.eval(r.ctx, framingJS, &framed); err != nil {
+		return err
+	}
+	if !framed {
+		return fmt.Errorf("portrait hand framing or hidden confirmation failed")
 	}
 	var initialWidth int
 	if err := page.eval(r.ctx, `window.__trick3d.stats().width`, &initialWidth); err != nil {
+		return err
+	}
+	var initialRevision int
+	if err := page.eval(r.ctx, `window.__trick3d.stats().revision`, &initialRevision); err != nil {
 		return err
 	}
 	if err := page.eval(r.ctx, `window.__trick3dInitial = window.__trick3d; true`, nil); err != nil {
@@ -75,7 +99,7 @@ func (r *runner) threeDSmoke() error {
 		return fmt.Errorf("pointer did not select and animate a legal rendered card")
 	}
 	var moved bool
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(25 * time.Millisecond) {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 		if err := page.eval(r.ctx, `window.__trick3d.stats().maxTravel > 0.1`, &moved); err != nil {
 			return err
 		}
@@ -84,7 +108,26 @@ func (r *runner) threeDSmoke() error {
 		}
 	}
 	if !moved {
-		return fmt.Errorf("selected 3D card did not move")
+		var stats map[string]any
+		_ = page.eval(r.ctx, `window.__trick3d.stats()`, &stats)
+		return fmt.Errorf("selected 3D card did not move: %+v", stats)
+	}
+	// Release outside the legal center. The local hand and revision must stay put.
+	if err := page.cdp.call(r.ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": target.X, "y": target.Y, "button": "left", "clickCount": 1}, nil); err != nil {
+		return err
+	}
+	if err := page.cdp.call(r.ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": target.X, "y": target.Y + 35, "button": "left", "buttons": 1}, nil); err != nil {
+		return err
+	}
+	if err := page.cdp.call(r.ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": target.X, "y": target.Y + 35, "button": "left", "clickCount": 1}, nil); err != nil {
+		return err
+	}
+	var rejected bool
+	if err := page.eval(r.ctx, fmt.Sprintf(`window.__trick3d.stats().revision === %d && !window.__trick3d.stats().dragging`, initialRevision), &rejected); err != nil {
+		return err
+	}
+	if !rejected {
+		return fmt.Errorf("invalid drag did not return to hand")
 	}
 	if err := page.click(r.ctx, "Play selected card"); err != nil {
 		return err
@@ -93,11 +136,67 @@ func (r *runner) threeDSmoke() error {
 		return err
 	}
 	var sameRenderer bool
-	if err := page.eval(r.ctx, `window.__trick3d === window.__trick3dInitial && window.__trick3d.stats().objects === 5`, &sameRenderer); err != nil {
+	if err := page.eval(r.ctx, `window.__trick3d === window.__trick3dInitial && window.__trick3d.stats().objects >= 10`, &sameRenderer); err != nil {
 		return err
 	}
 	if !sameRenderer {
-		return fmt.Errorf("HTMX update recreated renderer or retained played card")
+		return fmt.Errorf("HTMX update recreated renderer or lost table")
+	}
+	// A legal pointer release submits through the same Go form, then the bot completes the trick.
+	target = struct {
+		ID string  `json:"id"`
+		X  float64 `json:"x"`
+		Y  float64 `json:"y"`
+	}{}
+	for deadline := time.Now().Add(12 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if err := page.eval(r.ctx, targetJS, &target); err != nil {
+			return err
+		}
+		var idle bool
+		if err := page.eval(r.ctx, `window.__trick3d.stats().revision === Number(document.querySelector('#screen').dataset.revision) && !window.__trick3d.stats().motion && !window.__trickPresentation().presenting`, &idle); err != nil {
+			return err
+		}
+		if target.ID != "" && target.X != 0 && idle {
+			break
+		}
+		target.ID = ""
+	}
+	var center struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}
+	if err := page.eval(r.ctx, `window.__trick3d.project('dropzone')`, &center); err != nil {
+		return err
+	}
+	if target.ID == "" || center.X == 0 {
+		return fmt.Errorf("missing legal card or center drop target")
+	}
+	for _, event := range []struct {
+		Kind    string
+		X, Y    float64
+		Buttons int
+	}{
+		{"mousePressed", target.X, target.Y, 1}, {"mouseMoved", center.X, center.Y, 1}, {"mouseReleased", center.X, center.Y, 0},
+	} {
+		if err := page.cdp.call(r.ctx, "Input.dispatchMouseEvent", map[string]any{"type": event.Kind, "x": event.X, "y": event.Y, "button": "left", "buttons": event.Buttons, "clickCount": 1}, nil); err != nil {
+			return err
+		}
+	}
+	if err := r.waitPage(page, "valid drag and complete trick", 20*time.Second, func(s uiState) bool { return s.Revision >= 5 && s.HandCards == 3 }); err != nil {
+		return err
+	}
+	var pacing bool
+	const pacingJS = `(() => { const log = window.__trickPresentation().history; const by = (kind,id) => log.find(x => x.kind === kind && x.id === id); return log.some(x => x.kind === 'landed' && x.ok && by('landing-pause-end',x.id)?.at - x.at >= 350) && log.some(x => x.kind === 'collection-hold' && by('collection-start',x.id)?.at - x.at >= 600); })()`
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if err := page.eval(r.ctx, pacingJS, &pacing); err != nil {
+			return err
+		}
+		if pacing {
+			break
+		}
+	}
+	if !pacing {
+		return fmt.Errorf("bot landing pause or trick collection hold was not observed")
 	}
 	if err := page.cdp.call(r.ctx, "Emulation.setDeviceMetricsOverride", map[string]any{"width": 320, "height": 700, "deviceScaleFactor": 3, "mobile": true}, nil); err != nil {
 		return err
@@ -117,16 +216,21 @@ func (r *runner) threeDSmoke() error {
 	if err := page.cdp.call(r.ctx, "Page.reload", map[string]any{}, nil); err != nil {
 		return err
 	}
-	if err := r.waitPage(page, "3D reconnect", 20*time.Second, func(s uiState) bool { return s.Revision >= 3 && s.HandCards == 4 && s.Connection == "Connected" }); err != nil {
+	if err := r.waitPage(page, "3D reconnect", 35*time.Second, func(s uiState) bool { return s.Revision >= 5 && s.HandCards == 3 && s.Connection == "Connected" }); err != nil {
 		return err
 	}
 	var restored bool
-	if err := page.eval(r.ctx, `!!window.__trick3d && window.__trick3d.stats().objects === 5 && !window.__trick3d.stats().motion`, &restored); err != nil {
-		return err
+	for deadline := time.Now().Add(12 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if err := page.eval(r.ctx, `!!window.__trick3d && window.__trick3d.stats().objects >= 9 && !window.__trick3d.stats().motion && !window.__trickPresentation().presenting`, &restored); err != nil {
+			return err
+		}
+		if restored {
+			break
+		}
 	}
 	if !restored {
-		return fmt.Errorf("reconnect did not restore current 3D scene")
+		return fmt.Errorf("reconnect did not restore current 3D table")
 	}
-	r.steps = append(r.steps, "phone-size 3D card rendered, pointer-picked, animated, played through HTMX against a bot; canvas reconciled, resized and restored on reconnect")
+	r.steps = append(r.steps, "phone-size table rendered; tap-to-play, invalid drag, legal drag, bot reply and complete trick passed; canvas resized and restored on reconnect")
 	return r.checkConsole()
 }
