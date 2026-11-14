@@ -11,7 +11,7 @@
   let runtimePromise = null;
   let selections = new Map();
   let displayedSeats = [];
-  let rulesOpen = false;
+  let rulesScroll = 0;
   let submittedUpdate = 0;
   let sceneQueue = [];
   let presenting = false;
@@ -131,10 +131,8 @@
     if (!screen) return;
     const update = Number(screen.dataset.update);
     if (!Number.isSafeInteger(update) || update <= lastSceneUpdate) return;
-    const rules = screen.querySelector("#game-rules");
-    if (rules) rules.open = rulesOpen;
     if (!screen.dataset.scene) {
-      rulesOpen = false;
+      rulesScroll = 0;
       showSeats([]);
       lastSceneUpdate = update;
       resetPresentation();
@@ -142,6 +140,8 @@
       selections = new Map();
       return;
     }
+    const rules = screen.querySelector('#game-rules');
+    if (rules) rules.scrollLeft = rulesScroll;
     try {
       const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(screen.dataset.scene), c => c.charCodeAt(0))));
       if (payload.version !== 1) throw new Error('Unsupported card table payload');
@@ -253,12 +253,12 @@
       if (documentFragment.querySelector('#notice')) submittedUpdate = 0;
       return;
     }
-    rulesOpen = !!document.getElementById('game-rules')?.open;
     const update = Number(screen.dataset.update);
     if (!Number.isSafeInteger(update) || update <= lastUpdate) {
       event.preventDefault();
       return;
     }
+    rulesScroll = document.getElementById('game-rules')?.scrollLeft || 0;
     lastUpdate = update;
   });
 

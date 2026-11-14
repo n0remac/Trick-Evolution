@@ -72,7 +72,7 @@ const stateExpression = `(() => {
 	return {
 		ready: Boolean(window.__trickUIReady),
 		status: document.querySelector('.status')?.textContent || (turn ? turn.name + ' to play' : ''),
-		notice: document.querySelector('#notice')?.textContent || '',
+		notice: document.querySelector('.match-event')?.textContent || document.querySelector('#notice')?.textContent || '',
 		connection: document.querySelector('#connection')?.textContent || '',
 		revision: Number(screen?.dataset.revision) || 0,
 		hand: Number(document.querySelector('.game-panel')?.dataset.hand) || 0,

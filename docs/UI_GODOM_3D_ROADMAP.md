@@ -47,10 +47,10 @@ Smooth the table, inlay, and card silhouettes with rounded geometry and antialia
 
 ### Match HUD
 
-- Keep one Rules control at the top left and the host's End game control at the top right. Show connection warnings and rule reveals only when relevant. Put the room code, hand count, and detailed rule list inside Rules. Keep the revision in the protocol.
+- Keep the current rules visible above the table in a compact, horizontally scrollable row. Show the latest play, trick result, or rule reveal and the next action in a status line above the rules. Keep the host's End game control at the top right and the revision in the protocol.
 - Anchor player names and points to their seats. Mark whose turn it is on the nameplate. Keep the middle clear for played cards and show hand or match results there when play pauses.
 - Place Deal next hand at the bottom right for the host. Keep the bottom clear during play.
-- In the next layout pass, show a new rule beside the table at the hand break, with a way to reopen it under Rules. Test whether the seat highlight and the cards give players enough direction. If players miss a follow-suit restriction, show it beside the hand when it applies.
+- Tilt the local hand toward the camera so card faces are easy to read. If players miss a follow-suit restriction, show it beside the hand when it applies.
 
 Check phone orientation and safe areas, reconnect, motion preferences, rendering resolution, idle rendering, and resource cleanup. Keep the existing engine, AI, and full-game tests. Check the full hand, corner controls, and two- through four-seat layouts on a phone, including long names and rotations during play.
 

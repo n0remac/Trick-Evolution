@@ -115,7 +115,7 @@ func renderScreen(message serverMessage, seat domain.SeatID, catalog domain.Cata
 			}
 		}
 	}
-	return screen.Render() + noticeNode(eventNotice(message)).Render()
+	return screen.Render() + noticeNode("").Render()
 }
 
 func lobbyPanel(message serverMessage, seat domain.SeatID) *h.Node {
@@ -177,17 +177,28 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		rules = append(rules, h.Div(h.Class(class),
 			h.NewNode("strong", []*h.Node{h.T(title)}), h.P(h.T(definition.Text))))
 	}
+	next := ""
+	switch public.Phase {
+	case domain.PhasePlayingTrick:
+		next = name(public.Turn) + " to play"
+		if public.Turn == seat {
+			next = "Your turn"
+		}
+	case domain.PhaseHandComplete:
+		next = "Waiting for the host to deal"
+		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
+			next = "Deal the next hand"
+		}
+	}
 	parts := []*h.Node{
 		h.Class("game-panel"),
 		h.Attr("data-hand", fmt.Sprint(public.HandNumber)),
-		h.NewNode("details", []*h.Node{
-			h.Id("game-rules"), h.Class("game-rules"),
-			h.NewNode("summary", []*h.Node{h.T("Rules")}),
-			h.Div(h.Class("rules-drawer"),
-				h.P(h.Class("muted"), h.T(fmt.Sprintf("Hand %d of %d · Room %s", public.HandNumber, public.MaxHands, message.Room))),
-				h.Div(append([]*h.Node{h.Class("rules")}, rules...)...),
-				h.P(h.Class("muted"), h.T(fmt.Sprintf("%d rule cards left · reveal every %d completed hands", public.RulesRemaining, public.RevealEvery)))),
-		}),
+		h.Div(h.Class("game-hud"),
+			h.Div(h.Class("match-cue"), h.Role("status"), h.Attr("aria-atomic", "true"),
+				h.Span(h.Class("match-event"), h.T(eventNotice(message.Events, catalog, name))),
+				h.NewNode("strong", []*h.Node{h.Class("match-next"), h.T(next)})),
+			h.Section(append([]*h.Node{h.Id("game-rules"), h.Class("rules"), h.Attr("aria-label", "Rules in play"),
+				h.Attr("tabindex", "0")}, rules...)...)),
 	}
 	if public.Phase == domain.PhasePlayingTrick {
 		legal, _ := domain.LegalCards(*view, catalog)
@@ -270,17 +281,27 @@ func cardClass(id domain.CardID) string {
 	return class
 }
 
-func eventNotice(message serverMessage) string {
-	for i := len(message.Events) - 1; i >= 0; i-- {
-		event := message.Events[i]
-		if event.Kind == domain.EventRuleRevealed {
-			definition, ok := domain.DefaultCatalog().Definition(event.Rule)
-			if ok {
-				return fmt.Sprintf("%s revealed after hand %d.", definition.Title, event.Hand)
+func eventNotice(events []domain.Event, catalog domain.Catalog, name func(domain.SeatID) string) string {
+	var outcomes []string
+	var play string
+	for _, event := range events {
+		switch event.Kind {
+		case domain.EventHandStarted:
+			outcomes = append(outcomes, fmt.Sprintf("Hand %d dealt.", event.Hand))
+		case domain.EventCardPlayed:
+			play = fmt.Sprintf("%s played %s.", name(event.Seat), cardLabel(event.Card))
+		case domain.EventTrickWon:
+			outcomes = append(outcomes, fmt.Sprintf("%s won trick %d.", name(event.Seat), event.Trick))
+		case domain.EventRuleRevealed:
+			if definition, ok := catalog.Definition(event.Rule); ok {
+				outcomes = append(outcomes, fmt.Sprintf("%s revealed after hand %d.", definition.Title, event.Hand))
 			}
 		}
 	}
-	return ""
+	if len(outcomes) == 0 {
+		return play
+	}
+	return strings.Join(outcomes, " ")
 }
 
 func noticeNode(message string) *h.Node {

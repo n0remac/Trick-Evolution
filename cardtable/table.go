@@ -156,9 +156,10 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 		}
 		x := (float64(i) - float64(len(view.Hand)-1)/2) * spread
 		z := 3.25 + .13*math.Abs(float64(i)-float64(len(view.Hand)-1)/2)
-		rotation := scene.Vec3{-.35, (float64(i) - float64(len(view.Hand)-1)/2) * -.12, 0}
+		// Pitch the face normal toward the camera at the near edge of the table.
+		rotation := scene.Vec3{.61, (float64(i) - float64(len(view.Hand)-1)/2) * -.12, 0}
 		// Keep the lowered edge of the tilted card above the felt.
-		node := cardNode(id, card, scene.Vec3{x, .34 + .012*float64(i), z}, rotation, id)
+		node := cardNode(id, card, scene.Vec3{x, .48 + .012*float64(i), z}, rotation, id)
 		nodes = append(nodes, node)
 		lift := node.Transform
 		lift.Position[1] += .35
