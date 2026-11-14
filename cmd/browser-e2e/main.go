@@ -80,7 +80,7 @@ const stateExpression = `(() => {
 		connection: document.querySelector('#connection')?.textContent || '',
 		revision: Number(screen?.dataset.revision) || 0,
 		hand: Number(document.querySelector('.game-panel')?.dataset.hand) || 0,
-		rules: [...document.querySelectorAll('.rules .rule')].map(x => x.textContent),
+		rules: [...document.querySelectorAll('.rule-field .rule-card')].map(x => x.dataset.ruleTitle),
 		scores: seats.map(s => ({name:s.name, points:s.score, tricks:s.tricks, cards:s.count}))
 			.sort((a,b) => a.name.localeCompare(b.name)),
 		handCards: payload?.selections?.length || 0,

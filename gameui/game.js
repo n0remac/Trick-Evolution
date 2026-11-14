@@ -20,6 +20,22 @@
   const seenEvents = new Set();
   const presentationLog = [];
   const tableShell = document.getElementById('table3d');
+  const shell = document.querySelector('.shell');
+  let measuredHud = null;
+  const hudObserver = new ResizeObserver(() => measureTableSpace());
+  function measureTableSpace() {
+    const hud = document.querySelector('#screen .game-hud');
+    if (measuredHud !== hud) {
+      if (measuredHud) hudObserver.unobserve(measuredHud);
+      measuredHud = hud;
+      if (hud) hudObserver.observe(hud);
+    }
+    if (!hud || tableShell.hidden) return;
+    const top = Math.ceil(hud.getBoundingClientRect().bottom - shell.getBoundingClientRect().top + 8);
+    shell.style.setProperty('--table-top', `${top}px`);
+  }
+  new MutationObserver(() => requestAnimationFrame(measureTableSpace)).observe(live, {childList: true, subtree: true});
+  window.addEventListener('resize', measureTableSpace);
   const canvas = document.getElementById('table3d-canvas');
   const seatLabels = document.getElementById('table3d-seats');
   const dropHint = document.getElementById('table3d-drop-hint');
@@ -100,6 +116,7 @@
         const cards = payload.selections || [];
         selections = new Map(cards.map(item => [item.pickId, item]));
         tableShell.hidden = false;
+        measureTableSpace();
         if (!events.length || restoring || document.hidden) { table.apply(payload.scene, cards); showSeats(payload.seats || []); restoring = false; continue; }
         table.apply(payload.presentationScene || payload.scene, cards);
         for (const event of events) {
@@ -151,11 +168,12 @@
       return;
     }
     const rules = screen.querySelector('#game-rules');
-    if (rules) rules.scrollLeft = rulesScroll;
+    if (rules) rules.scrollTop = rulesScroll;
     try {
       const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(screen.dataset.scene), c => c.charCodeAt(0))));
       if (payload.version !== 1) throw new Error('Unsupported card table payload');
       tableShell.hidden = false;
+      measureTableSpace();
       if (!table) {
         runtimePromise ||= import('/game/browser3d/runtime.js');
         const {createRuntime} = await runtimePromise;
@@ -231,13 +249,29 @@
   ruleDetails.addEventListener('click', event => {
     if (event.target === ruleDetails) ruleDetails.close();
   });
+  ruleDetails.addEventListener('close', () => {
+    const card = [...document.querySelectorAll('#game-rules [data-rule-instance]')]
+      .find(node => node.dataset.ruleInstance === ruleDetails.dataset.instance);
+    (card || rulesButton).focus();
+  });
   live.addEventListener('click', event => {
     const rule = event.target.closest('.rule');
     if (!rule) return;
-    ruleDetails.querySelector('#rule-title').textContent = rule.textContent;
-    ruleDetails.querySelector('#rule-text').textContent = rule.dataset.ruleText;
+    ruleDetails.dataset.instance = rule.dataset.ruleInstance;
+    ruleDetails.dataset.title = rule.dataset.ruleTitle;
+    ruleDetails.querySelector('#rule-title').textContent = rule.dataset.ruleTitle;
+    ruleDetails.querySelector('#rule-text').textContent = rule.dataset.ruleDetail;
     ruleDetails.showModal();
   });
+  function syncRuleDetails() {
+    if (!ruleDetails.open) return;
+    const rule = [...document.querySelectorAll('#game-rules [data-rule-instance]')]
+      .find(card => card.dataset.ruleInstance === ruleDetails.dataset.instance);
+    ruleDetails.querySelector('#rule-title').textContent = rule?.dataset.ruleTitle || `${ruleDetails.dataset.title} · no longer active`;
+    ruleDetails.querySelector('#rule-text').textContent = rule?.dataset.ruleDetail ||
+      'This field card is no longer active. Open Rules, then Changes, to see what replaced it.';
+  }
+  new MutationObserver(syncRuleDetails).observe(live, {childList: true, subtree: true});
 
   function setReviewTab(tab, moveFocus = false) {
     if (!['current', 'starting', 'changes'].includes(tab)) return;
@@ -373,7 +407,7 @@
       event.preventDefault();
       return;
     }
-    rulesScroll = document.getElementById('game-rules')?.scrollLeft || 0;
+    rulesScroll = document.getElementById('game-rules')?.scrollTop || 0;
     if (reviewDialog.open) {
       reviewScroll = document.getElementById('rules-review-content')?.scrollTop || 0;
       reviewFocus = document.activeElement?.dataset.reviewFocus || reviewFocus;

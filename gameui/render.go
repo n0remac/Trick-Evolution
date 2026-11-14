@@ -185,21 +185,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		}
 		return string(id)
 	}
-	rules := make([]*h.Node, 0, len(public.ActiveField))
-	for _, resolved := range public.ActiveField {
-		definition, ok := catalog.Definition(resolved.Instance.DefinitionID)
-		title := string(resolved.Instance.DefinitionID)
-		if ok {
-			title = definition.Title
-		}
-		class := "rule"
-		if !resolved.Active {
-			class += " inactive"
-			title += " · overridden"
-		}
-		rules = append(rules, h.Button(h.Type("button"), h.Class(class),
-			h.Attr("data-rule-text", definition.Text), h.Attr("aria-haspopup", "dialog"), h.T(title)))
-	}
+	rules := renderRuleField(public, catalog)
 	next := ""
 	switch public.Phase {
 	case domain.PhasePlayingTrick:
@@ -212,6 +198,8 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
 			next = "Deal the next hand"
 		}
+	case domain.PhaseGameComplete:
+		next = "Game complete"
 	}
 	parts := []*h.Node{
 		h.Class("game-panel"),
@@ -220,8 +208,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			h.Div(h.Class("match-cue"), h.Role("status"), h.Attr("aria-atomic", "true"),
 				h.Span(h.Class("match-event"), h.T(eventNotice(message.Events, catalog, name))),
 				h.NewNode("strong", []*h.Node{h.Class("match-next"), h.T(next)})),
-			h.Section(append([]*h.Node{h.Id("game-rules"), h.Class("rules"), h.Attr("aria-label", "Rules in play"),
-				h.Attr("tabindex", "0")}, rules...)...)),
+			rules),
 	}
 	if public.Phase == domain.PhasePlayingTrick {
 		legal, _ := domain.LegalCards(*view, catalog)
@@ -317,7 +304,7 @@ func eventNotice(events []domain.Event, catalog domain.Catalog, name func(domain
 			outcomes = append(outcomes, fmt.Sprintf("%s won trick %d.", name(event.Seat), event.Trick))
 		case domain.EventRuleRevealed:
 			if definition, ok := catalog.Definition(event.Rule); ok {
-				outcomes = append(outcomes, fmt.Sprintf("%s revealed after hand %d.", definition.Title, event.Hand))
+				outcomes = append(outcomes, fmt.Sprintf("%s revealed after hand %d; it applies from hand %d.", definition.Title, event.Hand, event.Hand+1))
 			}
 		}
 	}

@@ -60,6 +60,27 @@ func (r *runner) rulesSmoke() error {
 	}); err != nil {
 		return err
 	}
+	for _, viewport := range []struct {
+		width, height int
+		mobile        bool
+	}{{390, 844, true}, {844, 390, true}, {1280, 800, false}, {390, 844, true}} {
+		if err := r.checkFieldViewport(page, viewport.width, viewport.height, viewport.mobile); err != nil {
+			return err
+		}
+	}
+	if err := page.clickSelector(r.ctx, `#game-rules .rule-card`); err != nil {
+		return err
+	}
+	var detailsOK bool
+	if err := page.eval(r.ctx, `document.getElementById('rule-details').open && document.getElementById('rule-text').textContent.includes('No prerequisite rules')`, &detailsOK); err != nil {
+		return err
+	}
+	if !detailsOK {
+		return fmt.Errorf("starting card full details unavailable")
+	}
+	if err := page.clickSelector(r.ctx, `#rule-details button`); err != nil {
+		return err
+	}
 	if err := page.eval(r.ctx, `window.__rulesSmokeTable=window.__trick3d; true`, nil); err != nil {
 		return err
 	}
@@ -136,6 +157,47 @@ func (r *runner) rulesSmoke() error {
 		return err
 	}
 	r.result.Final = final
-	r.steps = append(r.steps, "portrait automatic preview kept revision zero; host reviewed and started; current rules reopened with keyboard tabs and focus restoration; a trick scored after close; ended-game reconnect restored current rules without replaying landing animation")
+	r.steps = append(r.steps, "portrait automatic preview kept revision zero; host reviewed and started; four zones and measured table space fit portrait, landscape and desktop; card details and rules remained accessible; a trick scored after close; ended-game reconnect restored current rules without replaying landing animation")
 	return r.checkConsole()
+}
+
+func (r *runner) checkFieldViewport(page *page, width, height int, mobile bool) error {
+	if err := page.cdp.call(r.ctx, "Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": height, "deviceScaleFactor": 1, "mobile": mobile}, nil); err != nil {
+		return err
+	}
+	var result struct {
+		OK      bool   `json:"ok"`
+		Reason  string `json:"reason"`
+		Top     int    `json:"top"`
+		Height  int    `json:"height"`
+		Columns int    `json:"columns"`
+	}
+	const expression = `(async () => {
+		await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+		const field=document.getElementById('game-rules'),hud=document.querySelector('.game-hud'),table=document.getElementById('table3d');
+		const zones=[...field.querySelectorAll('.rule-zone')],cards=[...field.querySelectorAll('.rule-card')];
+		const box=table.getBoundingClientRect(),hudBox=hud.getBoundingClientRect();
+		const columns=getComputedStyle(field).gridTemplateColumns.split(' ').length;
+		const expected=innerWidth<=700?2:4;
+		const source=document.querySelector('#screen')?.dataset.scene;
+		const payload=source && JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(source), c => c.charCodeAt(0))));
+		const handPoint=window.__trick3d?.project(payload?.selections?.[0]?.pickId);
+		const center=window.__trick3d?.project('dropzone');
+		const within=p=>p && p.x>=box.left && p.x<=box.right && p.y>=box.top && p.y<=box.bottom;
+		const ruleButton=document.getElementById('rules-open').getBoundingClientRect();
+		const endButton=document.querySelector('.end-game > button')?.getBoundingClientRect();
+		const separated=!endButton || endButton.right<=ruleButton.left+2;
+		const ok=zones.map(z=>z.dataset.category).join(',')==='hand,play,trick,score_victory' &&
+			cards.length===2 && cards[0].dataset.ruleTitle==='Follow Suit' && cards[1].dataset.ruleTitle==='High Card Wins' &&
+			columns===expected && box.top>=hudBox.bottom+4 && box.height>=120 && box.bottom<=innerHeight+1 &&
+			within(handPoint) && within(center) && separated;
+		return {ok,reason:ok?'':'zone, cards, HUD, table projection or controls failed',top:Math.round(box.top),height:Math.round(box.height),columns};
+	})()`
+	if err := page.eval(r.ctx, expression, &result); err != nil {
+		return err
+	}
+	if !result.OK {
+		return fmt.Errorf("%dx%d field viewport: %s (table top %d, height %d, columns %d)", width, height, result.Reason, result.Top, result.Height, result.Columns)
+	}
+	return nil
 }
