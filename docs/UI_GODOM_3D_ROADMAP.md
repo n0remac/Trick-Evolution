@@ -1,6 +1,6 @@
 # UI roadmap: GoDom adoption and a mobile 3D card table
 
-Approved 2026-11-12. Status: planned; U1 is the next implementation.
+Approved 2026-11-12. U1 and U2 are merged into main. The dice-inspired table (U3), followed by card motion and pacing (U4), is next.
 
 ## Direction
 
@@ -25,9 +25,13 @@ The generic packages must not import the game domain. Use versioned validated de
 
 ## U3 — mobile table
 
-Whole-viewport field with dynamic viewport and safe-area handling; large angled bottom fan; tap-to-lift/inspect and explicit play action; compact opponent positions; readable turn indicators; played cards placed by seat; rules as cards on the field with expanded details; overridden rules covered/inactive but inspectable. Lobby, scores, settings and results use overlays. Do not require hover or page scrolling for normal gameplay. Supply legal-action information from Go rather than duplicating rules in the browser.
+Build on the U2 prototype in `cardtable`, `scene`, `animation`, and `browser3d`. Use the [Letter Dice Table](https://github.com/n0remac/Cards/tree/dice/frontend/src/pages/dice) as the layout and interaction reference. Read [arenaLayout.ts](https://github.com/n0remac/Cards/blob/dice/frontend/src/pages/dice/arenaLayout.ts) for responsive perspective framing and [Die.tsx](https://github.com/n0remac/Cards/blob/dice/frontend/src/pages/dice/Die.tsx) for projecting pointer rays onto a horizontal drag plane and handling pointer cancellation. Adapt those techniques to the existing Three.js runtime.
 
-Acceptance: complete a match on a phone using the new table, initially with simple movement.
+- Give the Three.js canvas the full playable viewport with safe-area handling. Start with the camera about 45 degrees above the table. Fit the hand fan, opponent seats, and center of the table together in portrait and landscape. Keep the fanned near-edge hand tilted for readability and land played cards flat in separate seat positions. Use a coherent table surface, lighting, and shadows to show height.
+- Hover lifts and highlights a card for inspection. Tap selects and lifts a card, and the existing explicit Play control remains available. Drag holds the card above the tabletop and follows the mouse or finger locally. Highlight the play area when a legal held card can be dropped. A valid release submits one play through the existing authoritative Go action. Invalid, canceled, or rejected drops return to the hand. Keep the pointer grab offset stable and recover when pointer capture is lost.
+- Keep the canvas mounted across GoDom and HTMX updates. Drive visible cards, seat positions, legal actions, and animations from Go descriptions. Preserve hidden opponent hands. Show turn indicators, visible rules with inspectable overridden rules, and score/results overlays. Keep the full game playable on phones without hover or page scrolling.
+
+Acceptance: first play one complete trick against a bot using the new table. Then complete a match. Extend the browser smoke path for a valid drag, invalid or canceled drag, tap-to-play, bot reply, resize, and reconnect. Check full-hand readability and drag feel on a phone when available.
 
 ## U4 — animation, physical cards and pacing
 
