@@ -90,7 +90,7 @@ build_dir=$(mktemp -d /tmp/trick-evolution-release.XXXXXX)
 trap 'rm -rf -- "$build_dir"' EXIT
 
 printf '[D1] Focused Go packages and ten-hand HTTP/WebSocket fixtures\n'
-"$go_cmd" test ./domain ./cards ./websocket ./gameui -count=1 -timeout=60s
+"$go_cmd" test ./domain ./cards ./websocket ./gameui ./cmd/browser-e2e -count=1 -timeout=60s
 
 printf '[D1] Root build\n'
 "$go_cmd" build -o "$build_dir/trick-evolution" .

@@ -476,8 +476,13 @@ func (r *runner) assertHand(hand int, a, b uiState) error {
 	if !reflectScores(a.Scores, b.Scores) {
 		return fmt.Errorf("hand %d scoreboards disagree: Alice=%+v Bob=%+v", hand, a.Scores, b.Scores)
 	}
-	if len(a.Rules) != 2 || len(b.Rules) != len(a.Rules) {
-		return fmt.Errorf("hand %d rule count %d/%d, expected %d", hand, len(a.Rules), len(b.Rules), 2)
+	if len(a.Rules) != len(b.Rules) || (hand < 3 && len(a.Rules) != 2) || (hand >= 3 && len(a.Rules) < 3) {
+		return fmt.Errorf("hand %d active field count %d/%d disagrees with reveal cadence", hand, len(a.Rules), len(b.Rules))
+	}
+	for index := range a.Rules {
+		if a.Rules[index] != b.Rules[index] {
+			return fmt.Errorf("hand %d active field order differs between seats: %v / %v", hand, a.Rules, b.Rules)
+		}
 	}
 	if totalPoints(a.Scores) != hand*5 || totalTricks(a.Scores) != hand*5 || a.HandCards != 0 || b.HandCards != 0 {
 		return fmt.Errorf("hand %d totals or hands wrong: Alice=%+v Bob=%+v", hand, a, b)

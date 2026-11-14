@@ -12,7 +12,7 @@ From a clean checkout with Go 1.25 or newer:
 scripts/test-release.sh
 ```
 
-This runs the focused `domain`, `cards`, `websocket`, and `gameui` Go packages once, including the ten-hand black-box WebSocket fixtures and GoDom HTML checks, then builds the root server and browser runner. The script defaults Go build and module caches and GOPATH to writable `/tmp/trick-evolution-*` directories. It exits on the first failed assertion or build.
+This runs the focused `domain`, `cards`, `websocket`, `gameui`, and browser-runner Go packages once, including the ten-hand black-box WebSocket fixtures, GoDom HTML checks, and evolving-field browser assertions, then builds the root server and browser runner. The script defaults Go build and module caches and GOPATH to writable `/tmp/trick-evolution-*` directories. It exits on the first failed assertion or build.
 
 With Chromium or Chrome installed, choose **one** browser mode for a run:
 
@@ -39,11 +39,11 @@ The optional `scripts/test-release.sh --race` runs the targeted concurrent-room 
 - Reveals occur exactly after hands 3, 6, and 9, after hand-completion events.
 - Every accepted command advances the revision by one; the final revisions are 110 and 210.
 - Every hand conserves its dealt cards across private hands, visible plays, and public captured counts; exactly 50 tricks and 50 points are awarded in each match.
-- Fixed seeded final scores are **28–22** for two players and **10–13–16–11** for four players. The public winners and final game event agree with the highest score.
+- Scores total 50 points in each complete match. The public winners and final game event agree with the highest score; new evolution cards may change the old seeded score splits.
 - Public payloads and each opponent's payload omit all unplayed private cards at every revision.
 - A midgame reconnect restores the private hand; a completed-game reconnect restores the final state. Replayed action IDs do not advance the revision. Cross-room tokens and forged identity fields are refused. Play and next-hand commands are refused after game completion.
 
-The browser runner asserts the two-seat UI's exact 28–22 outcome, ten hand boundaries, reveals at 3/6/9, winner text, and absence of JavaScript exceptions. Its separate smoke mode reaches one awarded trick. These checks exercise the real page and its WebSocket connection, rather than calling `domain.Step` directly.
+The browser runner asserts ten hand boundaries, a shared evolving field after reveals at 3/6/9, score totals and winner text, and absence of JavaScript exceptions. Its separate smoke mode reaches one awarded trick. These checks exercise the real page and its WebSocket connection, rather than calling `domain.Step` directly.
 
 ## CI and current evidence
 
