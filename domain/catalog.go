@@ -27,6 +27,8 @@ const (
 	MechanicFirstLeader       Mechanic        = "first_leader"
 	MechanicNextLeader        Mechanic        = "next_leader"
 	MechanicTrump             Mechanic        = "trump"
+	MechanicBreakSpades       Mechanic        = "break_spades"
+	MechanicBreakHearts       Mechanic        = "break_hearts"
 	MechanicPlayRestriction   Mechanic        = "play_restriction"
 	MechanicWinnerEligibility Mechanic        = "winner_eligibility"
 	MechanicRankComparison    Mechanic        = "rank_comparison"
@@ -43,8 +45,13 @@ const (
 	ValueLeftOfDealer         EffectValue     = "left_of_dealer_rotating"
 	ValueWinnerLeads          EffectValue     = "winner_leads"
 	ValueNoTrump              EffectValue     = "none"
+	ValueSpadesTrump          EffectValue     = "spades"
+	ValueFirstLeadTrump       EffectValue     = "first_lead"
+	ValueBreakSpades          EffectValue     = "spades_unbroken"
+	ValueBreakHearts          EffectValue     = "hearts_unbroken"
 	ValueFollow               EffectValue     = "follow_suit"
 	ValueAnySuit              EffectValue     = "any_suit"
+	ValueFollowOrTrump        EffectValue     = "follow_or_trump"
 	ValueLeadSuit             EffectValue     = "lead_suit"
 	ValueHigh                 EffectValue     = "high_ace_to_two"
 	ValueLow                  EffectValue     = "low_two_to_ace"
@@ -65,6 +72,11 @@ const (
 	RuleFollowSuit       RuleID     = "rule.follow_suit"
 	RuleLowCardWins      RuleID     = "rule.low_card_wins"
 	RuleNoFollowRequired RuleID     = "rule.no_follow_required"
+	RuleSpadesTrump      RuleID     = "rule.spades_are_trump"
+	RulePitchTrump       RuleID     = "rule.pitch_the_trump"
+	RuleFollowOrTrump    RuleID     = "rule.follow_suit_or_trump"
+	RuleBreakSpades      RuleID     = "rule.break_spades"
+	RuleBreakHearts      RuleID     = "rule.break_hearts"
 	RuleDeckStandard     RuleID     = "baseline.standard_deck"
 	RuleHandSize         RuleID     = "baseline.hand_size"
 	RuleUnusedCards      RuleID     = "baseline.unused_cards"
@@ -111,6 +123,7 @@ type RuleDefinition struct {
 	FieldCategory      FieldCategory
 	Effects            []TypedEffect
 	Prerequisites      []RuleID
+	PrerequisiteAny    []RuleID // At least one named controller must be active.
 	StartActive        bool
 	StartingVisibility FieldVisibility
 }
@@ -120,7 +133,7 @@ type Catalog struct {
 	Definitions []RuleDefinition
 }
 
-const CatalogVersion = 2
+const CatalogVersion = 3
 
 func (c Catalog) Definition(id RuleID) (RuleDefinition, bool) {
 	for _, d := range c.Definitions {
@@ -162,7 +175,7 @@ func (c Catalog) Validate() error {
 		}
 		switch d.Status {
 		case StatusUnsupported:
-			if d.UnsupportedReason == "" || d.InDeck || d.Timing != "" || d.WinnerEffect != "" || d.PlayEffect != "" || d.Parameters != (RuleParameters{}) || len(d.Overrides) != 0 || len(d.Effects) != 0 || len(d.Prerequisites) != 0 || d.StartActive {
+			if d.UnsupportedReason == "" || d.InDeck || d.Timing != "" || d.WinnerEffect != "" || d.PlayEffect != "" || d.Parameters != (RuleParameters{}) || len(d.Overrides) != 0 || len(d.Effects) != 0 || len(d.Prerequisites) != 0 || len(d.PrerequisiteAny) != 0 || d.StartActive {
 				return fmt.Errorf("%s: unsupported entry must have a reason and no executable behavior", d.ID)
 			}
 		case StatusSupported:
@@ -232,7 +245,12 @@ func (c Catalog) Validate() error {
 				return fmt.Errorf("%s: override target has no shared mechanic", d.ID)
 			}
 		}
-		for _, prerequisite := range d.Prerequisites {
+		prerequisites := map[RuleID]bool{}
+		for _, prerequisite := range append(append([]RuleID(nil), d.Prerequisites...), d.PrerequisiteAny...) {
+			if prerequisites[prerequisite] {
+				return fmt.Errorf("%s: duplicate prerequisite %s", d.ID, prerequisite)
+			}
+			prerequisites[prerequisite] = true
 			old, ok := byID[prerequisite]
 			if !ok || old.Status != StatusSupported || prerequisite == d.ID {
 				return fmt.Errorf("%s: invalid prerequisite %s", d.ID, prerequisite)
@@ -257,7 +275,7 @@ func (c Catalog) Validate() error {
 			return nil
 		}
 		visiting[id] = true
-		for _, p := range byID[id].Prerequisites {
+		for _, p := range append(append([]RuleID(nil), byID[id].Prerequisites...), byID[id].PrerequisiteAny...) {
 			if err := checkCycle(p); err != nil {
 				return err
 			}
@@ -309,13 +327,16 @@ func baseline(id RuleID, title, text string, category FieldCategory, effect Type
 }
 
 func validTypedEffect(e TypedEffect) bool {
-	values := map[Mechanic]EffectValue{MechanicDeck: ValueStandardDeck, MechanicHandSize: ValueConfigured, MechanicUnused: ValueOutOfPlay, MechanicScoreOwnership: ValueIndividual, MechanicTurnOrder: ValueClockwise, MechanicFirstLeader: ValueLeftOfDealer, MechanicNextLeader: ValueWinnerLeads, MechanicTrump: ValueNoTrump, MechanicPlayRestriction: ValueFollow, MechanicWinnerEligibility: ValueLeadSuit, MechanicRankComparison: ValueHigh, MechanicTieBreak: ValueFirstPlay, MechanicTrickPoints: ValueOnePoint, MechanicHandLimit: ValueConfigured, MechanicVictory: ValueHighestShared, MechanicReveal: ValueConfigured}
+	values := map[Mechanic]EffectValue{MechanicDeck: ValueStandardDeck, MechanicHandSize: ValueConfigured, MechanicUnused: ValueOutOfPlay, MechanicScoreOwnership: ValueIndividual, MechanicTurnOrder: ValueClockwise, MechanicFirstLeader: ValueLeftOfDealer, MechanicNextLeader: ValueWinnerLeads, MechanicTrump: ValueNoTrump, MechanicBreakSpades: ValueBreakSpades, MechanicBreakHearts: ValueBreakHearts, MechanicPlayRestriction: ValueFollow, MechanicWinnerEligibility: ValueLeadSuit, MechanicRankComparison: ValueHigh, MechanicTieBreak: ValueFirstPlay, MechanicTrickPoints: ValueOnePoint, MechanicHandLimit: ValueConfigured, MechanicVictory: ValueHighestShared, MechanicReveal: ValueConfigured}
 	want, ok := values[e.Mechanic]
 	if !ok {
 		return false
 	}
 	if e.Mechanic == MechanicPlayRestriction {
-		return (e.Value == ValueFollow || e.Value == ValueAnySuit) && e.Config == ""
+		return (e.Value == ValueFollow || e.Value == ValueAnySuit || e.Value == ValueFollowOrTrump) && e.Config == ""
+	}
+	if e.Mechanic == MechanicTrump {
+		return (e.Value == ValueNoTrump || e.Value == ValueSpadesTrump || e.Value == ValueFirstLeadTrump) && e.Config == ""
 	}
 	if e.Mechanic == MechanicRankComparison {
 		return (e.Value == ValueHigh || e.Value == ValueLow) && e.Config == ""
@@ -362,6 +383,11 @@ func DefaultCatalog() Catalog {
 		baseline(RuleHandLimit, "Fixed Hand Limit", "End after the configured number of hands.", FieldScoreVictory, TypedEffect{MechanicHandLimit, ValueConfigured, "max_hands"}),
 		baseline(RuleVictory, "Highest Score Wins", "Highest score wins; tied leaders share victory.", FieldScoreVictory, TypedEffect{MechanicVictory, ValueHighestShared, ""}),
 		baseline(RuleReveal, "Rule Reveal", "Reveal at the configured interval between hands if an eligible card remains.", FieldPlay, TypedEffect{MechanicReveal, ValueConfigured, "reveal_every"}),
+		{ID: RuleSpadesTrump, Title: "Spades Are Trump", Text: "Spades beat nontrump cards. If no trump is played, the lead suit wins.", Category: "rule", Status: StatusSupported, FieldCategory: FieldTrick, Effects: []TypedEffect{{Mechanic: MechanicTrump, Value: ValueSpadesTrump}}, Overrides: []RuleID{RuleNoTrump, RulePitchTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RulePitchTrump, Title: "Pitch the Trump", Text: "The first card led each hand chooses its trump suit, including the first trick.", Category: "rule", Status: StatusSupported, FieldCategory: FieldTrick, Effects: []TypedEffect{{Mechanic: MechanicTrump, Value: ValueFirstLeadTrump}}, Overrides: []RuleID{RuleNoTrump, RuleSpadesTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleFollowOrTrump, Title: "Follow Suit or Trump", Text: "Follow suit or play trump when holding the lead suit. On a trump lead, follow trump if able.", Category: "rule", Status: StatusSupported, FieldCategory: FieldPlay, Effects: []TypedEffect{{Mechanic: MechanicPlayRestriction, Value: ValueFollowOrTrump}}, Overrides: []RuleID{RuleFollowSuit, RuleNoFollowRequired}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleBreakSpades, Title: "Break Spades", Text: "Do not lead spades until a spade has been played on another suit lead, unless only spades remain.", Category: "rule", Status: StatusSupported, FieldCategory: FieldPlay, Effects: []TypedEffect{{Mechanic: MechanicBreakSpades, Value: ValueBreakSpades}}, Prerequisites: []RuleID{RuleSpadesTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleBreakHearts, Title: "Break Hearts", Text: "Do not lead hearts until a heart has been played on another suit lead, unless only hearts remain.", Category: "rule", Status: StatusSupported, FieldCategory: FieldPlay, Effects: []TypedEffect{{Mechanic: MechanicBreakHearts, Value: ValueBreakHearts}}, InDeck: true, StartingVisibility: NotStarting},
 		follow,
 		supported(RuleNoFollowRequired, "No Follow Required", "Play any card even if you hold the lead suit. Only lead-suit cards can win without trump.", TimingPlay, "", EffectAnySuit, false, RuleFollowSuit),
 		unsupported("rule.must_underplay", "Must Underplay", "If able, you must play a lower card than the lead.", "rule", unmodeled),

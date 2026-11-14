@@ -147,6 +147,13 @@ func ResolveRules(field []RuleInstance, catalog Catalog, config Config) (RuleRes
 					break
 				}
 			}
+			if len(d.PrerequisiteAny) > 0 {
+				anyActive := false
+				for _, prerequisite := range d.PrerequisiteAny {
+					anyActive = anyActive || activeIDs[prerequisite]
+				}
+				eligible = eligible && anyActive
+			}
 			if eligible {
 				next[mechanic] = index
 			} else if baseline, ok := starting[mechanic]; ok && !field[baseline].Removed {
@@ -228,7 +235,7 @@ func (r RuleResolution) ValidateMatchEffects(config Config) error {
 		{MechanicDeck, ValueStandardDeck, 0}, {MechanicHandSize, ValueConfigured, config.HandSize},
 		{MechanicUnused, ValueOutOfPlay, 0}, {MechanicScoreOwnership, ValueIndividual, 0},
 		{MechanicTurnOrder, ValueClockwise, 0}, {MechanicFirstLeader, ValueLeftOfDealer, 0},
-		{MechanicNextLeader, ValueWinnerLeads, 0}, {MechanicTrump, ValueNoTrump, 0},
+		{MechanicNextLeader, ValueWinnerLeads, 0}, {MechanicTrump, "", 0},
 		{MechanicPlayRestriction, "", 0}, {MechanicWinnerEligibility, ValueLeadSuit, 0},
 		{MechanicRankComparison, "", 0}, {MechanicTieBreak, ValueFirstPlay, 0},
 		{MechanicTrickPoints, ValueOnePoint, 0}, {MechanicHandLimit, ValueConfigured, config.MaxHands},

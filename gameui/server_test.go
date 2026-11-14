@@ -388,7 +388,7 @@ func TestWebsocketJoinThroughRuleReveal(t *testing.T) {
 	state := *r.state
 	events := append([]domain.Event(nil), r.lastEvents...)
 	r.mu.Unlock()
-	if state.CompletedHands != 3 || len(state.Field) != 15 || events[len(events)-1].Kind != domain.EventHandCompleted {
+	if state.CompletedHands != 3 || len(state.Field) != 16 || events[len(events)-1].Kind != domain.EventRuleRevealed {
 		t.Fatalf("reveal did not occur: %+v, %+v", state.Field, events)
 	}
 	if state.Seats[0].Score+state.Seats[1].Score != 15 {

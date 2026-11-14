@@ -3,13 +3,14 @@ package gameui
 import "github.com/n0remac/trick-evolution/domain"
 
 // ObservedPlay contains only facts visible when a card was played. The
-// follow flag must be stored at that time; later rule reveals cannot change
-// whether an off-suit play proved a void suit.
+// play restriction and selected trump are stored at that time; later rule
+// reveals cannot reinterpret whether an off-suit play proved a void suit.
 type ObservedPlay struct {
-	Seat           domain.SeatID
-	Card           domain.CardID
-	LeadSuit       domain.Suit
-	FollowRequired bool
+	Seat            domain.SeatID
+	Card            domain.CardID
+	LeadSuit        domain.Suit
+	PlayRestriction domain.EffectValue
+	TrumpSuit       domain.Suit
 }
 
 type ObservedTrick struct {
@@ -40,10 +41,9 @@ func (r *room) recordPublicEventsLocked(previous *domain.MatchState, events []do
 				leadID = previous.CurrentTrick[0].Card
 			}
 			lead, _ := domain.CardDetails(leadID) // Accepted Step validated the card.
-			follow := false
 			resolved, _ := domain.ResolveRules(previous.Field, r.server.catalog, previous.Config)
-			if effect, err := resolved.Effect(domain.MechanicPlayRestriction); err == nil { follow = effect.Value == domain.ValueFollow }
-			r.publicPlays = append(r.publicPlays, ObservedPlay{Seat: event.Seat, Card: event.Card, LeadSuit: lead.Suit, FollowRequired: follow})
+			play, _ := resolved.Effect(domain.MechanicPlayRestriction)
+			r.publicPlays = append(r.publicPlays, ObservedPlay{Seat: event.Seat, Card: event.Card, LeadSuit: lead.Suit, PlayRestriction: play.Value, TrumpSuit: previous.TrumpSuit})
 		case domain.EventTrickWon:
 			r.publicTricks = append(r.publicTricks, ObservedTrick{Winner: event.Seat, Plays: append([]domain.Play(nil), event.Plays...)})
 		}

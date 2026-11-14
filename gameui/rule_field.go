@@ -89,7 +89,7 @@ func renderFieldCard(rule domain.ResolvedRule, definition domain.RuleDefinition,
 	short := []string{}
 	for _, effect := range public.Effective {
 		if effect.InstanceID == rule.Instance.InstanceID {
-			short = append(short, shortEffect(effect))
+			short = append(short, shortEffect(effect, rule, public))
 		}
 	}
 	partial := len(rule.ActiveEffects) < len(definition.Effects)
@@ -109,11 +109,42 @@ func renderFieldCard(rule domain.ResolvedRule, definition domain.RuleDefinition,
 	return h.Button(children...)
 }
 
-func shortEffect(effect domain.EffectiveEffect) string {
+func shortEffect(effect domain.EffectiveEffect, rule domain.ResolvedRule, public domain.PublicView) string {
+	pending := !rule.Instance.Starting && public.HandNumber <= rule.Instance.IntroducedAfterHand
 	switch effect.Mechanic {
+	case domain.MechanicTrump:
+		if effect.Value == domain.ValueSpadesTrump {
+			if pending {
+				return "Trump: Spades · next hand"
+			}
+			return "Trump: Spades"
+		}
+		if effect.Value == domain.ValueFirstLeadTrump {
+			if pending {
+				return "First lead chooses · next hand"
+			}
+			if public.TrumpSuit != "" {
+				return "Trump: " + suitName(public.TrumpSuit)
+			}
+			return "First lead chooses"
+		}
+		return "No trump"
+	case domain.MechanicBreakSpades:
+		if !pending && public.BrokenSpades {
+			return "Spades: Broken"
+		}
+		return "Spades: Unbroken"
+	case domain.MechanicBreakHearts:
+		if !pending && public.BrokenHearts {
+			return "Hearts: Broken"
+		}
+		return "Hearts: Unbroken"
 	case domain.MechanicPlayRestriction:
 		if effect.Value == domain.ValueFollow {
 			return "Follow suit when able"
+		}
+		if effect.Value == domain.ValueFollowOrTrump {
+			return "Follow suit or play trump"
 		}
 		return "Any suit may be played"
 	case domain.MechanicWinnerEligibility:
@@ -127,6 +158,21 @@ func shortEffect(effect domain.EffectiveEffect) string {
 	return effectDescription(effect)
 }
 
+func suitName(suit domain.Suit) string {
+	switch suit {
+	case domain.Spades:
+		return "Spades"
+	case domain.Hearts:
+		return "Hearts"
+	case domain.Diamonds:
+		return "Diamonds"
+	case domain.Clubs:
+		return "Clubs"
+	default:
+		return "Unset"
+	}
+}
+
 func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition, public domain.PublicView, catalog domain.Catalog) string {
 	lines := []string{"Category: " + categoryLabel(definition.FieldCategory) + "."}
 	if rule.Instance.Starting {
@@ -137,6 +183,9 @@ func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition,
 	for _, effect := range public.Effective {
 		if effect.InstanceID == rule.Instance.InstanceID {
 			lines = append(lines, effectDescription(effect))
+			if effect.Mechanic == domain.MechanicTrump || effect.Mechanic == domain.MechanicBreakSpades || effect.Mechanic == domain.MechanicBreakHearts {
+				lines = append(lines, shortEffect(effect, rule, public)+".")
+			}
 		}
 	}
 	for _, declared := range definition.Effects {
@@ -160,7 +209,7 @@ func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition,
 		}
 		lines = append(lines, fmt.Sprintf("%s is no longer controlled by this card; %s controls it now.", mechanicNames([]domain.Mechanic{declared.Mechanic}), controller))
 	}
-	if len(definition.Prerequisites) > 0 {
+	if len(definition.Prerequisites) > 0 || len(definition.PrerequisiteAny) > 0 {
 		for _, id := range definition.Prerequisites {
 			prerequisite, _ := catalog.Definition(id)
 			status := "inactive"
@@ -171,6 +220,14 @@ func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition,
 				}
 			}
 			lines = append(lines, "Requires "+prerequisite.Title+" ("+status+").")
+		}
+		if len(definition.PrerequisiteAny) > 0 {
+			names := []string{}
+			for _, id := range definition.PrerequisiteAny {
+				prerequisite, _ := catalog.Definition(id)
+				names = append(names, prerequisite.Title)
+			}
+			lines = append(lines, "Requires one active rule: "+strings.Join(names, " or ")+".")
 		}
 	} else {
 		lines = append(lines, "No prerequisite rules.")

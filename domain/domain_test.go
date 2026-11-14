@@ -9,6 +9,15 @@ type identityShuffle struct{}
 
 func (identityShuffle) Shuffle(_ int, _ func(i, j int)) {}
 
+// Legacy fixtures exercise the Stage 1 baseline without evolution draws.
+func emptyEvolutionCatalog() Catalog {
+	c := DefaultCatalog()
+	for i := range c.Definitions {
+		c.Definitions[i].InDeck = false
+	}
+	return c
+}
+
 func TestStandardDeckUniqueAndStable(t *testing.T) {
 	deck := StandardDeck()
 	if len(deck) != 52 || !reflect.DeepEqual(deck, StandardDeck()) {
@@ -39,7 +48,7 @@ func TestStage1SetupReplayAndProjection(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(a, replay) {
 		t.Fatal("replay diverged", err)
 	}
-	if a.Dealer != "north" || a.Leader != "east" || a.Turn != "east" || len(a.RuleDraw) != 0 || len(a.StandardDraw) != 52-cfg.HandSize*len(ids) {
+	if a.Dealer != "north" || a.Leader != "east" || a.Turn != "east" || len(a.RuleDraw) != 5 || len(a.StandardDraw) != 52-cfg.HandSize*len(ids) {
 		t.Fatalf("bad setup %+v", a)
 	}
 	for _, id := range ids {
@@ -96,8 +105,8 @@ func TestInjectedFixtureDeal(t *testing.T) {
 	if !reflect.DeepEqual(state.Hands["b"], []CardID{"std:H:02", "std:H:04", "std:H:06", "std:H:08", "std:H:10"}) || !reflect.DeepEqual(state.Hands["a"], []CardID{"std:H:03", "std:H:05", "std:H:07", "std:H:09", "std:H:11"}) {
 		t.Fatalf("deal changed %+v", state.Hands)
 	}
-	if len(state.RuleDraw) != 0 {
-		t.Fatal("default evolution deck should be empty")
+	if len(state.RuleDraw) != 5 {
+		t.Fatal("default evolution deck should contain five cards")
 	}
 }
 
@@ -106,19 +115,39 @@ func TestCatalogValidation(t *testing.T) {
 	if err := catalog.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Definitions) != 68 {
+	if len(catalog.Definitions) != 73 {
 		t.Fatalf("catalog entries %d", len(catalog.Definitions))
 	}
-	if len(catalog.RuleDeck()) != 0 {
-		t.Fatal("default deck not empty")
+	wantDeck := []RuleID{RuleSpadesTrump, RulePitchTrump, RuleFollowOrTrump, RuleBreakSpades, RuleBreakHearts}
+	if !reflect.DeepEqual(catalog.RuleDeck(), wantDeck) {
+		t.Fatalf("default evolution deck: %v", catalog.RuleDeck())
 	}
 	cases := map[string]func(*Catalog){
-		"duplicate":        func(c *Catalog) { c.Definitions = append(c.Definitions, c.Definitions[0]) },
-		"unknown effect":   func(c *Catalog) { c.Definitions[13].Effects[0].Value = "unknown" },
-		"unknown target":   func(c *Catalog) { c.Definitions[14].Overrides = []RuleID{"missing"} },
-		"unsupported draw": func(c *Catalog) { c.Definitions[15].InDeck = true },
-		"starter in draw":  func(c *Catalog) { c.Definitions[13].InDeck = true },
-		"old version":      func(c *Catalog) { c.Version = 1 },
+		"duplicate":      func(c *Catalog) { c.Definitions = append(c.Definitions, c.Definitions[0]) },
+		"unknown effect": func(c *Catalog) { c.Definitions[13].Effects[0].Value = "unknown" },
+		"unknown target": func(c *Catalog) { c.Definitions[14].Overrides = []RuleID{"missing"} },
+		"unsupported draw": func(c *Catalog) {
+			for i := range c.Definitions {
+				if c.Definitions[i].ID == "rule.must_underplay" {
+					c.Definitions[i].InDeck = true
+				}
+			}
+		},
+		"starter in draw": func(c *Catalog) {
+			for i := range c.Definitions {
+				if c.Definitions[i].ID == RuleFollowSuit {
+					c.Definitions[i].InDeck = true
+				}
+			}
+		},
+		"duplicate alternative prerequisite": func(c *Catalog) {
+			for i := range c.Definitions {
+				if c.Definitions[i].ID == RuleFollowOrTrump {
+					c.Definitions[i].PrerequisiteAny = append(c.Definitions[i].PrerequisiteAny, RuleSpadesTrump)
+				}
+			}
+		},
+		"old version": func(c *Catalog) { c.Version = 1 },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -171,7 +200,7 @@ func TestOrderedReplacementAndBaselineRestoration(t *testing.T) {
 }
 
 func TestRevealSkipsIneligibleAndStopsOnEmptyDeck(t *testing.T) {
-	c := DefaultCatalog()
+	c := emptyEvolutionCatalog()
 	for i := range c.Definitions {
 		switch c.Definitions[i].ID {
 		case RuleLowCardWins:
@@ -272,7 +301,7 @@ func TestConfigAndSeatValidation(t *testing.T) {
 }
 
 func TestHiddenPrerequisiteAndIneligibleDeckRetention(t *testing.T) {
-	c := DefaultCatalog()
+	c := emptyEvolutionCatalog()
 	for i := range c.Definitions {
 		if c.Definitions[i].ID == RuleLowCardWins {
 			c.Definitions[i].InDeck = true
@@ -339,7 +368,7 @@ func TestDependentReactivatesWhenStartingPrerequisiteReturns(t *testing.T) {
 }
 
 func TestFinalCadenceDoesNotReveal(t *testing.T) {
-	c := DefaultCatalog()
+	c := emptyEvolutionCatalog()
 	for i := range c.Definitions {
 		if c.Definitions[i].ID == RuleLowCardWins {
 			c.Definitions[i].InDeck = true

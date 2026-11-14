@@ -81,7 +81,7 @@ func rulesReviewContent(message serverMessage, seat domain.SeatID, catalog domai
 		h.Attr("data-kind", message.Type), h.Attr("data-update", fmt.Sprint(message.Sequence)), h.Attr("data-host", fmt.Sprint(host)),
 		h.P(h.Class("review-context"), h.T(intro)),
 		h.NewNode("div", tabNodes),
-		panel("current", defaultTab != "current", renderCurrentRules(current, catalog, lobby)),
+		panel("current", defaultTab != "current", renderCurrentRules(current, catalog, lobby, message.View)),
 		panel("starting", defaultTab != "starting", renderStartingRules(starting, catalog)),
 		panel("changes", defaultTab != "changes", renderRuleChanges(current, catalog)),
 		h.Div(actions...),
@@ -96,7 +96,7 @@ func reviewStartButton(disabled bool) *h.Node {
 	return h.Button(nodes...)
 }
 
-func renderCurrentRules(resolved domain.RuleResolution, catalog domain.Catalog, lobby bool) *h.Node {
+func renderCurrentRules(resolved domain.RuleResolution, catalog domain.Catalog, lobby bool, view *domain.PlayerView) *h.Node {
 	title := "Rules in effect now"
 	if lobby {
 		title = "Rules ready for the first hand"
@@ -112,7 +112,15 @@ func renderCurrentRules(resolved domain.RuleResolution, catalog domain.Catalog, 
 			if !ok || definition.FieldCategory != group.category {
 				continue
 			}
-			entries = append(entries, renderEffectiveRule(rule, definition, resolved.Effective))
+			status := ""
+			if view != nil {
+				for _, effect := range resolved.Effective {
+					if effect.InstanceID == rule.Instance.InstanceID && (effect.Mechanic == domain.MechanicTrump || effect.Mechanic == domain.MechanicBreakSpades || effect.Mechanic == domain.MechanicBreakHearts) {
+						status = shortEffect(effect, rule, view.Public)
+					}
+				}
+			}
+			entries = append(entries, renderEffectiveRule(rule, definition, resolved.Effective, status))
 		}
 		if len(entries) > 0 {
 			parts = append(parts, reviewGroup(group.label, entries))
@@ -126,7 +134,7 @@ func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog)
 	for _, rule := range starting.ActiveField {
 		definition, ok := catalog.Definition(rule.Instance.DefinitionID)
 		if ok {
-			cards = append(cards, renderEffectiveRule(rule, definition, starting.Effective))
+			cards = append(cards, renderEffectiveRule(rule, definition, starting.Effective, ""))
 		}
 	}
 	parts := []*h.Node{h.NewNode("h3", []*h.Node{h.T("Starting field cards")}), h.P(h.Class("muted"), h.T("These are the two cards visible on the table when play begins.")), h.Div(append([]*h.Node{h.Class("review-start-cards")}, cards...)...), h.NewNode("h3", []*h.Node{h.T("Active starting baselines")})}
@@ -138,7 +146,7 @@ func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog)
 			}
 			definition, ok := catalog.Definition(rule.Instance.DefinitionID)
 			if ok && definition.StartingVisibility == domain.Hidden && definition.FieldCategory == group.category {
-				entries = append(entries, renderEffectiveRule(rule, definition, starting.Effective))
+				entries = append(entries, renderEffectiveRule(rule, definition, starting.Effective, ""))
 			}
 		}
 		if len(entries) > 0 {
@@ -154,7 +162,7 @@ func reviewGroup(label string, entries []*h.Node) *h.Node {
 	return h.Section(nodes...)
 }
 
-func renderEffectiveRule(rule domain.ResolvedRule, definition domain.RuleDefinition, effects []domain.EffectiveEffect) *h.Node {
+func renderEffectiveRule(rule domain.ResolvedRule, definition domain.RuleDefinition, effects []domain.EffectiveEffect, status string) *h.Node {
 	kind := "Field card"
 	if definition.StartingVisibility == domain.Hidden {
 		kind = "Hidden baseline"
@@ -164,6 +172,9 @@ func renderEffectiveRule(rule domain.ResolvedRule, definition domain.RuleDefinit
 		if effect.InstanceID == rule.Instance.InstanceID {
 			nodes = append(nodes, h.P(h.T(effectDescription(effect))))
 		}
+	}
+	if status != "" {
+		nodes = append(nodes, h.P(h.Class("review-rule-status"), h.T(status)))
 	}
 	return h.NewNode("article", nodes)
 }
@@ -185,14 +196,27 @@ func effectDescription(e domain.EffectiveEffect) string {
 	case domain.MechanicNextLeader:
 		return "The winner leads the next trick."
 	case domain.MechanicTrump:
+		switch e.Value {
+		case domain.ValueSpadesTrump:
+			return "Spades are trump. If a trump card is played, only trump cards can win; otherwise the lead suit can win. The active rank and tie rules compare eligible cards."
+		case domain.ValueFirstLeadTrump:
+			return "The first card led each hand chooses trump for that hand, including its first trick. If trump is played, only trump can win; otherwise the lead suit can win. The normal opening leader still leads."
+		}
 		return "There is no trump suit."
+	case domain.MechanicBreakSpades:
+		return "Do not lead spades until a spade has been played on a different suit lead, unless only spades remain. If both active lead bans leave no legal lead, any card may be led. This resets each hand."
+	case domain.MechanicBreakHearts:
+		return "Do not lead hearts until a heart has been played on a different suit lead, unless only hearts remain. If both active lead bans leave no legal lead, any card may be led. This resets each hand."
 	case domain.MechanicPlayRestriction:
 		if e.Value == domain.ValueFollow {
 			return "Play the lead suit when you hold it."
 		}
+		if e.Value == domain.ValueFollowOrTrump {
+			return "On a nontrump lead, follow suit or play trump when holding the lead suit; if void in the lead suit, play anything. On a trump lead, follow trump when able."
+		}
 		return "You may play any card, even when you hold the lead suit."
 	case domain.MechanicWinnerEligibility:
-		return "Only cards in the lead suit can win."
+		return "Only cards in the lead suit can win; active trump overrides this when played."
 	case domain.MechanicRankComparison:
 		if e.Value == domain.ValueLow {
 			return "The lowest eligible rank wins, from 2 up to ace."
@@ -283,7 +307,18 @@ func renderRuleChanges(current domain.RuleResolution, catalog domain.Catalog) *h
 					names = append(names, d.Title)
 				}
 			}
-			nodes = append(nodes, h.P(h.T("Requires an active "+strings.Join(names, ", ")+" rule.")))
+			if len(names) > 0 {
+				nodes = append(nodes, h.P(h.T("Requires an active "+strings.Join(names, ", ")+" rule.")))
+			}
+			if len(definition.PrerequisiteAny) > 0 {
+				alternatives := []string{}
+				for _, id := range definition.PrerequisiteAny {
+					if d, ok := catalog.Definition(id); ok {
+						alternatives = append(alternatives, d.Title)
+					}
+				}
+				nodes = append(nodes, h.P(h.T("Requires one active rule: "+strings.Join(alternatives, " or ")+".")))
+			}
 		}
 		entries = append(entries, h.NewNode("article", nodes))
 	}

@@ -72,7 +72,7 @@ func TestBotVsBotDeterministicMatch(t *testing.T) {
 		for _, score := range scores {
 			total += score
 		}
-		if total != 50 || !reflect.DeepEqual(scores, again) || len(reveals) != 0 || !reflect.DeepEqual(reveals, againReveals) {
+		if total != 50 || !reflect.DeepEqual(scores, again) || !reflect.DeepEqual(reveals, []int{3, 6, 9}) || !reflect.DeepEqual(reveals, againReveals) {
 			t.Fatalf("%d bots were nondeterministic: %v/%v reveals %v/%v", seats, scores, again, reveals, againReveals)
 		}
 	}
@@ -181,7 +181,7 @@ func TestServerCloseCancelsPendingBotMove(t *testing.T) {
 
 func botView(t *testing.T, hand []domain.CardID, trick []domain.Play, low, follow, anySuit bool) domain.PlayerView {
 	t.Helper()
-	field := []domain.RuleInstance{{InstanceID: "high", DefinitionID: domain.RuleHighCardWins, Sequence: 0}}
+	field := []domain.RuleInstance{{InstanceID: "trump", DefinitionID: domain.RuleNoTrump, Sequence: 0}, {InstanceID: "high", DefinitionID: domain.RuleHighCardWins, Sequence: 1}}
 	if low {
 		field = append(field, domain.RuleInstance{InstanceID: "low", DefinitionID: domain.RuleLowCardWins, Sequence: len(field)})
 	}

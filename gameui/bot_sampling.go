@@ -92,6 +92,7 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 		}
 		seen[id] = true
 	}
+	brokenSpades, brokenHearts := false, false
 	for i, play := range observation.Played {
 		card, ok := domain.CardDetails(play.Card)
 		if !ok || seen[play.Card] {
@@ -108,12 +109,29 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 		if !ok || play.LeadSuit != lead.Suit {
 			return preparedObservation{}, fmt.Errorf("inconsistent public lead suit")
 		}
-		if play.FollowRequired && card.Suit != play.LeadSuit {
+		if play.PlayRestriction != domain.ValueFollow && play.PlayRestriction != domain.ValueAnySuit && play.PlayRestriction != domain.ValueFollowOrTrump {
+			return preparedObservation{}, fmt.Errorf("unknown observed play restriction")
+		}
+		if play.TrumpSuit != "" && play.TrumpSuit != domain.Hearts && play.TrumpSuit != domain.Diamonds && play.TrumpSuit != domain.Clubs && play.TrumpSuit != domain.Spades {
+			return preparedObservation{}, fmt.Errorf("unknown observed trump suit")
+		}
+		if card.Suit != play.LeadSuit && card.Suit == domain.Spades {
+			brokenSpades = true
+		}
+		if card.Suit != play.LeadSuit && card.Suit == domain.Hearts {
+			brokenHearts = true
+		}
+		provesVoid := card.Suit != play.LeadSuit && (play.PlayRestriction == domain.ValueFollow ||
+			play.PlayRestriction == domain.ValueFollowOrTrump && play.TrumpSuit != "" && card.Suit != play.TrumpSuit)
+		if provesVoid {
 			if prepared.voids[play.Seat] == nil {
 				prepared.voids[play.Seat] = make(map[domain.Suit]bool)
 			}
 			prepared.voids[play.Seat][play.LeadSuit] = true
 		}
+	}
+	if brokenSpades != public.BrokenSpades || brokenHearts != public.BrokenHearts {
+		return preparedObservation{}, fmt.Errorf("public broken-suit facts disagree with plays")
 	}
 	for _, id := range view.Hand {
 		card, _ := domain.CardDetails(id)
@@ -220,7 +238,7 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 	}
 	state := domain.MatchState{Revision: public.Revision, CatalogVersion: catalog.Version, Config: prepared.config,
 		Phase: public.Phase, Seats: make([]domain.Seat, len(public.Seats)), Hands: make(map[domain.SeatID][]domain.CardID), Captured: make(map[domain.SeatID][]domain.CardID),
-		CurrentTrick: append([]domain.Play(nil), public.CurrentTrick...), Dealer: public.Dealer, Leader: public.Leader, Turn: public.Turn,
+		CurrentTrick: append([]domain.Play(nil), public.CurrentTrick...), TrumpSuit: public.TrumpSuit, BrokenSpades: public.BrokenSpades, BrokenHearts: public.BrokenHearts, Dealer: public.Dealer, Leader: public.Leader, Turn: public.Turn,
 		HandNumber: public.HandNumber, TrickNumber: public.TrickNumber, CompletedHands: public.CompletedHands,
 		Field: append([]domain.RuleInstance(nil), prepared.field...), RuleDraw: append([]domain.RuleID(nil), prepared.rules...)}
 	for i, seat := range public.Seats {

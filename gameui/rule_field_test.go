@@ -151,6 +151,14 @@ func TestRevealCueNamesNextHand(t *testing.T) {
 	}
 }
 
+func TestBrokenSuitCueSurvivesTrickCompletion(t *testing.T) {
+	events := []domain.Event{{Kind: domain.EventCardPlayed, Seat: "host", Card: "std:S:02", BrokeSpades: true}, {Kind: domain.EventTrickWon, Seat: "host", Trick: 2}}
+	got := eventNotice(events, domain.DefaultCatalog(), func(domain.SeatID) string { return "Alice" })
+	if !strings.Contains(got, "Spades are broken") || !strings.Contains(got, "won trick 2") {
+		t.Fatalf("status lost break transition: %s", got)
+	}
+}
+
 func TestRuleFieldAndReviewShareLiveProjection(t *testing.T) {
 	state, catalog := fieldFixture(t)
 	appendFieldRule(&state, domain.RuleLowCardWins, "low-reveal")
@@ -168,5 +176,48 @@ func TestRuleFieldAndReviewShareLiveProjection(t *testing.T) {
 		if strings.Contains(html, string(card)) {
 			t.Fatalf("opponent card leaked into live projection: %s", card)
 		}
+	}
+}
+
+func TestTrumpBreakFieldReviewAndReplacement(t *testing.T) {
+	state, catalog := fieldFixture(t)
+	for _, entry := range []struct {
+		id       domain.RuleID
+		instance string
+	}{{domain.RuleSpadesTrump, "spades"}, {domain.RuleFollowOrTrump, "optional"}, {domain.RuleBreakSpades, "break-spades"}, {domain.RuleBreakHearts, "break-hearts"}} {
+		appendFieldRule(&state, entry.id, entry.instance)
+	}
+	state.HandNumber, state.CompletedHands, state.TrickNumber = 4, 3, 2
+	state.TrumpSuit, state.BrokenSpades = domain.Spades, true
+	view := fieldView(t, state, catalog)
+	field := renderRuleField(view.Public, catalog).Render()
+	review := reviewHTML(t, reviewMessage(&view), "host", catalog, state.Config)
+	for _, want := range []string{"Trump: Spades", "Spades: Broken", "Hearts: Unbroken", "Follow suit or play trump", "If both active lead bans leave no legal lead", "Spades Are Trump", "Break Spades", "Break Hearts"} {
+		if !strings.Contains(field+review, want) {
+			t.Fatalf("missing %q", want)
+		}
+	}
+	if strings.Contains(field, `data-rule-title="No Trump"`) {
+		t.Fatal("hidden trump baseline entered field")
+	}
+	for _, card := range state.Hands["guest"] {
+		if strings.Contains(field+review, string(card)) {
+			t.Fatalf("private card %s leaked", card)
+		}
+	}
+	appendFieldRule(&state, domain.RulePitchTrump, "pitch")
+	state.TrumpSuit = domain.Hearts
+	view = fieldView(t, state, catalog)
+	field = renderRuleField(view.Public, catalog).Render()
+	review = reviewHTML(t, reviewMessage(&view), "host", catalog, state.Config)
+	if strings.Contains(field, `data-rule-title="Spades Are Trump"`) || strings.Contains(field, `data-rule-title="Break Spades"`) || !strings.Contains(field, `data-rule-title="Pitch the Trump"`) || !strings.Contains(field, "Trump: Hearts") {
+		t.Fatal("pitch replacement field is stale")
+	}
+	if !strings.Contains(review, "Inactive: prerequisite missing") || !strings.Contains(review, "No Trump") || !strings.Contains(review, "Superseded") {
+		t.Fatal("history omitted inactive dependency or baseline replacement")
+	}
+	reconnected := fieldView(t, state, catalog)
+	if !reflect.DeepEqual(view.Public, reconnected.Public) || !reflect.DeepEqual(fieldOrder(view.Public, catalog), fieldOrder(reconnected.Public, catalog)) {
+		t.Fatal("reconnect field changed")
 	}
 }

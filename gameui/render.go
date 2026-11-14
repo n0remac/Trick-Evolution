@@ -300,6 +300,15 @@ func eventNotice(events []domain.Event, catalog domain.Catalog, name func(domain
 			outcomes = append(outcomes, fmt.Sprintf("Hand %d dealt.", event.Hand))
 		case domain.EventCardPlayed:
 			play = fmt.Sprintf("%s played %s.", name(event.Seat), cardLabel(event.Card))
+			if event.TrumpSuit != "" {
+				play += " Trump: " + suitName(event.TrumpSuit) + " chosen for this hand."
+			}
+			if event.BrokeSpades {
+				play += " Spades are broken."
+			}
+			if event.BrokeHearts {
+				play += " Hearts are broken."
+			}
 		case domain.EventTrickWon:
 			outcomes = append(outcomes, fmt.Sprintf("%s won trick %d.", name(event.Seat), event.Trick))
 		case domain.EventRuleRevealed:
@@ -310,6 +319,9 @@ func eventNotice(events []domain.Event, catalog domain.Catalog, name func(domain
 	}
 	if len(outcomes) == 0 {
 		return play
+	}
+	if play != "" {
+		outcomes = append([]string{play}, outcomes...)
 	}
 	return strings.Join(outcomes, " ")
 }

@@ -92,7 +92,7 @@
     const entry = selections.get(id);
     if (!entry || inputBlocked()) return;
     if (!entry.legal) {
-      if (displayedSeats.some(seat => seat.self && seat.turn)) notice('Choose a legal card for this trick.');
+      if (displayedSeats.some(seat => seat.self && seat.turn)) notice(entry.reason || 'Choose a legal card for this trick.');
       return;
     }
     const screen = document.getElementById('screen');

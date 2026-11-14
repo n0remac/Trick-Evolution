@@ -124,6 +124,9 @@ type MatchState struct {
 	StandardDraw   []CardID
 	RuleDraw       []RuleID
 	CurrentTrick   []Play
+	TrumpSuit      Suit // Empty before Pitch's first lead, or with No Trump.
+	BrokenSpades   bool // Public facts, tracked even before Break Spades is active.
+	BrokenHearts   bool
 	Dealer         SeatID
 	Leader         SeatID
 	Turn           SeatID
@@ -183,6 +186,10 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 	if err := resolved.ValidateMatchEffects(cfg); err != nil {
 		return MatchState{}, err
 	}
+	state.TrumpSuit, err = TrumpForTrick(resolved, "", nil)
+	if err != nil {
+		return MatchState{}, err
+	}
 	return state, nil
 }
 
@@ -221,6 +228,10 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 		return MatchState{}, err
 	}
 	if err := resolved.ValidateMatchEffects(cfg); err != nil {
+		return MatchState{}, err
+	}
+	state.TrumpSuit, err = TrumpForTrick(resolved, "", nil)
+	if err != nil {
 		return MatchState{}, err
 	}
 	return state, nil

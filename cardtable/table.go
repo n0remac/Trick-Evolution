@@ -15,6 +15,7 @@ type Selection struct {
 	PickID    string                `json:"pickId"`
 	Card      domain.CardID         `json:"card"`
 	Legal     bool                  `json:"legal"`
+	Reason    string                `json:"reason,omitempty"`
 	Animation animation.Description `json:"animation"`
 }
 type Seat struct {
@@ -188,7 +189,11 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 		if err := motion.Validate(); err != nil {
 			return Payload{}, err
 		}
-		selections = append(selections, Selection{PickID: id, Card: card.ID, Legal: allowed[card.ID], Animation: motion})
+		reason := ""
+		if view.Public.Phase == domain.PhasePlayingTrick && view.Seat == view.Public.Turn && !allowed[card.ID] {
+			reason, _ = domain.LegalCardReason(view, card.ID, catalog)
+		}
+		selections = append(selections, Selection{PickID: id, Card: card.ID, Legal: allowed[card.ID], Reason: reason, Animation: motion})
 	}
 	for _, play := range view.Public.CurrentTrick {
 		card, ok := domain.CardDetails(play.Card)

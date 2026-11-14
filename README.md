@@ -2,7 +2,7 @@
 
 The current game interface is rendered with shared GoDom and updated through HTMX WebSockets. See [U1: shared GoDom migration](docs/U1_GODOM_MIGRATION.md) and [the UI roadmap](docs/UI_GODOM_3D_ROADMAP.md). The [revival plan](docs/REVIVAL_PLAN.md) records the earlier architecture and stages.
 
-See [Basic Play and Rule Field Stage 1](docs/BASIC_RULES_STAGE1.md) for the rule model, [Stage 2](docs/BASIC_RULES_STAGE2.md) for the Game Rules review, and [Stage 3](docs/BASIC_RULES_STAGE3.md) for the table rule field.
+See [Basic Play and Rule Field Stage 1](docs/BASIC_RULES_STAGE1.md) for the rule model, [Stage 2](docs/BASIC_RULES_STAGE2.md) for the Game Rules review, and [Stage 3](docs/BASIC_RULES_STAGE3.md) for the table rule field. See [Trump and Play Restrictions with AI](docs/TRUMP_PLAY_AI.md) for the current five-card evolution set and bot behavior.
 
 ## Play locally
 

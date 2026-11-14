@@ -8,15 +8,17 @@ import (
 type ErrorCode string
 
 const (
-	ErrInvalidState   ErrorCode = "invalid_state"
-	ErrUnknownAction  ErrorCode = "unknown_action"
-	ErrUnknownSeat    ErrorCode = "unknown_seat"
-	ErrWrongPhase     ErrorCode = "wrong_phase"
-	ErrNotYourTurn    ErrorCode = "not_your_turn"
-	ErrNotHost        ErrorCode = "not_host"
-	ErrCardNotOwned   ErrorCode = "card_not_owned"
-	ErrMustFollowSuit ErrorCode = "must_follow_suit"
-	ErrInvalidDeck    ErrorCode = "invalid_deck"
+	ErrInvalidState      ErrorCode = "invalid_state"
+	ErrUnknownAction     ErrorCode = "unknown_action"
+	ErrUnknownSeat       ErrorCode = "unknown_seat"
+	ErrWrongPhase        ErrorCode = "wrong_phase"
+	ErrNotYourTurn       ErrorCode = "not_your_turn"
+	ErrNotHost           ErrorCode = "not_host"
+	ErrCardNotOwned      ErrorCode = "card_not_owned"
+	ErrMustFollowSuit    ErrorCode = "must_follow_suit"
+	ErrMustFollowOrTrump ErrorCode = "must_follow_or_trump"
+	ErrIllegalLead       ErrorCode = "illegal_lead"
+	ErrInvalidDeck       ErrorCode = "invalid_deck"
 )
 
 type TransitionError struct {
@@ -50,6 +52,9 @@ type Event struct {
 	Trick          int
 	Seat           SeatID
 	Card           CardID
+	TrumpSuit      Suit
+	BrokeSpades    bool
+	BrokeHearts    bool
 	Plays          []Play
 	Score          int
 	Rule           RuleID
@@ -70,6 +75,9 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 	if err := resolved.ValidateMatchEffects(state.Config); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
+	if err := validateHandFacts(state, resolved); err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
 	seatIndex := indexOfSeat(state.Seats, action.Seat)
 	if seatIndex < 0 {
 		return state, nil, transitionError(ErrUnknownSeat, "seat is not in this match")
@@ -78,7 +86,7 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 	case ActionPlayCard:
 		return stepPlay(state, action, seatIndex, catalog, resolved)
 	case ActionStartHand:
-		return stepStartHand(state, action, seatIndex)
+		return stepStartHand(state, action, seatIndex, resolved)
 	case ActionEndGame:
 		return stepEndGame(state, action, seatIndex)
 	default:
@@ -108,7 +116,7 @@ func stepEndGame(state MatchState, action Action, seatIndex int) (MatchState, []
 	}, nil
 }
 
-func stepStartHand(state MatchState, action Action, seatIndex int) (MatchState, []Event, error) {
+func stepStartHand(state MatchState, action Action, seatIndex int, resolved RuleResolution) (MatchState, []Event, error) {
 	if state.Phase != PhaseHandComplete || state.CompletedHands >= state.Config.MaxHands {
 		return state, nil, transitionError(ErrWrongPhase, "a new hand cannot start now")
 	}
@@ -136,6 +144,12 @@ func stepStartHand(state MatchState, action Action, seatIndex int) (MatchState, 
 	next.HandNumber++
 	next.TrickNumber = 1
 	next.CurrentTrick = nil
+	next.BrokenSpades, next.BrokenHearts = false, false
+	var err error
+	next.TrumpSuit, err = TrumpForTrick(resolved, "", nil)
+	if err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
 	next.Captured = make(map[SeatID][]CardID, len(next.Seats))
 	dealerIndex := (indexOfSeat(next.Seats, state.Dealer) + 1) % len(next.Seats)
 	next.Dealer = next.Seats[dealerIndex].ID
@@ -177,21 +191,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	if !ok {
 		return state, nil, transitionError(ErrInvalidState, "hand contains an unknown card")
 	}
-	playRule, _ := resolvedRules.Effect(MechanicPlayRestriction)
-	rankRule, _ := resolvedRules.Effect(MechanicRankComparison)
-	playEffect := EffectFollow
-	if playRule.Value == ValueAnySuit {
-		playEffect = EffectAnySuit
-	}
-	winnerEffect := EffectHighLead
-	if rankRule.Value == ValueLow {
-		winnerEffect = EffectLowLead
-	}
-	eligibility, err := resolvedRules.Effect(MechanicWinnerEligibility)
-	if err != nil {
-		return state, nil, transitionError(ErrInvalidState, err.Error())
-	}
-	legal, err := legalCardsForHand(hand, state.CurrentTrick, playEffect)
+	legal, err := legalCardsWithRules(hand, state.CurrentTrick, resolvedRules, factsFromState(state))
 	if err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
@@ -203,7 +203,13 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 		}
 	}
 	if !allowed {
-		return state, nil, transitionError(ErrMustFollowSuit, "lead suit is available")
+		code := ErrMustFollowSuit
+		if len(state.CurrentTrick) == 0 {
+			code = ErrIllegalLead
+		} else if play, _ := resolvedRules.Effect(MechanicPlayRestriction); play.Value == ValueFollowOrTrump {
+			code = ErrMustFollowOrTrump
+		}
+		return state, nil, transitionError(code, IllegalPlayReason(hand, state.CurrentTrick, action.Card, resolvedRules, factsFromState(state)))
 	}
 	if len(state.CurrentTrick) >= len(state.Seats) {
 		return state, nil, transitionError(ErrInvalidState, "trick already has all plays")
@@ -211,16 +217,36 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	next := cloneState(state)
 	next.Revision++
 	next.Hands[action.Seat] = append(next.Hands[action.Seat][:cardIndex], next.Hands[action.Seat][cardIndex+1:]...)
+	card, _ := cardByID(action.Card)
+	played := Event{Kind: EventCardPlayed, Revision: next.Revision, Hand: next.HandNumber, Trick: next.TrickNumber, Seat: action.Seat, Card: action.Card}
+	if len(state.CurrentTrick) == 0 && next.TrumpSuit == "" {
+		trumpRule, _ := resolvedRules.Effect(MechanicTrump)
+		if trumpRule.Value == ValueFirstLeadTrump && state.TrickNumber == 1 {
+			next.TrumpSuit = card.Suit
+			played.TrumpSuit = card.Suit
+		}
+	} else if len(state.CurrentTrick) > 0 {
+		lead, _ := cardByID(state.CurrentTrick[0].Card)
+		if card.Suit != lead.Suit {
+			if card.Suit == Spades && !next.BrokenSpades {
+				next.BrokenSpades, played.BrokeSpades = true, true
+			}
+			if card.Suit == Hearts && !next.BrokenHearts {
+				next.BrokenHearts, played.BrokeHearts = true, true
+			}
+		}
+	}
 	next.CurrentTrick = append(next.CurrentTrick, Play{Seat: action.Seat, Card: action.Card})
-	events := []Event{{Kind: EventCardPlayed, Revision: next.Revision, Hand: next.HandNumber, Trick: next.TrickNumber, Seat: action.Seat, Card: action.Card}}
+	events := []Event{played}
 	if len(next.CurrentTrick) < len(next.Seats) {
 		next.Turn = next.Seats[(seatIndex+1)%len(next.Seats)].ID
 		return next, events, nil
 	}
-	winner, err := trickWinner(next.CurrentTrick, winnerEffect, eligibility.Value)
+	winningPlay, err := WinningPlay(next.CurrentTrick, resolvedRules, next.TrumpSuit)
 	if err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
+	winner := winningPlay.Seat
 	winnerIndex := indexOfSeat(next.Seats, winner)
 	if winnerIndex < 0 {
 		return state, nil, transitionError(ErrInvalidState, "trick winner is not a seat")
@@ -330,30 +356,6 @@ func activeEffects(field []RuleInstance, catalog Catalog) (SuitEffect, EffectKin
 		winnerEffect = EffectLowLead
 	}
 	return playEffect, winnerEffect, nil
-}
-
-func trickWinner(plays []Play, effect EffectKind, eligibility EffectValue) (SeatID, error) {
-	if len(plays) == 0 {
-		return "", fmt.Errorf("empty trick")
-	}
-	lead, ok := cardByID(plays[0].Card)
-	if !ok {
-		return "", fmt.Errorf("unknown lead card")
-	}
-	winner, winningRank := plays[0].Seat, lead.Rank
-	for _, play := range plays[1:] {
-		card, ok := cardByID(play.Card)
-		if !ok {
-			return "", fmt.Errorf("unknown played card")
-		}
-		if eligibility == ValueLeadSuit && card.Suit != lead.Suit {
-			continue
-		}
-		if (effect == EffectHighLead && card.Rank > winningRank) || (effect == EffectLowLead && card.Rank < winningRank) {
-			winner, winningRank = play.Seat, card.Rank
-		}
-	}
-	return winner, nil
 }
 
 func cloneState(state MatchState) MatchState {

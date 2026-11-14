@@ -211,7 +211,7 @@ func TestBotCompleteGameBlackBox(t *testing.T) {
 					if expected.CompletedHands != 10 || revision != uint64(10*5*(bots+1)+10) {
 						t.Fatalf("incomplete match: hand=%d revision=%d", expected.CompletedHands, revision)
 					}
-					if len(revealHands) != 0 {
+					if !reflect.DeepEqual(revealHands, []int{3, 6, 9}) {
 						t.Fatalf("reveal hands %v", revealHands)
 					}
 					total := 0

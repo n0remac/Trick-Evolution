@@ -28,19 +28,8 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 	if err != nil {
 		return "", err
 	}
-	eligibility, err := resolved.Effect(domain.MechanicWinnerEligibility)
-	if err != nil {
-		return "", err
-	}
-	effect := domain.EffectHighLead
-	if rank.Value == domain.ValueLow {
-		effect = domain.EffectLowLead
-	}
-	if effect != domain.EffectHighLead && effect != domain.EffectLowLead {
-		return "", fmt.Errorf("unsupported winner effect %s", effect)
-	}
 	strength := func(card domain.StandardCard) int {
-		if effect == domain.EffectLowLead {
+		if rank.Value == domain.ValueLow {
 			return 16 - int(card.Rank)
 		}
 		return int(card.Rank)
@@ -51,46 +40,63 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 	}
 	// Stable ID order breaks every tie without randomness or deal-order bias.
 	sort.Slice(legal, func(i, j int) bool { return legal[i] < legal[j] })
+	trump, err := domain.TrumpForTrick(resolved, view.Public.TrumpSuit, view.Public.CurrentTrick)
+	if err != nil {
+		return "", err
+	}
 	if len(view.Public.CurrentTrick) == 0 {
-		// Lead a strong card in a longer suit to preserve later options.
+		// Pitch chooses a suit for the hand: prefer a longer suit, then a
+		// strong card within it. Fixed trump raises a legal spade lead.
 		counts := map[domain.Suit]int{}
 		for _, id := range view.Hand {
 			counts[cardFor(id).Suit]++
 		}
+		trumpRule, _ := resolved.Effect(domain.MechanicTrump)
+		leadValue := func(card domain.StandardCard) int {
+			if trumpRule.Value == domain.ValueFirstLeadTrump && view.Public.TrumpSuit == "" {
+				return counts[card.Suit]*20 + strength(card)
+			}
+			value := strength(card)*16 + counts[card.Suit]
+			if trump != "" && card.Suit == trump {
+				value += 256
+			}
+			return value
+		}
 		best := legal[0]
 		for _, id := range legal[1:] {
 			card, current := cardFor(id), cardFor(best)
-			if strength(card) > strength(current) ||
-				(strength(card) == strength(current) && counts[card.Suit] > counts[current.Suit]) {
+			if leadValue(card) > leadValue(current) || leadValue(card) == leadValue(current) && counts[card.Suit] > counts[current.Suit] {
 				best = id
 			}
 		}
 		return best, nil
 	}
-	lead := cardFor(view.Public.CurrentTrick[0].Card).Suit
-	winningStrength := -1
-	for _, play := range view.Public.CurrentTrick {
-		card := cardFor(play.Card)
-		if (eligibility.Value != domain.ValueLeadSuit || card.Suit == lead) && strength(card) > winningStrength {
-			winningStrength = strength(card)
+	cost := func(card domain.StandardCard) int {
+		value := strength(card)
+		if trump != "" && card.Suit == trump {
+			value += 16 // Save trump when an ordinary card can win or shed.
 		}
+		return value
 	}
 	// Win with the least valuable card that currently beats the table.
 	var cheapestWin domain.CardID
 	for _, id := range legal {
-		card := cardFor(id)
-		if (eligibility.Value != domain.ValueLeadSuit || card.Suit == lead) && strength(card) > winningStrength &&
-			(cheapestWin == "" || strength(card) < strength(cardFor(cheapestWin))) {
+		candidate := append(append([]domain.Play(nil), view.Public.CurrentTrick...), domain.Play{Seat: view.Seat, Card: id})
+		winner, err := domain.WinningPlay(candidate, resolved, view.Public.TrumpSuit)
+		if err != nil {
+			return "", err
+		}
+		if winner.Seat == view.Seat && (cheapestWin == "" || cost(cardFor(id)) < cost(cardFor(cheapestWin))) {
 			cheapestWin = id
 		}
 	}
 	if cheapestWin != "" {
 		return cheapestWin, nil
 	}
-	// Otherwise shed the weakest legal card, including off-suit when allowed.
+	// Otherwise shed the cheapest legal card, preserving trump if possible.
 	weakest := legal[0]
 	for _, id := range legal[1:] {
-		if strength(cardFor(id)) < strength(cardFor(weakest)) {
+		if cost(cardFor(id)) < cost(cardFor(weakest)) {
 			weakest = id
 		}
 	}

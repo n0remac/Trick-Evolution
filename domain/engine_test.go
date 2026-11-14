@@ -152,7 +152,7 @@ func mixedState(t *testing.T, rules ...RuleID) MatchState {
 	for i, id := range order {
 		stringsOrder[i] = string(id)
 	}
-	state, err := ReplayMatch([]SeatID{"a", "b"}, DefaultConfig(), DefaultCatalog(), []ShuffleRecord{{Kind: StandardDeckKind, Order: stringsOrder}, {Kind: RuleDeckKind}})
+	state, err := ReplayMatch([]SeatID{"a", "b"}, DefaultConfig(), emptyEvolutionCatalog(), []ShuffleRecord{{Kind: StandardDeckKind, Order: stringsOrder}, {Kind: RuleDeckKind}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func canonicalOrder() []CardID {
 }
 
 func TestCompleteGameReplayAndCadence(t *testing.T) {
-	catalog := DefaultCatalog()
+	catalog := emptyEvolutionCatalog()
 	initial, err := NewMatch([]SeatID{"a", "b"}, DefaultConfig(), catalog, SeededShuffle(29))
 	if err != nil {
 		t.Fatal(err)
@@ -401,7 +401,7 @@ func TestEmptyPrivateHandProjectsAsArray(t *testing.T) {
 }
 
 func TestBoundedFullGameRevealAppliesBetweenHands(t *testing.T) {
-	catalog := DefaultCatalog()
+	catalog := emptyEvolutionCatalog()
 	for i := range catalog.Definitions {
 		if catalog.Definitions[i].ID == RuleLowCardWins {
 			catalog.Definitions[i].InDeck = true

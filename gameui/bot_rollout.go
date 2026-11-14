@@ -67,8 +67,8 @@ type CandidateScore struct {
 }
 
 // decideRollout receives no live match state. Every candidate in a complete
-// comparison round uses the same sampled world. Budget or cancellation paths
-// return the deterministic A1 choice.
+// comparison round uses the same sampled world. A wall budget may use only
+// completed comparison rounds; cancellation and invalid samples use A1.
 func decideRollout(ctx context.Context, observation BotObservation, catalog domain.Catalog, seed int64, budget RolloutBudget) (BotDecision, error) {
 	fallback, err := chooseBotCard(observation.View, catalog)
 	if err != nil {
@@ -90,6 +90,7 @@ func decideRollout(ctx context.Context, observation BotObservation, catalog doma
 		decision.Reason = "canceled"
 		return decision, nil
 	}
+	parentContext := ctx
 	ctx, cancel := context.WithTimeout(ctx, budget.MaxWallTime)
 	defer cancel()
 	prepared, err := prepareObservation(observation, catalog)
@@ -102,15 +103,25 @@ func decideRollout(ctx context.Context, observation BotObservation, catalog doma
 	sums := make([]int, len(legal))
 	completed := 0
 	stopReason := "sample_limit"
+rounds:
 	for round := 0; round < budget.SamplesPerCard; round++ {
 		if ctx.Err() != nil {
-			decision.Reason = "wall_or_room_canceled"
-			return decision, nil
+			if parentContext.Err() != nil {
+				decision.Reason = "canceled"
+				return decision, nil
+			}
+			stopReason = "wall_budget"
+			break
 		}
 		world, err := prepared.sampleWorld(ctx, random, budget.MaxSampleNodes, catalog)
 		if err != nil {
 			if ctx.Err() != nil {
-				decision.Reason = "wall_or_room_canceled"
+				if parentContext.Err() != nil {
+					decision.Reason = "canceled"
+					return decision, nil
+				}
+				stopReason = "wall_budget"
+				break
 			} else {
 				decision.Reason = "sample_failed"
 			}
@@ -120,8 +131,12 @@ func decideRollout(ctx context.Context, observation BotObservation, catalog doma
 		complete := true
 		for index, candidate := range legal {
 			if ctx.Err() != nil {
-				decision.Reason = "wall_or_room_canceled"
-				return decision, nil
+				if parentContext.Err() != nil {
+					decision.Reason = "canceled"
+					return decision, nil
+				}
+				stopReason = "wall_budget"
+				break rounds
 			}
 			if decision.Steps >= budget.MaxSteps {
 				complete = false
@@ -136,8 +151,12 @@ func decideRollout(ctx context.Context, observation BotObservation, catalog doma
 			}
 			for state.Phase == domain.PhasePlayingTrick {
 				if ctx.Err() != nil {
-					decision.Reason = "wall_or_room_canceled"
-					return decision, nil
+					if parentContext.Err() != nil {
+						decision.Reason = "canceled"
+						return decision, nil
+					}
+					stopReason = "wall_budget"
+					break rounds
 				}
 				if decision.Steps >= budget.MaxSteps {
 					complete = false
@@ -179,8 +198,8 @@ func decideRollout(ctx context.Context, observation BotObservation, catalog doma
 			decision.Scores = append(decision.Scores, CandidateScore{Card: card, Sum: sums[i], Samples: completed})
 		}
 	}
-	if ctx.Err() != nil {
-		decision.Reason = "wall_or_room_canceled"
+	if parentContext.Err() != nil {
+		decision.Reason = "canceled"
 		return decision, nil
 	}
 	if completed == 0 {
