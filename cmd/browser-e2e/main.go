@@ -39,6 +39,10 @@ type uiState struct {
 	LobbyNames []string    `json:"lobbyNames"`
 	SeatTiles  int         `json:"seatTiles"`
 	Winner     string      `json:"winner"`
+	ReviewOpen bool        `json:"reviewOpen"`
+	ReviewTab  string      `json:"reviewTab"`
+	ReviewBack string      `json:"reviewBack"`
+	TableReady bool        `json:"tableReady"`
 }
 
 type runResult struct {
@@ -82,25 +86,31 @@ const stateExpression = `(() => {
 		handCards: payload?.selections?.length || 0,
 		lobbyNames: [...document.querySelectorAll('.scoreboard .seat strong')].map(x => x.textContent),
 		seatTiles: document.querySelectorAll('.scoreboard .seat').length,
-		winner: document.querySelector('.game-results h2')?.textContent || ''
+		winner: document.querySelector('.game-results h2')?.textContent || '',
+		reviewOpen: Boolean(document.getElementById('rules-review')?.open),
+		reviewTab: document.querySelector('#rules-review-content [data-review-tab][aria-selected="true"]')?.dataset.reviewTab || '',
+		reviewBack: document.querySelector('#rules-review-content [data-action="review-close"]')?.textContent || '',
+		tableReady: Boolean(window.__trick3d && window.__trick3d.stats().objects > 0)
 	};
 })()`
 
 func main() { os.Exit(runMain()) }
 
 func runMain() int {
-	mode := flag.String("mode", "smoke", "smoke, bot-smoke, 3d-smoke, or full")
+	mode := flag.String("mode", "smoke", "smoke, rules-smoke, bot-smoke, 3d-smoke, or full")
 	browserPath := flag.String("browser", "", "Chromium/Chrome executable (auto-detected if empty)")
 	artifactRoot := flag.String("artifacts", "artifacts/browser-e2e", "directory for run reports and failure artifacts")
 	timeLimit := flag.Duration("timeout", 0, "overall time bound (default: 45s smoke, 150s full)")
 	flag.Parse()
-	if *mode != "smoke" && *mode != "bot-smoke" && *mode != "3d-smoke" && *mode != "full" {
-		fmt.Fprintln(os.Stderr, "-mode must be smoke, bot-smoke, 3d-smoke, or full")
+	if *mode != "smoke" && *mode != "rules-smoke" && *mode != "bot-smoke" && *mode != "3d-smoke" && *mode != "full" {
+		fmt.Fprintln(os.Stderr, "-mode must be smoke, rules-smoke, bot-smoke, 3d-smoke, or full")
 		return 2
 	}
 	if *timeLimit == 0 {
 		if *mode == "full" {
 			*timeLimit = 180 * time.Second
+		} else if *mode == "rules-smoke" {
+			*timeLimit = 75 * time.Second
 		} else {
 			*timeLimit = 45 * time.Second
 		}
@@ -144,7 +154,7 @@ func (r *runner) run(explicitBrowser string) error {
 	}
 	var server *gameui.Server
 	var err error
-	if r.mode == "3d-smoke" {
+	if r.mode == "3d-smoke" || r.mode == "rules-smoke" {
 		server, err = gameui.NewServerWithBotOptions(domain.DefaultConfig(), shuffle, gameui.BotOptions{Mode: gameui.BotModeHeuristic})
 	} else {
 		server, err = gameui.NewServerWithConfig(domain.DefaultConfig(), shuffle)
@@ -167,6 +177,9 @@ func (r *runner) run(explicitBrowser string) error {
 	if err != nil {
 		return err
 	}
+	if r.mode == "rules-smoke" {
+		return r.rulesSmoke()
+	}
 	if r.mode == "3d-smoke" {
 		return r.threeDSmoke()
 	}
@@ -186,7 +199,13 @@ func (r *runner) run(explicitBrowser string) error {
 	if _, _, err := r.waitBoth("two-seat lobby", 25*time.Second, func(a, b uiState) bool { return a.SeatTiles == 2 && b.SeatTiles == 2 }); err != nil {
 		return err
 	}
-	if err := r.alice.click(r.ctx, "Start game"); err != nil {
+	if err := r.closeReview(r.alice); err != nil {
+		return err
+	}
+	if err := r.closeReview(r.bob); err != nil {
+		return err
+	}
+	if err := r.startFromLobby(r.alice); err != nil {
 		return err
 	}
 	if _, _, err := r.waitBoth("first deal", 40*time.Second, func(a, b uiState) bool {
@@ -206,6 +225,17 @@ func (r *runner) run(explicitBrowser string) error {
 		return r.smoke()
 	}
 	return r.full()
+}
+
+func (r *runner) closeReview(p *page) error {
+	return p.eval(r.ctx, `(() => { const dialog=document.getElementById('rules-review'); if (dialog?.open) dialog.close(); return true; })()`, nil)
+}
+
+func (r *runner) startFromLobby(p *page) error {
+	if err := p.clickSelector(r.ctx, `[data-action="review-start"]`); err != nil {
+		return err
+	}
+	return p.clickSelector(r.ctx, `#review-start-form button`)
 }
 
 func (r *runner) join(p *page, name string, botCount ...int) error {
@@ -232,6 +262,9 @@ func (r *runner) botSmoke() error {
 	if err := r.join(r.alice, "Alice"); err != nil {
 		return err
 	}
+	if err := r.closeReview(r.alice); err != nil {
+		return err
+	}
 	if err := r.waitPage(r.alice, "one-seat lobby", 20*time.Second, func(s uiState) bool { return s.SeatTiles == 1 }); err != nil {
 		return err
 	}
@@ -243,7 +276,7 @@ func (r *runner) botSmoke() error {
 	}); err != nil {
 		return err
 	}
-	if err := r.alice.click(r.ctx, "Start game"); err != nil {
+	if err := r.startFromLobby(r.alice); err != nil {
 		return err
 	}
 	if err := r.waitPage(r.alice, "bot first deal", 20*time.Second, func(s uiState) bool {

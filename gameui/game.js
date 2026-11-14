@@ -23,6 +23,16 @@
   const canvas = document.getElementById('table3d-canvas');
   const seatLabels = document.getElementById('table3d-seats');
   const dropHint = document.getElementById('table3d-drop-hint');
+  const reviewDialog = document.getElementById('rules-review');
+  const rulesButton = document.getElementById('rules-open');
+  let reviewMode = 'closed';
+  let reviewTab = 'starting';
+  let reviewUpdate = 0;
+  let reviewFocus = '';
+  let reviewScroll = 0;
+  let reviewOpener = 'rules-open';
+  let autoReviewPending = false;
+  let closeAfterStart = false;
   const markPresentation = (kind, id, ok = true) => {
     presentationLog.push({kind, id, ok, at: performance.now()});
     if (presentationLog.length > 40) presentationLog.shift();
@@ -59,7 +69,7 @@
   }
 
   function inputBlocked() {
-    return !connected || presenting || submittedUpdate === lastSceneUpdate;
+    return reviewDialog.open || !connected || presenting || submittedUpdate === lastSceneUpdate;
   }
 
   function submit(id) {
@@ -188,6 +198,7 @@
         throw new Error(message || `Join failed (${response.status})`);
       }
       session = await response.json();
+      autoReviewPending = !token;
       sessionStorage.setItem(key(), session.token);
       sessionStorage.setItem(`${key()}:name`, session.name);
       lastUpdate = 0;
@@ -228,15 +239,107 @@
     ruleDetails.showModal();
   });
 
+  function setReviewTab(tab, moveFocus = false) {
+    if (!['current', 'starting', 'changes'].includes(tab)) return;
+    reviewTab = tab;
+    const content = document.getElementById('rules-review-content');
+    if (!content) return;
+    content.querySelectorAll('[data-review-tab]').forEach(button => {
+      const active = button.dataset.reviewTab === tab;
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+      if (active && moveFocus) button.focus();
+    });
+    content.querySelectorAll('[data-review-panel]').forEach(panel => { panel.hidden = panel.dataset.reviewPanel !== tab; });
+  }
+
+  function syncReview() {
+    const content = document.getElementById('rules-review-content');
+    const update = Number(content?.dataset.update);
+    if (!Number.isSafeInteger(update) || update <= reviewUpdate) return;
+    reviewUpdate = update;
+    rulesButton.hidden = false;
+    if (autoReviewPending) {
+      autoReviewPending = false;
+      if (content.dataset.kind === 'lobby') openReview('auto', 'starting', 'rules-open');
+    }
+    if (reviewDialog.open) {
+      if (closeAfterStart && content.dataset.kind === 'state') {
+        closeAfterStart = false;
+        reviewDialog.close();
+        return;
+      }
+      if (content.dataset.kind !== 'lobby' && reviewMode === 'start') reviewMode = 'manual';
+      setReviewTab(reviewTab);
+      content.scrollTop = reviewScroll;
+      const target = content.querySelector(`[data-review-focus="${reviewFocus}"]`);
+      requestAnimationFrame(() => {
+        if (reviewDialog.open && !content.contains(document.activeElement)) (target || reviewDialog.querySelector('.review-header button')).focus();
+      });
+    }
+    const startWrap = content.querySelector('#review-start-wrap');
+    if (startWrap) startWrap.hidden = reviewMode !== 'start' || content.dataset.kind !== 'lobby';
+  }
+  new MutationObserver(syncReview).observe(live, {childList: true, subtree: true});
+
+  function openReview(mode, tab, opener) {
+    const content = document.getElementById('rules-review-content');
+    if (!content?.dataset.update) return;
+    reviewMode = mode;
+    reviewOpener = opener;
+    reviewFocus = '';
+    reviewScroll = 0;
+    setReviewTab(tab);
+    const startWrap = content.querySelector('#review-start-wrap');
+    if (startWrap) startWrap.hidden = mode !== 'start' || content.dataset.kind !== 'lobby';
+    if (!reviewDialog.open) reviewDialog.showModal();
+    const primary = mode === 'start' ? content.querySelector('#review-start-form button:not(:disabled)') : null;
+    (primary || content.querySelector(`[data-review-tab="${tab}"]`) || reviewDialog.querySelector('.review-header button')).focus();
+  }
+  reviewDialog.addEventListener('close', () => {
+    reviewMode = 'closed';
+    closeAfterStart = false;
+    const focusTarget = reviewOpener === 'review-start' ? document.querySelector('[data-action="review-start"]:not(:disabled)') : rulesButton;
+    (focusTarget || rulesButton).focus();
+  });
+  reviewDialog.addEventListener('click', event => { if (event.target === reviewDialog) reviewDialog.close(); });
+  reviewDialog.addEventListener('focusin', event => { reviewFocus = event.target.dataset.reviewFocus || ''; });
+  reviewDialog.addEventListener('keydown', event => {
+    const current = event.target.closest('[data-review-tab]');
+    if (!current || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = [...reviewDialog.querySelectorAll('[data-review-tab]')];
+    let index = tabs.indexOf(current);
+    if (event.key === 'Home') index = 0;
+    else if (event.key === 'End') index = tabs.length - 1;
+    else index = (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    setReviewTab(tabs[index].dataset.reviewTab, true);
+    event.preventDefault();
+  });
+  reviewDialog.addEventListener('submit', event => {
+    if (event.target.id === 'review-start-form') closeAfterStart = true;
+  });
+
   document.addEventListener('click', event => {
     const action = event.target.closest('[data-action]')?.dataset.action;
-    if (action === 'leave') {
+    if (action === 'review-start') {
+      openReview('start', 'starting', 'review-start');
+    } else if (action === 'review-close') {
+      reviewDialog.close();
+    } else if (action === 'leave') {
       sessionStorage.removeItem(key());
       location.reload();
     } else if (action === 'end-confirm' || action === 'end-cancel') {
       const confirm = document.getElementById('end-confirm');
       if (confirm) confirm.hidden = action !== 'end-confirm';
     }
+  });
+  rulesButton.addEventListener('click', () => {
+    const kind = document.getElementById('rules-review-content')?.dataset.kind;
+    openReview('manual', kind === 'lobby' ? 'starting' : 'current', 'rules-open');
+  });
+  reviewDialog.addEventListener('click', event => {
+    const tab = event.target.closest('[data-review-tab]')?.dataset.reviewTab;
+    if (tab) setReviewTab(tab, true);
   });
 
   document.body.addEventListener('htmx:wsOpen', event => {
@@ -262,7 +365,7 @@
     const documentFragment = new DOMParser().parseFromString(event.detail.message, 'text/html');
     const screen = documentFragment.querySelector('#screen[data-update]');
     if (!screen) {
-      if (documentFragment.querySelector('#notice')) submittedUpdate = 0;
+      if (documentFragment.querySelector('#notice')) { submittedUpdate = 0; closeAfterStart = false; }
       return;
     }
     const update = Number(screen.dataset.update);
@@ -271,6 +374,10 @@
       return;
     }
     rulesScroll = document.getElementById('game-rules')?.scrollLeft || 0;
+    if (reviewDialog.open) {
+      reviewScroll = document.getElementById('rules-review-content')?.scrollTop || 0;
+      reviewFocus = document.activeElement?.dataset.reviewFocus || reviewFocus;
+    }
     lastUpdate = update;
   });
 

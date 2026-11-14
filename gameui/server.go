@@ -457,7 +457,7 @@ func (c *client) enqueue(message serverMessage) {
 	if c.html {
 		switch message.Type {
 		case "lobby", "state":
-			data = []byte(renderScreen(message, c.seat, c.room.server.catalog))
+			data = []byte(renderScreen(message, c.seat, c.room.server.catalog, c.room.server.config))
 		case "error":
 			data = []byte(noticeNode(message.Message).Render())
 		default: // Acknowledgements have no visual update.

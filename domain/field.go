@@ -2,6 +2,32 @@ package domain
 
 import "fmt"
 
+// StartingField constructs the catalog's public starting rule instances.
+// It is shared by match setup and pregame rules review.
+func StartingField(catalog Catalog) []RuleInstance {
+	field := []RuleInstance{}
+	for _, definition := range catalog.Definitions {
+		if definition.StartActive {
+			field = append(field, RuleInstance{InstanceID: fmt.Sprintf("rule:initial:%d", len(field)), DefinitionID: definition.ID, Sequence: len(field), Starting: true})
+		}
+	}
+	return field
+}
+
+func StartingRules(config Config, catalog Catalog) (RuleResolution, error) {
+	if err := config.Validate(2); err != nil {
+		return RuleResolution{}, err
+	}
+	rules, err := ResolveRules(StartingField(catalog), catalog, config)
+	if err != nil {
+		return RuleResolution{}, err
+	}
+	if err := rules.ValidateMatchEffects(config); err != nil {
+		return RuleResolution{}, err
+	}
+	return rules, nil
+}
+
 type RuleInstance struct {
 	InstanceID          string
 	DefinitionID        RuleID

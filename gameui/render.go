@@ -29,6 +29,9 @@ func pageNode(room string) *h.Node {
 		h.Body(h.Main(h.Class("shell"),
 			h.Header(h.Class("masthead"),
 				h.Div(h.Span(h.Class("eyebrow"), h.T("Trick taking, one rule at a time")), h.H1(h.T("Trick Evolution"))),
+			),
+			h.Div(h.Class("top-controls"),
+				h.Button(h.Id("rules-open"), h.Type("button"), h.Attr("hidden", ""), h.Attr("aria-haspopup", "dialog"), h.Attr("aria-controls", "rules-review"), h.T("Rules")),
 				h.Span(h.Id("connection"), h.Class("connection"), h.T("Offline")),
 			),
 			h.Div(h.Id("notice"), h.Class("notice"), h.Role("status"), h.Attr("aria-live", "polite")),
@@ -44,6 +47,13 @@ func pageNode(room string) *h.Node {
 			}),
 			h.Div(h.Id("live"), h.Attr("hx-ext", "ws"),
 				joinScreen(room),
+				h.NewNode("dialog", []*h.Node{h.Id("rules-review"), h.Attr("aria-labelledby", "rules-review-title"), h.Attr("aria-modal", "true"),
+					h.Div(h.Class("review-frame"),
+						h.Header(h.Class("review-header"), h.H2(h.Id("rules-review-title"), h.T("Game Rules")),
+							h.Button(h.Type("button"), h.Attr("data-action", "review-close"), h.Attr("aria-label", "Close Game Rules"), h.T("Close"))),
+						h.Div(h.Id("rules-review-content"), h.Class("review-content"), h.P(h.T("Loading rules…"))),
+					),
+				}),
 			),
 		)),
 	)
@@ -88,7 +98,7 @@ func commandForm(kind, label string, card domain.CardID, disabled bool, class st
 	return h.Form(children...)
 }
 
-func renderScreen(message serverMessage, seat domain.SeatID, catalog domain.Catalog) string {
+func renderScreen(message serverMessage, seat domain.SeatID, catalog domain.Catalog, config domain.Config) string {
 	var content *h.Node
 	if message.Type == "lobby" {
 		content = lobbyPanel(message, seat)
@@ -120,7 +130,11 @@ func renderScreen(message serverMessage, seat domain.SeatID, catalog domain.Cata
 			}
 		}
 	}
-	return screen.Render() + noticeNode("").Render()
+	review, err := rulesReviewContent(message, seat, catalog, config)
+	if err != nil {
+		return screen.Render() + noticeNode("Rules unavailable: "+err.Error()).Render()
+	}
+	return screen.Render() + review.Render() + noticeNode("").Render()
 }
 
 func lobbyPanel(message serverMessage, seat domain.SeatID) *h.Node {
@@ -142,7 +156,11 @@ func lobbyPanel(message serverMessage, seat domain.SeatID) *h.Node {
 		if len(message.Seats) < 4 {
 			controls = append(controls, commandForm("add_bot", "Add bot", "", false, "", 0))
 		}
-		controls = append(controls, commandForm("start", "Start game", "", len(message.Seats) < 2, "", 0))
+		start := []*h.Node{h.Type("button"), h.Attr("data-action", "review-start"), h.Attr("aria-haspopup", "dialog"), h.Attr("aria-controls", "rules-review"), h.T("Start game")}
+		if len(message.Seats) < 2 {
+			start = append(start, h.Attr("disabled", ""))
+		}
+		controls = append(controls, h.Button(start...))
 	} else {
 		controls = append(controls, h.P(h.Class("muted"), h.T("Waiting for the host to start.")))
 	}

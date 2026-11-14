@@ -17,13 +17,16 @@ func (r *runner) threeDSmoke() error {
 	if err := r.join(page, "Alice"); err != nil {
 		return err
 	}
+	if err := r.closeReview(page); err != nil {
+		return err
+	}
 	if err := page.click(r.ctx, "Add bot"); err != nil {
 		return err
 	}
 	if err := r.waitPage(page, "3D bot lobby", 15*time.Second, func(s uiState) bool { return s.SeatTiles == 2 }); err != nil {
 		return err
 	}
-	if err := page.click(r.ctx, "Start game"); err != nil {
+	if err := r.startFromLobby(page); err != nil {
 		return err
 	}
 	if err := r.waitPage(page, "3D first deal and Alice turn", 20*time.Second, func(s uiState) bool {

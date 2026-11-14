@@ -256,13 +256,8 @@ func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, r
 	s := MatchState{CatalogVersion: catalog.Version, Config: cfg, Phase: PhasePlayingTrick,
 		Seats: make([]Seat, len(ids)), Hands: make(map[SeatID][]CardID, len(ids)), Captured: make(map[SeatID][]CardID, len(ids)),
 		RuleDraw: make([]RuleID, len(ruleOrder)), HandNumber: 1, TrickNumber: 1,
-		Field:    []RuleInstance{},
+		Field:    StartingField(catalog),
 		Shuffles: []ShuffleRecord{{Kind: StandardDeckKind, Order: append([]string(nil), standardOrder...)}, {Kind: RuleDeckKind, Order: append([]string(nil), ruleOrder...)}},
-	}
-	for _, definition := range catalog.Definitions {
-		if definition.StartActive {
-			s.Field = append(s.Field, RuleInstance{InstanceID: fmt.Sprintf("rule:initial:%d", len(s.Field)), DefinitionID: definition.ID, Sequence: len(s.Field), Starting: true})
-		}
 	}
 	for i, id := range ids {
 		s.Seats[i].ID = id

@@ -189,6 +189,19 @@ func (p *page) click(ctx context.Context, label string) error {
 	return nil
 }
 
+func (p *page) clickSelector(ctx context.Context, selector string) error {
+	quoted, _ := json.Marshal(selector)
+	expression := `(() => { const button = document.querySelector(` + string(quoted) + `); if (!button || button.disabled || button.getClientRects().length === 0) return false; button.click(); return true; })()`
+	var clicked bool
+	if err := p.eval(ctx, expression, &clicked); err != nil {
+		return err
+	}
+	if !clicked {
+		return fmt.Errorf("%s: selector %q is absent, hidden, or disabled", p.name, selector)
+	}
+	return nil
+}
+
 func (p *page) startAutoplay(ctx context.Context, maximumRevision int) error {
 	expression := fmt.Sprintf(`(() => {
 		clearInterval(window.__trickE2EAutoplay);

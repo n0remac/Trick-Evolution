@@ -31,8 +31,8 @@ func TestGoDomScreensKeepHandsPrivateAndUseDomainLegality(t *testing.T) {
 		t.Fatal(err)
 	}
 	seats := []seatSummary{{ID: "alice", Name: "Alice", Host: true}, {ID: "bob", Name: "Bob"}}
-	aliceHTML := renderScreen(serverMessage{Type: "state", Room: "test", View: &alice, Seats: seats, Sequence: 1}, "alice", catalog)
-	bobHTML := renderScreen(serverMessage{Type: "state", Room: "test", View: &bob, Seats: seats, Sequence: 1}, "bob", catalog)
+	aliceHTML := renderScreen(serverMessage{Type: "state", Room: "test", View: &alice, Seats: seats, Sequence: 1}, "alice", catalog, domain.DefaultConfig())
+	bobHTML := renderScreen(serverMessage{Type: "state", Room: "test", View: &bob, Seats: seats, Sequence: 1}, "bob", catalog, domain.DefaultConfig())
 	decodeScene := func(html string) cardtable.Payload {
 		t.Helper()
 		match := regexp.MustCompile(`data-scene="([A-Za-z0-9+/=]+)"`).FindStringSubmatch(html)
@@ -103,7 +103,7 @@ func TestGoDomScreensKeepHandsPrivateAndUseDomainLegality(t *testing.T) {
 		Phase: domain.PhasePlayingTrick, Turn: "alice", Revision: 7, HandNumber: 1, MaxHands: 10,
 		CurrentTrick: []domain.Play{{Seat: "bob", Card: "std:H:09"}}, Rules: rules,
 	}}
-	html := renderScreen(serverMessage{Type: "state", Room: "test", View: &view, Seats: seats, Sequence: 9, Revision: 7}, "alice", catalog)
+	html := renderScreen(serverMessage{Type: "state", Room: "test", View: &view, Seats: seats, Sequence: 9, Revision: 7}, "alice", catalog, domain.DefaultConfig())
 	if !regexp.MustCompile(`<button[^>]*disabled[^>]*>2♠</button>`).MatchString(html) {
 		t.Fatal("off-suit card was enabled under Follow Suit")
 	}
