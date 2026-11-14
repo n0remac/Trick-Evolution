@@ -1,5 +1,6 @@
 :root { font-family: system-ui, sans-serif; color: #edf3e7; background: #14221d; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #275840, #14221d 62%); }
 button, input, select { font: inherit; }
 button { cursor: pointer; border: 0; border-radius: .6rem; padding: .7rem 1rem; background: #eec976; color: #1d271b; font-weight: 700; }
@@ -41,3 +42,55 @@ h2 { margin: 0 0 .75rem; }
 .table3d-controls { display: flex; align-items: center; justify-content: space-between; gap: .7rem; padding: .6rem .8rem; }
 .table3d-controls span { min-width: 0; }
 @media (max-width: 600px) { .shell { padding: .75rem; } .card { min-width: 59px; height: 88px; } }
+/* The game uses the full safe viewport; the lobby keeps the document layout. */
+.shell:has(.table3d:not([hidden])) { position: relative; width: 100%; max-width: none; height: 100dvh; min-height: 420px; padding: 0; overflow: hidden; }
+.shell:has(.table3d:not([hidden])) .masthead { position: absolute; z-index: 4; top: env(safe-area-inset-top); left: max(.55rem, env(safe-area-inset-left)); right: max(.55rem, env(safe-area-inset-right)); padding: .3rem .5rem; border: 0; pointer-events: none; }
+.shell:has(.table3d:not([hidden])) .masthead h1 { font-size: clamp(.95rem, 2.5vw, 1.4rem); margin: 0; }
+.shell:has(.table3d:not([hidden])) .eyebrow { display: none; }
+.shell:has(.table3d:not([hidden])) .connection { font-size: .75rem; background: #10271fca; }
+.shell:has(.table3d:not([hidden])) #notice { position: absolute; z-index: 6; top: calc(env(safe-area-inset-top) + 2.2rem); left: .7rem; right: .7rem; padding: 0; min-height: 0; text-align: center; pointer-events: none; text-shadow: 0 1px 4px #07140e; }
+.table3d:not([hidden]) { position: absolute; inset: 0; margin: 0; border: 0; border-radius: 0; }
+.table3d canvas { width: 100%; height: 100%; touch-action: none; }
+.table3d-controls { position: absolute; z-index: 5; bottom: max(.4rem, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(96%, 440px); border: 1px solid #b5a970; border-radius: .9rem; background: #102b21e8; box-shadow: 0 5px 20px #08130ca8; }
+.table3d-controls span { font-size: .85rem; }
+.table3d-controls button { flex: none; padding: .65rem .75rem; }
+.table3d-drop-hint { display: none; position: absolute; z-index: 3; left: 50%; top: 53%; transform: translate(-50%, -50%); color: #fff1c4; background: #306b4bd9; border: 2px solid #ffe19a; border-radius: 2rem; padding: .35rem .75rem; pointer-events: none; text-align: center; box-shadow: 0 0 26px #f3d978aa; }
+.table3d-drop-hint.active { display: block; }
+.shell:has(.table3d:not([hidden])) #live { position: absolute; z-index: 3; top: calc(env(safe-area-inset-top) + 2.1rem); left: max(.5rem, env(safe-area-inset-left)); right: max(.5rem, env(safe-area-inset-right)); pointer-events: none; }
+.game-panel { background: none; border: 0; box-shadow: none; margin: 0; padding: .2rem; }
+.game-panel > .row:first-child { padding: .2rem .5rem; background: #102b21d9; border-radius: .55rem; }
+.game-panel > .row:first-child h2 { font-size: .9rem; margin: 0; }
+.game-panel > .status { display: inline-block; padding: .35rem .6rem; margin: .35rem 0; border-radius: .55rem; background: #102b21e5; color: #ffe09a; }
+.game-panel > .scoreboard { grid-template-columns: repeat(4,minmax(0,1fr)); gap: .3rem; }
+.game-panel > .scoreboard .seat { padding: .35rem; min-width: 0; background: #102b21df; font-size: .78rem; }
+.game-panel > .scoreboard .seat span { display: block; font-size: .69rem; }
+.game-panel > .panel { margin: .35rem 0; padding: .4rem .55rem; background: #102b21d9; box-shadow: none; }
+.game-panel > .panel h2 { font-size: .8rem; margin: 0 0 .25rem; }
+.game-panel > .panel .muted { display: none; }
+.game-panel .rules { flex-wrap: nowrap; overflow-x: auto; }
+.game-panel .rule { flex: none; max-width: min(240px,60vw); padding: .22rem .4rem; font-size: .73rem; cursor: pointer; pointer-events: auto; }
+.game-panel .rule summary { list-style: none; }
+.game-panel .rule summary::-webkit-details-marker { display: none; }
+.game-panel .rule p { margin: .35rem 0 0; white-space: normal; }
+.game-panel .rule.inactive { opacity: .7; text-decoration: none; border-style: dashed; }
+.game-panel .text-table { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+.game-panel .hand-fallback { position: absolute; right: .3rem; top: calc(100dvh - 10.5rem); max-height: 8rem; overflow: auto; padding: .25rem .45rem; border-radius: .5rem; background: #102b21e3; font-size: .7rem; pointer-events: auto; }
+.game-panel .hand-fallback summary { cursor: pointer; }
+.game-panel .hand-fallback h2 { font-size: .8rem; margin: .2rem 0; }
+.game-panel .hand-fallback .card { min-width: 44px; height: 58px; font-size: .9rem; }
+.game-panel > .row:last-child, .game-panel > form, .game-panel > button { pointer-events: auto; }
+.game-panel > .row:last-child button { font-size: .68rem; padding: .3rem .55rem; }
+@media (max-width: 600px) {
+ .game-panel > .scoreboard .seat { font-size: .7rem; }
+ .game-panel > .scoreboard .seat span { font-size: .6rem; }
+ .game-panel .rules { max-height: 3.7rem; }
+ .game-panel .rule[open] { position: relative; z-index: 8; max-height: 8rem; overflow: auto; }
+ .table3d-controls { font-size: .75rem; }
+}
+@media (orientation: landscape) and (max-height: 600px) {
+ .shell:has(.table3d:not([hidden])) #live { top: .2rem; right: .25rem; left: auto; width: 42%; }
+ .game-panel > .panel { max-height: 4rem; overflow: auto; }
+ .game-panel > .scoreboard { grid-template-columns: repeat(2,minmax(0,1fr)); }
+ .game-panel .hand-fallback { top: auto; bottom: 1rem; }
+ .table3d-controls { left: 1rem; transform: none; width: min(45%,330px); }
+}

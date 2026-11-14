@@ -141,9 +141,16 @@ func runMain() int {
 
 func (r *runner) run(explicitBrowser string) error {
 	var deal atomic.Int64
-	server, err := gameui.NewServerWithConfig(domain.DefaultConfig(), func() domain.ShuffleSource {
+	shuffle := func() domain.ShuffleSource {
 		return domain.SeededShuffle(5100 + deal.Add(1))
-	})
+	}
+	var server *gameui.Server
+	var err error
+	if r.mode == "3d-smoke" {
+		server, err = gameui.NewServerWithBotOptions(domain.DefaultConfig(), shuffle, gameui.BotOptions{Mode: gameui.BotModeHeuristic})
+	} else {
+		server, err = gameui.NewServerWithConfig(domain.DefaultConfig(), shuffle)
+	}
 	if err != nil {
 		return err
 	}

@@ -19,7 +19,7 @@ func pageNode(room string) *h.Node {
 	return h.Html(h.Attr("lang", "en"),
 		h.Head(
 			h.Meta(h.Charset("utf-8")),
-			h.Meta(h.Attrs(map[string]string{"name": "viewport", "content": "width=device-width, initial-scale=1"})),
+			h.Meta(h.Attrs(map[string]string{"name": "viewport", "content": "width=device-width, initial-scale=1, viewport-fit=cover"})),
 			h.Title(h.T("Trick Evolution")),
 			h.Link(h.Rel("stylesheet"), h.Href("/game/style.css")),
 			h.Script(h.Src("/game/vendor/htmx-2.0.11.min.js"), h.Attr("defer", "")),
@@ -34,6 +34,7 @@ func pageNode(room string) *h.Node {
 			h.Div(h.Id("notice"), h.Class("notice"), h.Role("status"), h.Attr("aria-live", "polite")),
 			h.Section(h.Id("table3d"), h.Class("table3d"), h.Attr("hidden", ""), h.Attr("aria-label", "3D card table"),
 				h.NewNode("canvas", []*h.Node{h.Id("table3d-canvas"), h.Attr("aria-label", "Your cards on a 3D table")}),
+				h.Div(h.Id("table3d-drop-hint"), h.Class("table3d-drop-hint"), h.T("Release here to play")),
 				h.Div(h.Class("table3d-controls"),
 					h.Span(h.Id("table3d-selection"), h.Role("status"), h.Attr("aria-live", "polite"), h.T("Select a card on the table.")),
 					h.Button(h.Id("table3d-play"), h.Type("button"), h.Attr("disabled", ""), h.T("Play selected card")),
@@ -98,7 +99,15 @@ func renderScreen(message serverMessage, seat domain.SeatID, catalog domain.Cata
 		h.Attr("data-kind", message.Type),
 		h.Attr("aria-live", "polite"), content)
 	if message.View != nil {
-		if payload, err := cardtable.Build(*message.View, catalog); err == nil {
+		if payload, err := cardtable.Build(*message.View, catalog, message.Events...); err == nil {
+			for i := range payload.Seats {
+				for _, summary := range message.Seats {
+					if payload.Seats[i].ID == summary.ID {
+						payload.Seats[i].Name = summary.Name
+						break
+					}
+				}
+			}
 			if data, err := json.Marshal(payload); err == nil {
 				screen = h.Section(h.Id("screen"), h.Attr("hx-swap-oob", "outerHTML"),
 					h.Attr("data-update", fmt.Sprint(message.Sequence)),
@@ -190,7 +199,11 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			class += " inactive"
 			title += " · overridden"
 		}
-		rules = append(rules, h.Span(h.Class(class), h.T(title)))
+		label := title
+		if ok {
+			label += ": " + definition.Text
+		}
+		rules = append(rules, h.NewNode("details", []*h.Node{h.Class(class), h.NewNode("summary", []*h.Node{h.T(title)}), h.P(h.T(label))}))
 	}
 	plays := make([]*h.Node, 0, len(public.CurrentTrick))
 	if len(public.CurrentTrick) == 0 {
@@ -200,12 +213,12 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		plays = append(plays, h.Div(h.Class(cardClass(play.Card)), h.T(cardLabel(play.Card)), h.Small(h.T(name(play.Seat)))))
 	}
 	parts := []*h.Node{
-		h.Class("panel"),
+		h.Class("panel game-panel"),
 		h.Div(h.Class("row"), h.H2(h.T(fmt.Sprintf("Room %s · Hand %d of %d", message.Room, public.HandNumber, public.MaxHands))), h.Span(h.Class("tag"), h.T(fmt.Sprintf("Revision %d", public.Revision)))),
 		h.P(h.Class("status"), h.T(status)),
 		h.Div(append([]*h.Node{h.Class("scoreboard")}, seats...)...),
 		h.Div(h.Class("panel"), h.H2(h.T("Rules in play")), h.Div(append([]*h.Node{h.Class("rules")}, rules...)...), h.P(h.Class("muted"), h.T(fmt.Sprintf("%d rule cards left · reveal every %d completed hands", public.RulesRemaining, public.RevealEvery)))),
-		h.Div(append([]*h.Node{h.Class("table")}, plays...)...),
+		h.Div(append([]*h.Node{h.Class("table text-table")}, plays...)...),
 	}
 	if public.Phase == domain.PhasePlayingTrick {
 		legal, _ := domain.LegalCards(*view, catalog)
@@ -217,7 +230,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		for _, id := range view.Hand {
 			cards = append(cards, commandForm("play", cardLabel(id), id, !allowed[id], cardClass(id), public.Revision))
 		}
-		parts = append(parts, h.H2(h.T("Your hand")), h.Div(append([]*h.Node{h.Class("hand")}, cards...)...))
+		parts = append(parts, h.NewNode("details", []*h.Node{h.Class("hand-fallback"), h.NewNode("summary", []*h.Node{h.T("Text hand and keyboard controls")}), h.H2(h.T("Your hand")), h.Div(append([]*h.Node{h.Class("hand")}, cards...)...)}))
 		if seat == public.Turn && len(legal) < len(view.Hand) {
 			parts = append(parts, h.P(h.Class("muted"), h.T("Follow suit: play a card matching the lead suit.")))
 		}

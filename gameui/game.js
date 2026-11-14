@@ -11,10 +11,22 @@
   let runtimePromise = null;
   let selections = new Map();
   let selected = null;
+  let sceneQueue = [];
+  let presenting = false;
+  let presentationEpoch = 0;
+  let restoring = true;
+  const seenEvents = new Set();
+  const presentationLog = [];
   const tableShell = document.getElementById('table3d');
   const canvas = document.getElementById('table3d-canvas');
   const play3d = document.getElementById('table3d-play');
   const selectionLabel = document.getElementById('table3d-selection');
+  const dropHint = document.getElementById('table3d-drop-hint');
+  const markPresentation = (kind, id, ok = true) => {
+    presentationLog.push({kind, id, ok, at: performance.now()});
+    if (presentationLog.length > 40) presentationLog.shift();
+  };
+  window.__trickPresentation = () => ({pending: sceneQueue.length, presenting, history: presentationLog});
 
   function clearSelection() {
     selected = null;
@@ -30,6 +42,62 @@
     play3d.disabled = !connected || !entry.legal || !form || !!form.querySelector('button')?.disabled;
     selectionLabel.textContent = entry.legal ? `${entry.card.replaceAll(':', ' ')} selected.` : `${entry.card.replaceAll(':', ' ')} selected. Wait for your legal turn.`;
   }
+  function submit(id) {
+    const entry = selections.get(id);
+    if (!entry || !entry.legal || !connected) { table?.resetDrag(); return; }
+    const form = [...document.querySelectorAll('.hand form')].find(f => f.querySelector('input[name=card]')?.value === entry.card);
+    const button = form?.querySelector('button');
+    if (!button || button.disabled) { table?.resetDrag(); return; }
+    selected = entry;
+    button.click();
+    play3d.disabled = true;
+  }
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  async function drainScenes() {
+    if (presenting || !table) return;
+    presenting = true;
+    const epoch = presentationEpoch;
+    try {
+      while (sceneQueue.length && epoch === presentationEpoch) {
+        const payload = sceneQueue.shift();
+        const events = (payload.presentations || []).filter(item => !seenEvents.has(item.id));
+        events.forEach(item => seenEvents.add(item.id));
+        const cards = payload.selections || [];
+        selections = new Map(cards.map(item => [item.pickId, item]));
+        clearSelection();
+        tableShell.hidden = false;
+        if (!events.length || restoring || document.hidden) { table.apply(payload.scene, cards); restoring = false; continue; }
+        table.apply(payload.presentationScene || payload.scene, cards);
+        for (const event of events) {
+          if (epoch !== presentationEpoch) break;
+          if (event.kind === 'card_played') {
+            markPresentation('landing', event.id);
+            const landed = await Promise.race([table.animate(event.motion), wait(1800).then(() => false)]);
+            markPresentation('landed', event.id, landed);
+            if (epoch !== presentationEpoch) break;
+            // The pause follows the visible landing, including when the next update is queued.
+            await wait(event.seat === payload.seats?.find(s => s.self)?.id ? 180 : 420);
+            markPresentation('landing-pause-end', event.id);
+          } else if (event.kind === 'trick_won') {
+            markPresentation('collection-hold', event.id);
+            await wait(650);
+            if (epoch !== presentationEpoch) break;
+            markPresentation('collection-start', event.id);
+            if (event.motion?.steps?.length) await Promise.race([table.animate(event.motion), wait(1200)]);
+          }
+        }
+        if (epoch === presentationEpoch) table.apply(payload.scene, cards);
+      }
+    } finally { if (epoch === presentationEpoch) { presenting = false; if (sceneQueue.length) drainScenes(); } }
+  }
+  function resetPresentation() {
+    presentationEpoch++;
+    sceneQueue = [];
+    presenting = false;
+    restoring = true;
+    seenEvents.clear();
+    table?.cancel();
+  }
   async function applyScene() {
     const screen = document.querySelector('#screen[data-update]');
     if (!screen) return;
@@ -38,7 +106,7 @@
     if (!screen.dataset.scene) {
       lastSceneUpdate = update;
       clearSelection();
-      table?.cancel();
+      resetPresentation();
       tableShell.hidden = true;
       selections = new Map();
       return;
@@ -46,21 +114,20 @@
     try {
       const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(screen.dataset.scene), c => c.charCodeAt(0))));
       if (payload.version !== 1) throw new Error('Unsupported card table payload');
+      tableShell.hidden = false;
       if (!table) {
         runtimePromise ||= import('/game/browser3d/runtime.js');
         const {createRuntime} = await runtimePromise;
         if (document.querySelector('#screen[data-update]') !== screen) { applyScene(); return; }
         if (!table) {
-          table = createRuntime(canvas, picked);
+          table = createRuntime(canvas, {onSelect: picked, onDrop: submit, onDragState: valid => dropHint.classList.toggle('active', valid)});
           window.__trick3d = table; // Read-only browser smoke diagnostics.
         }
       }
       if (update <= lastSceneUpdate) return;
       lastSceneUpdate = update;
-      clearSelection();
-      selections = new Map(payload.selections.map(item => [item.pickId, item]));
-      tableShell.hidden = false;
-      table.apply(payload.scene);
+      sceneQueue.push(payload);
+      drainScenes();
     } catch (error) {
       lastSceneUpdate = update;
       tableShell.hidden = true;
@@ -69,12 +136,7 @@
   }
   new MutationObserver(applyScene).observe(live, {childList: true, subtree: true});
   play3d.addEventListener('click', () => {
-    if (!selected || !selected.legal || !connected) return;
-    const form = [...document.querySelectorAll('.hand form')].find(f => f.querySelector('input[name=card]')?.value === selected.card);
-    const button = form?.querySelector('button');
-    if (!button || button.disabled) { clearSelection(); return; }
-    button.click(); // Existing authenticated HTMX action carries card, revision and fresh ID.
-    play3d.disabled = true;
+    if (selected) submit(selected.pickId); // Existing authenticated HTMX form carries revision and a fresh ID.
   });
   window.addEventListener('pagehide', () => table?.dispose());
 
@@ -102,7 +164,7 @@
       sessionStorage.setItem(`${key()}:name`, session.name);
       lastUpdate = 0;
       lastSceneUpdate = 0;
-      table?.cancel();
+      resetPresentation();
       notice('');
       live.setAttribute('hx-ext', 'ws');
       live.setAttribute('ws-connect', `/ws/game?room=${encodeURIComponent(room)}&token=${encodeURIComponent(session.token)}&format=html`);
@@ -145,7 +207,7 @@
   document.body.addEventListener('htmx:wsClose', event => {
     if (event.detail.elt !== live) return;
     setConnection(false);
-    table?.cancel();
+    resetPresentation();
     play3d.disabled = true;
     if (session) notice('Connection lost. Reconnecting…');
   });
