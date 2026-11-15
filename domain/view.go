@@ -65,7 +65,7 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 	if state.Phase == PhaseGameComplete {
 		view.Winners = gameWinners(state.Seats)
 	}
-	if state.Phase == PhaseHandComplete || state.Phase == PhaseGameComplete && state.CompletedHands == state.HandNumber {
+	if state.Phase == PhaseHandComplete || state.Phase == PhaseGameComplete {
 		view.HandAwards = append([]HandAward(nil), state.HandAwards...)
 	}
 	for i, seat := range state.Seats {

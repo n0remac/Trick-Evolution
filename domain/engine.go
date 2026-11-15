@@ -261,6 +261,9 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 		next.Seats[winnerIndex].Score++
 		next.HandAwards = append(next.HandAwards, HandAward{Rule: trickPoints.Source, Title: "Point per Trick", Seat: winner, Trick: next.TrickNumber, Points: 1})
 	}
+	if err := scoreCapturedTrick(&next, resolvedRules, winnerIndex); err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
 	for _, play := range next.CurrentTrick {
 		next.Captured[winner] = append(next.Captured[winner], play.Card)
 	}
@@ -274,6 +277,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	}
 	next.Turn = ""
 	next.Phase = PhaseHandComplete
+	scoreLastTrickBonus(&next, resolvedRules, winnerIndex)
 	if err := settleHandScores(&next, resolvedRules); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}

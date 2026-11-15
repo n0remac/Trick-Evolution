@@ -39,6 +39,9 @@ const (
 	MechanicLowOwner          Mechanic        = "low_trump_owner"
 	MechanicJackTrump         Mechanic        = "jack_trump_score"
 	MechanicGamePoint         Mechanic        = "game_point"
+	MechanicAvoidQueenHearts  Mechanic        = "avoid_queen_hearts"
+	MechanicAvoidHearts       Mechanic        = "avoid_hearts"
+	MechanicLastTrickBonus    Mechanic        = "last_trick_bonus"
 	MechanicHandLimit         Mechanic        = "hand_limit"
 	MechanicVictory           Mechanic        = "victory"
 	MechanicReveal            Mechanic        = "reveal"
@@ -92,6 +95,9 @@ const (
 	RuleKeepLow           RuleID     = "rule.keep_low"
 	RuleJackTrump         RuleID     = "rule.trump_jack_scores"
 	RuleGamePoint         RuleID     = "rule.game_point"
+	RuleAvoidQueenHearts  RuleID     = "rule.avoid_queen_hearts"
+	RuleAvoidHearts       RuleID     = "rule.avoid_hearts"
+	RuleLastTrickBonus    RuleID     = "rule.last_trick_bonus"
 	RuleNoPoints          RuleID     = "rule.no_points_for_tricks"
 	RulePointsPerTrick    RuleID     = "rule.points_per_trick"
 	RuleDeckStandard      RuleID     = "baseline.standard_deck"
@@ -151,7 +157,7 @@ type Catalog struct {
 	Definitions []RuleDefinition
 }
 
-const CatalogVersion = 4
+const CatalogVersion = 5
 
 func (c Catalog) Definition(id RuleID) (RuleDefinition, bool) {
 	for _, d := range c.Definitions {
@@ -345,7 +351,7 @@ func baseline(id RuleID, title, text string, category FieldCategory, effect Type
 }
 
 func validTypedEffect(e TypedEffect) bool {
-	values := map[Mechanic]EffectValue{MechanicDeck: ValueStandardDeck, MechanicHandSize: ValueConfigured, MechanicUnused: ValueOutOfPlay, MechanicScoreOwnership: ValueIndividual, MechanicTurnOrder: ValueClockwise, MechanicFirstLeader: ValueLeftOfDealer, MechanicNextLeader: ValueWinnerLeads, MechanicTrump: ValueNoTrump, MechanicBreakSpades: ValueBreakSpades, MechanicBreakHearts: ValueBreakHearts, MechanicPlayRestriction: ValueFollow, MechanicWinnerEligibility: ValueLeadSuit, MechanicRankComparison: ValueHigh, MechanicTieBreak: ValueFirstPlay, MechanicTrickPoints: ValueOnePoint, MechanicLowOwner: ValueCaptureLow, MechanicHighTrump: ValueAward, MechanicLowTrump: ValueAward, MechanicJackTrump: ValueAward, MechanicGamePoint: ValueAward, MechanicHandLimit: ValueConfigured, MechanicVictory: ValueHighestShared, MechanicReveal: ValueConfigured}
+	values := map[Mechanic]EffectValue{MechanicDeck: ValueStandardDeck, MechanicHandSize: ValueConfigured, MechanicUnused: ValueOutOfPlay, MechanicScoreOwnership: ValueIndividual, MechanicTurnOrder: ValueClockwise, MechanicFirstLeader: ValueLeftOfDealer, MechanicNextLeader: ValueWinnerLeads, MechanicTrump: ValueNoTrump, MechanicBreakSpades: ValueBreakSpades, MechanicBreakHearts: ValueBreakHearts, MechanicPlayRestriction: ValueFollow, MechanicWinnerEligibility: ValueLeadSuit, MechanicRankComparison: ValueHigh, MechanicTieBreak: ValueFirstPlay, MechanicTrickPoints: ValueOnePoint, MechanicLowOwner: ValueCaptureLow, MechanicHighTrump: ValueAward, MechanicLowTrump: ValueAward, MechanicJackTrump: ValueAward, MechanicGamePoint: ValueAward, MechanicAvoidQueenHearts: ValueAward, MechanicAvoidHearts: ValueAward, MechanicLastTrickBonus: ValueAward, MechanicHandLimit: ValueConfigured, MechanicVictory: ValueHighestShared, MechanicReveal: ValueConfigured}
 	want, ok := values[e.Mechanic]
 	if !ok {
 		return false
@@ -419,8 +425,11 @@ func DefaultCatalog() Catalog {
 		{ID: RuleKeepLow, Title: "Keep Low", Text: "The original holder of the lowest dealt trump gets its point. Replaces Capture Low.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicLowOwner, Value: ValueKeepLow}}, Overrides: []RuleID{RuleDefaultCaptureLow, RuleCaptureLow}, Prerequisites: []RuleID{RuleLowTrump}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleJackTrump, Title: "Trump Jack Scores", Text: "At hand end, the captor of the dealt trump Jack scores one point. Requires trump.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicJackTrump, Value: ValueAward}}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleGamePoint, Title: "Game Point", Text: "At hand end, the unique highest captured-card tally scores one point: 10=10, A=4, K=3, Q=2, J=1. Ties score nothing.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicGamePoint, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
-		{ID: RuleNoPoints, Title: "No Points for Tricks", Text: "Captured tricks give no direct point; hand-end awards still score.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicTrickPoints, Value: ValueNoPoints}}, Overrides: []RuleID{RuleTrickPoint, RulePointsPerTrick}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleNoPoints, Title: "No Points for Tricks", Text: "Captured tricks give no ordinary trick point; other scoring rules still apply.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicTrickPoints, Value: ValueNoPoints}}, Overrides: []RuleID{RuleTrickPoint, RulePointsPerTrick}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RulePointsPerTrick, Title: "Points per Trick", Text: "Each captured trick scores one point. Replaces No Points for Tricks.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicTrickPoints, Value: ValueOnePoint}}, Overrides: []RuleID{RuleTrickPoint, RuleNoPoints}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleAvoidQueenHearts, Title: "Avoid Queen of Hearts", Text: "Capturing the Queen of Hearts costs 5 match points when its trick completes. Stacks with Avoid Hearts; undealt or unplayed cards do not score.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicAvoidQueenHearts, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleAvoidHearts, Title: "Avoid Hearts", Text: "Each heart captured in a completed trick costs 1 match point, including the Queen of Hearts. Stacks with other scoring rules.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicAvoidHearts, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleLastTrickBonus, Title: "Last Trick Bonus", Text: "The winner of the final completed trick of a completed hand gains 2 match points. An unfinished hand earns no bonus.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicLastTrickBonus, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
 		follow,
 		supported(RuleNoFollowRequired, "No Follow Required", "Play any card even if you hold the lead suit. Only lead-suit cards can win without trump.", TimingPlay, "", EffectAnySuit, false, RuleFollowSuit),
 		unsupported("rule.must_underplay", "Must Underplay", "If able, you must play a lower card than the lead.", "rule", unmodeled),

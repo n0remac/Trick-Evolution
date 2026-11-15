@@ -38,6 +38,21 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 		card, _ := domain.CardDetails(id) // LegalCards already validates each ID.
 		return card
 	}
+	_, queenPenaltyRule := resolved.Effect(domain.MechanicAvoidQueenHearts)
+	_, heartsPenaltyRule := resolved.Effect(domain.MechanicAvoidHearts)
+	heartPenalty := func(card domain.StandardCard) int {
+		if card.Suit != domain.Hearts {
+			return 0
+		}
+		points := 0
+		if heartsPenaltyRule == nil {
+			points++
+		}
+		if card.Rank == 12 && queenPenaltyRule == nil {
+			points += 5
+		}
+		return points
+	}
 	// Stable ID order breaks every tie without randomness or deal-order bias.
 	sort.Slice(legal, func(i, j int) bool { return legal[i] < legal[j] })
 	trump, err := domain.TrumpForTrick(resolved, view.Public.TrumpSuit, view.Public.CurrentTrick)
@@ -52,15 +67,20 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 			counts[cardFor(id).Suit]++
 		}
 		trumpRule, _ := resolved.Effect(domain.MechanicTrump)
+		_, lastBonusRule := resolved.Effect(domain.MechanicLastTrickBonus)
+		saveLastWinner := lastBonusRule == nil && view.Public.TrickNumber == view.Public.HandSize-1 && len(view.Hand) > 1
 		leadValue := func(card domain.StandardCard) int {
 			if trumpRule.Value == domain.ValueFirstLeadTrump && view.Public.TrumpSuit == "" {
-				return counts[card.Suit]*20 + strength(card)
+				return counts[card.Suit]*20 + strength(card) - heartPenalty(card)*100
 			}
 			value := strength(card)*16 + counts[card.Suit]
+			if saveLastWinner {
+				value = (16-strength(card))*16 + counts[card.Suit]
+			}
 			if trump != "" && card.Suit == trump {
 				value += 256
 			}
-			return value
+			return value - heartPenalty(card)*100
 		}
 		best := legal[0]
 		for _, id := range legal[1:] {
@@ -97,18 +117,40 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 	}
 	// Win with the least valuable card that currently beats the table.
 	var cheapestWin domain.CardID
+	var cheapestLoss domain.CardID
+	bestWinNet := -1000
+	trickPoints, _ := resolved.Effect(domain.MechanicTrickPoints)
+	baseWin := 0
+	if trickPoints.Value == domain.ValueOnePoint {
+		baseWin++
+	}
+	if _, err := resolved.Effect(domain.MechanicLastTrickBonus); err == nil && view.Public.TrickNumber == view.Public.HandSize {
+		baseWin += 2
+	}
+	for _, play := range view.Public.CurrentTrick {
+		baseWin -= heartPenalty(cardFor(play.Card))
+	}
 	for _, id := range legal {
+		card := cardFor(id)
 		candidate := append(append([]domain.Play(nil), view.Public.CurrentTrick...), domain.Play{Seat: view.Seat, Card: id})
 		winner, err := domain.WinningPlay(candidate, resolved, view.Public.TrumpSuit)
 		if err != nil {
 			return "", err
 		}
-		if winner.Seat == view.Seat && (cheapestWin == "" || cost(cardFor(id)) < cost(cardFor(cheapestWin))) {
-			cheapestWin = id
+		if winner.Seat == view.Seat {
+			net := baseWin - heartPenalty(card)
+			if cheapestWin == "" || net > bestWinNet || net == bestWinNet && cost(card) < cost(cardFor(cheapestWin)) {
+				cheapestWin, bestWinNet = id, net
+			}
+		} else if cheapestLoss == "" || cost(card)-heartPenalty(card)*20 < cost(cardFor(cheapestLoss))-heartPenalty(cardFor(cheapestLoss))*20 {
+			cheapestLoss = id
 		}
 	}
-	if cheapestWin != "" {
+	if cheapestWin != "" && (bestWinNet >= 0 || cheapestLoss == "") {
 		return cheapestWin, nil
+	}
+	if cheapestLoss != "" {
+		return cheapestLoss, nil
 	}
 	// Otherwise shed the cheapest legal card, preserving trump if possible.
 	weakest := legal[0]

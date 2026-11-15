@@ -2,7 +2,8 @@ package domain
 
 import "fmt"
 
-// HandAward is public only after the hand has completed.
+// HandAward records settled points. Completed-trick awards are projected at
+// early game end; completed-hand awards are projected after hand settlement.
 type HandAward struct {
 	Rule   RuleID
 	Title  string
@@ -27,6 +28,39 @@ func gameCardValue(rank uint8) int {
 		return 1
 	}
 	return 0
+}
+
+// scoreCapturedTrick applies only public captured-card penalties. It runs when
+// the trick is complete, so an early game end keeps these earned scores.
+func scoreCapturedTrick(state *MatchState, rules RuleResolution, winnerIndex int) error {
+	_, queenActive := rules.Effect(MechanicAvoidQueenHearts)
+	_, heartsActive := rules.Effect(MechanicAvoidHearts)
+	for _, play := range state.CurrentTrick {
+		card, ok := cardByID(play.Card)
+		if !ok {
+			return fmt.Errorf("unknown captured card %s", play.Card)
+		}
+		if card.Suit != Hearts {
+			continue
+		}
+		if card.Rank == 12 && queenActive == nil {
+			state.Seats[winnerIndex].Score -= 5
+			state.HandAwards = append(state.HandAwards, HandAward{Rule: RuleAvoidQueenHearts, Title: "Avoid Queen of Hearts", Seat: state.Seats[winnerIndex].ID, Card: card.ID, Trick: state.TrickNumber, Points: -5})
+		}
+		if heartsActive == nil {
+			state.Seats[winnerIndex].Score--
+			state.HandAwards = append(state.HandAwards, HandAward{Rule: RuleAvoidHearts, Title: "Avoid Hearts", Seat: state.Seats[winnerIndex].ID, Card: card.ID, Trick: state.TrickNumber, Points: -1})
+		}
+	}
+	return nil
+}
+
+func scoreLastTrickBonus(state *MatchState, rules RuleResolution, winnerIndex int) {
+	if _, err := rules.Effect(MechanicLastTrickBonus); err != nil {
+		return
+	}
+	state.Seats[winnerIndex].Score += 2
+	state.HandAwards = append(state.HandAwards, HandAward{Rule: RuleLastTrickBonus, Title: "Last Trick Bonus", Seat: state.Seats[winnerIndex].ID, Trick: state.TrickNumber, Points: 2})
 }
 
 // settleHandScores runs once on the last completed trick, before any reveal.

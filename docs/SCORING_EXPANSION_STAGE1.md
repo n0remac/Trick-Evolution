@@ -26,3 +26,10 @@ Review git diff, commit milestone and implementation on main, push, use existing
 
 ## Explicit exclusions
 Do not implement Expanded Hand or Keep One Card in this stage (approved later stage). Kitty is removed entirely from this milestone and deferred until bidding. No bidding, teams, new victory rules, duplicate suit penalty variants, or unrelated changes.
+
+## Implemented behavior
+The three cards are independent Score & Victory additions in catalog version 5. They are available in the evolution deck and host starting-rule selector but are absent from the default starting field. Selected starting cards are removed from the draw deck. Version 4 states and replay records are rejected by the catalog version check; this release does not migrate active rooms.
+
+Capture penalties settle when a trick completes, with separate signed entries naming the captured card and trick. A completed trick keeps its penalties if the host ends the game early. The last-trick award settles only when all cards in the hand have been played. No Points for Tricks suppresses only the ordinary trick point. The game screen shows signed award entries and per-player hand totals; the Rules view and tappable field give each card's full effect. Rollouts use the authoritative engine score margin; the fallback bot considers heart penalties and the last trick bonus using only its own hand and public cards.
+
+Focused tests cover individual and stacked awards, negative totals, Pitch interaction, undealt Queen, early end, once-only settlement, reveal timing, version rejection, replay, room save/reconnect/start, signed UI breakdown, and seeded AI decisions. The repository release gate, vet, and JavaScript syntax checks are run before deployment. Phone layout and touch behavior remain a manual playtest check because Pi Chromium cannot initialize reliably.

@@ -264,7 +264,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			h.H2(h.T(label + strings.Join(winners, " and "))),
 		}
 		if public.EndedEarly {
-			results = append(results, h.P(h.Class("muted"), h.T("Scores include completed tricks only.")))
+			results = append(results, h.P(h.Class("muted"), h.T("Scores include completed tricks and settled hands. An unfinished trick and its hand bonus do not score.")))
 		}
 		results = append(results, h.Button(h.Type("button"), h.Attr("data-action", "leave"), h.T("Return to join")))
 		parts = append(parts, h.Div(results...))
@@ -273,18 +273,22 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		parts = append(parts, h.Div(h.Class("end-game"),
 			h.Button(h.Type("button"), h.Attr("data-action", "end-confirm"), h.T("End game")),
 			h.Div(h.Id("end-confirm"), h.Attr("hidden", ""), h.Class("end-confirm"),
-				h.Span(h.Class("muted"), h.T("End this game for everyone? An unfinished trick will not score.")),
+				h.Span(h.Class("muted"), h.T("End this game for everyone? Completed-trick scores remain; an unfinished trick and hand bonus will not score.")),
 				commandForm("end", "Confirm end game", "", false, "", public.Revision),
 				h.Button(h.Type("button"), h.Attr("data-action", "end-cancel"), h.T("Cancel")),
 			),
 		))
 	}
-	if public.Phase == domain.PhaseHandComplete || public.Phase == domain.PhaseGameComplete && public.CompletedHands == public.HandNumber {
-		items := []*h.Node{h.Class("hand-awards"), h.NewNode("summary", []*h.Node{h.T("Hand score breakdown")})}
+	if public.Phase == domain.PhaseHandComplete || public.Phase == domain.PhaseGameComplete {
+		title := "Hand score breakdown"
+		if public.EndedEarly && public.CompletedHands < public.HandNumber {
+			title = "Completed trick score breakdown"
+		}
+		items := []*h.Node{h.Class("hand-awards"), h.NewNode("summary", []*h.Node{h.T(title)})}
 		totals := map[domain.SeatID]int{}
 		for _, award := range public.HandAwards {
 			totals[award.Seat] += award.Points
-			detail := award.Title + " · " + name(award.Seat) + " +1"
+			detail := fmt.Sprintf("%s · %s %+d", award.Title, name(award.Seat), award.Points)
 			if award.Card != "" {
 				detail += " · " + cardLabel(award.Card)
 			}
@@ -297,7 +301,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			items = append(items, h.P(h.T(detail)))
 		}
 		for _, player := range public.Seats {
-			items = append(items, h.P(h.T(fmt.Sprintf("%s · hand total +%d", name(player.ID), totals[player.ID]))))
+			items = append(items, h.P(h.T(fmt.Sprintf("%s · hand total %+d", name(player.ID), totals[player.ID]))))
 		}
 		parts = append(parts, h.NewNode("details", items))
 	}

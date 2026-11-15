@@ -123,6 +123,35 @@ func TestRolloutBoundedFallbacks(t *testing.T) {
 	}
 }
 
+func TestScoringExpansionSeededRolloutUsesOnlyObservation(t *testing.T) {
+	catalog := domain.DefaultCatalog()
+	cfg := domain.DefaultConfig()
+	cfg.HandSize = 2
+	cfg.InitialRules = []domain.RuleID{domain.RuleAvoidQueenHearts, domain.RuleAvoidHearts, domain.RuleLastTrickBonus}
+	state, err := domain.NewMatch([]domain.SeatID{"human", "bot:1"}, cfg, catalog, domain.SeededShuffle(1729))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := domain.ProjectForSeat(state, catalog, "bot:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget := RolloutBudget{SamplesPerCard: 1, MaxSteps: 100, MaxSampleNodes: 3000, MaxWallTime: time.Second, Objective: ObjectiveMatchMargin}
+	first, err := decideRollout(context.Background(), BotObservation{View: view}, catalog, 7001, budget)
+	if err != nil || first.CompletedSamples != 1 || len(first.Scores) != 2 {
+		t.Fatalf("configured rollout failed: %+v %v", first, err)
+	}
+	state.Hands["human"][0], state.StandardDraw[0] = state.StandardDraw[0], state.Hands["human"][0]
+	otherView, err := domain.ProjectForSeat(state, catalog, "bot:1")
+	if err != nil || !reflect.DeepEqual(view, otherView) {
+		t.Fatalf("hidden swap changed bot observation: %v", err)
+	}
+	second, err := decideRollout(context.Background(), BotObservation{View: otherView}, catalog, 7001, budget)
+	if err != nil || !reflect.DeepEqual(first, second) {
+		t.Fatalf("hidden cards changed seeded decision: %+v / %+v: %v", first, second, err)
+	}
+}
+
 func TestRolloutBudgetValidationAndDefault(t *testing.T) {
 	s, err := NewServerWithConfig(domain.DefaultConfig(), func() domain.ShuffleSource { return domain.SeededShuffle(1) })
 	if err != nil {

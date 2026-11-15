@@ -219,3 +219,30 @@ func TestBotHeuristicHighLowAndPlayOverrides(t *testing.T) {
 		})
 	}
 }
+
+func TestBotHeuristicAvoidsHeartCaptureAndSavesLastWinner(t *testing.T) {
+	catalog := domain.DefaultCatalog()
+	viewFor := func(rules []domain.RuleID, hand []domain.CardID, trick []domain.Play, handSize, trickNumber int) domain.PlayerView {
+		t.Helper()
+		cfg := domain.DefaultConfig()
+		cfg.InitialRules = rules
+		resolved, err := domain.StartingRules(cfg, catalog)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return domain.PlayerView{Seat: "bot:1", Hand: hand, Public: domain.PublicView{
+			Phase: domain.PhasePlayingTrick, Turn: "bot:1", CurrentTrick: trick,
+			HandSize: handSize, TrickNumber: trickNumber, Rules: resolved.History,
+		}}
+	}
+	penalty := viewFor([]domain.RuleID{domain.RuleAvoidQueenHearts, domain.RuleAvoidHearts},
+		[]domain.CardID{"std:H:02", "std:H:12"}, []domain.Play{{Seat: "human", Card: "std:H:10"}}, 2, 1)
+	if got, err := chooseBotCard(penalty, catalog); err != nil || got != "std:H:02" {
+		t.Fatalf("bot captured penalized hearts with %s: %v", got, err)
+	}
+	bonus := viewFor([]domain.RuleID{domain.RuleLastTrickBonus},
+		[]domain.CardID{"std:H:02", "std:H:14"}, nil, 2, 1)
+	if got, err := chooseBotCard(bonus, catalog); err != nil || got != "std:H:02" {
+		t.Fatalf("bot failed to save strong final-trick card: %s %v", got, err)
+	}
+}

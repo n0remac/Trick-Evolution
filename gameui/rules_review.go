@@ -299,6 +299,12 @@ func effectDescription(e domain.EffectiveEffect) string {
 		return "The captor of Low Trump receives its point (default)."
 	case domain.MechanicHighTrump, domain.MechanicLowTrump, domain.MechanicJackTrump, domain.MechanicGamePoint:
 		return "One point at completed-hand settlement when the card or tally qualifies."
+	case domain.MechanicAvoidQueenHearts:
+		return "Capturing the Queen of Hearts costs 5 match points when its trick completes. This stacks with Avoid Hearts."
+	case domain.MechanicAvoidHearts:
+		return "Each captured heart costs 1 match point when its trick completes, including the Queen of Hearts."
+	case domain.MechanicLastTrickBonus:
+		return "The final trick winner gains 2 match points when the hand completes. No bonus is awarded for an unfinished hand."
 	case domain.MechanicHandLimit:
 		return fmt.Sprintf("The match ends after %d completed hands.", e.Number)
 	case domain.MechanicVictory:

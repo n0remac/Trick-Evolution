@@ -165,7 +165,7 @@ func TestEndGameMidhandDoesNotSettleTrumpAwards(t *testing.T) {
 		t.Fatalf("abort score %+v", state.Seats)
 	}
 	public, err := ProjectPublic(state, DefaultCatalog())
-	if err != nil || len(public.HandAwards) != 0 {
-		t.Fatal("abort exposed hidden scoring metadata", err)
+	if err != nil || len(public.HandAwards) != 1 || public.HandAwards[0].Rule != RuleTrickPoint {
+		t.Fatal("abort omitted earned trick score or exposed future awards", err)
 	}
 }

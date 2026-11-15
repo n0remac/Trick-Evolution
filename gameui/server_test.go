@@ -615,3 +615,68 @@ func TestHTMLSettingsEnvelopeCarriesPreSendPayload(t *testing.T) {
 		t.Fatalf("HTML settings command %+v", cmd)
 	}
 }
+
+func TestScoringExpansionPregameSaveReconnectAndStart(t *testing.T) {
+	_, server := testServer(t)
+	host := joinRoom(t, server.URL, "scoring-expansion", "Host", "", http.StatusOK)
+	guest := joinRoom(t, server.URL, "scoring-expansion", "Guest", "", http.StatusOK)
+	a, b := dialRoom(t, server.URL, host), dialRoom(t, server.URL, guest)
+	_ = readMessage(t, a, "lobby")
+	_ = readMessage(t, b, "lobby")
+	settings := `{"handSize":1,"revealEvery":2,"initialRules":["rule.avoid_queen_hearts","rule.avoid_hearts","rule.last_trick_bonus"]}`
+	sendCommand(t, a, command{Type: "configure", ID: "save-expansion", Settings: settings})
+	_ = readMessage(t, a, "ack")
+	for _, conn := range []*websocket.Conn{a, b} {
+		lobby := readMessage(t, conn, "lobby")
+		if lobby.Config == nil || lobby.Config.HandSize != 1 || lobby.Config.RevealEvery != 2 || len(lobby.Config.InitialRules) != 3 {
+			t.Fatalf("saved settings did not synchronize: %+v", lobby.Config)
+		}
+	}
+	guest = joinRoom(t, server.URL, "scoring-expansion", "Guest", guest.Token, http.StatusOK)
+	b = dialRoom(t, server.URL, guest)
+	if lobby := readMessage(t, b, "lobby"); lobby.Config == nil || len(lobby.Config.InitialRules) != 3 || lobby.Config.RevealEvery != 2 {
+		t.Fatalf("reconnect lost settings: %+v", lobby.Config)
+	}
+	_ = readMessage(t, a, "lobby")
+	_ = readMessage(t, a, "lobby")
+	sendCommand(t, a, command{Type: "start", ID: "start-expansion"})
+	_ = readMessage(t, a, "ack")
+	states := []serverMessage{readRevision(t, a, 1), readRevision(t, b, 1)}
+	for i, id := range []domain.RuleID{domain.RuleAvoidQueenHearts, domain.RuleAvoidHearts, domain.RuleLastTrickBonus} {
+		if states[0].View.Public.InitialRules[i] != id {
+			t.Fatalf("starting rule %d: %v", i, states[0].View.Public.InitialRules)
+		}
+	}
+	field := renderRuleField(states[0].View.Public, domain.DefaultCatalog()).Render()
+	for _, title := range []string{"Avoid Queen of Hearts", "Avoid Hearts", "Last Trick Bonus"} {
+		if !strings.Contains(field, title) {
+			t.Fatalf("field missing %s", title)
+		}
+	}
+	for play := 0; play < 2; play++ {
+		idx := 0
+		if states[0].View.Public.Turn == guest.Seat {
+			idx = 1
+		}
+		card := states[idx].View.Hand[0]
+		sendCommand(t, []*websocket.Conn{a, b}[idx], command{Type: "play", ID: fmt.Sprintf("expansion-%d", play), Card: card})
+		ack := readMessage(t, []*websocket.Conn{a, b}[idx], "ack")
+		states[0], states[1] = readRevision(t, a, ack.Revision), readRevision(t, b, ack.Revision)
+	}
+	if states[0].View.Public.CompletedHands != 1 {
+		t.Fatal("configured one-card hand did not complete")
+	}
+	bonus := 0
+	for _, award := range states[0].View.Public.HandAwards {
+		if award.Rule == domain.RuleLastTrickBonus && award.Points == 2 {
+			bonus++
+		}
+	}
+	if bonus != 1 || !strings.Contains(renderScreen(states[0], host.Seat, domain.DefaultCatalog(), domain.DefaultConfig()), "Last Trick Bonus") {
+		t.Fatalf("bonus missing from hand breakdown: %+v", states[0].View.Public.HandAwards)
+	}
+	sendCommand(t, a, command{Type: "configure", ID: "late-expansion", Settings: settings})
+	if got := readMessage(t, a, "error"); got.Code != "invalid_config" {
+		t.Fatalf("midgame settings edit: %+v", got)
+	}
+}
