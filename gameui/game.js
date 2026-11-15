@@ -351,6 +351,14 @@
   });
   reviewDialog.addEventListener('submit', event => {
     if (event.target.id === 'review-start-form') closeAfterStart = true;
+    if (event.target.id === 'review-settings-form') {
+      const form = event.target;
+      form.elements.settings.value = JSON.stringify({
+        handSize: Number(form.querySelector('[data-setting="hand-size"]').value),
+        revealEvery: Number(form.querySelector('[data-setting="reveal-every"]').value),
+        initialRules: Array.from(form.querySelectorAll('[data-initial-rule]:checked'), input => input.value)
+      });
+    }
   });
 
   document.addEventListener('click', event => {

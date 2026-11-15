@@ -92,6 +92,14 @@ func renderFieldCard(rule domain.ResolvedRule, definition domain.RuleDefinition,
 			short = append(short, shortEffect(effect, rule, public))
 		}
 	}
+	if definition.ID == domain.RuleLowTrump {
+		for _, effect := range public.Effective {
+			if effect.Mechanic == domain.MechanicLowOwner {
+				short = append(short, effectDescription(effect))
+				break
+			}
+		}
+	}
 	partial := len(rule.ActiveEffects) < len(definition.Effects)
 	label := definition.Title + ", " + category + ". " + strings.Join(short, "; ")
 	if partial {
@@ -175,7 +183,7 @@ func suitName(suit domain.Suit) string {
 
 func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition, public domain.PublicView, catalog domain.Catalog) string {
 	lines := []string{"Category: " + categoryLabel(definition.FieldCategory) + "."}
-	if rule.Instance.Starting {
+	if rule.Instance.IntroducedAfterHand == 0 {
 		lines = append(lines, "Starting field card.")
 	} else {
 		lines = append(lines, fmt.Sprintf("Revealed after hand %d; applies from hand %d.", rule.Instance.IntroducedAfterHand, rule.Instance.IntroducedAfterHand+1))
@@ -185,6 +193,14 @@ func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition,
 			lines = append(lines, effectDescription(effect))
 			if effect.Mechanic == domain.MechanicTrump || effect.Mechanic == domain.MechanicBreakSpades || effect.Mechanic == domain.MechanicBreakHearts {
 				lines = append(lines, shortEffect(effect, rule, public)+".")
+			}
+		}
+	}
+	if definition.ID == domain.RuleLowTrump {
+		for _, effect := range public.Effective {
+			if effect.Mechanic == domain.MechanicLowOwner {
+				lines = append(lines, effectDescription(effect))
+				break
 			}
 		}
 	}

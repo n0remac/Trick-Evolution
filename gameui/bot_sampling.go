@@ -26,7 +26,7 @@ type preparedObservation struct {
 func prepareObservation(observation BotObservation, catalog domain.Catalog) (preparedObservation, error) {
 	view := observation.View
 	public := view.Public
-	config := domain.Config{HandSize: public.HandSize, RevealEvery: public.RevealEvery, MaxHands: public.MaxHands}
+	config := domain.Config{HandSize: public.HandSize, RevealEvery: public.RevealEvery, MaxHands: public.MaxHands, InitialRules: append([]domain.RuleID(nil), public.InitialRules...)}
 	if err := config.Validate(len(public.Seats)); err != nil {
 		return preparedObservation{}, err
 	}
@@ -246,9 +246,17 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 		state.Captured[seat.ID] = append([]domain.CardID(nil), prepared.captured[seat.ID]...)
 	}
 	state.Hands[prepared.observation.View.Seat] = append([]domain.CardID(nil), prepared.observation.View.Hand...)
+	state.DealOwner = make(map[domain.CardID]domain.SeatID)
+	for _, play := range prepared.observation.Played {
+		state.DealOwner[play.Card] = play.Seat
+	}
+	for _, id := range prepared.observation.View.Hand {
+		state.DealOwner[id] = prepared.observation.View.Seat
+	}
 	used := make([]bool, len(unknown))
 	for slot, card := range slotCard {
 		state.Hands[slots[slot]] = append(state.Hands[slots[slot]], unknown[card].ID)
+		state.DealOwner[unknown[card].ID] = slots[slot]
 		used[card] = true
 	}
 	for i, card := range unknown {

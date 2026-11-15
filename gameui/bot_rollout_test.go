@@ -222,3 +222,43 @@ func completedOffSuitObservation(t *testing.T, noFollow bool) BotObservation {
 	}
 	return observation
 }
+
+func TestConfiguredPitchObservationContinues(t *testing.T) {
+	catalog := domain.DefaultCatalog()
+	cfg := domain.DefaultConfig()
+	cfg.HandSize = 2
+	cfg.RevealEvery = 1
+	cfg.InitialRules = []domain.RuleID{domain.RuleSpadesTrump, domain.RuleHighTrump, domain.RuleLowTrump, domain.RuleGamePoint, domain.RuleNoPoints}
+	state, err := domain.NewMatch([]domain.SeatID{"human", "bot:1"}, cfg, catalog, domain.SeededShuffle(97))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := domain.ProjectForSeat(state, catalog, "bot:1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := BotObservation{View: view}
+	prepared, err := prepareObservation(obs, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	world, err := prepared.sampleWorld(context.Background(), rand.New(rand.NewSource(3)), 3000, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if world.Config.HandSize != 2 || world.Config.RevealEvery != 1 || len(world.Config.InitialRules) != 5 || len(world.DealOwner) != 4 {
+		t.Fatal("configured sampled world incomplete")
+	}
+	for seat, hand := range world.Hands {
+		for _, card := range hand {
+			if world.DealOwner[card] != seat {
+				t.Fatal("sampled original ownership incorrect")
+			}
+		}
+	}
+	budget := RolloutBudget{SamplesPerCard: 1, MaxSteps: 1000, MaxSampleNodes: 3000, MaxWallTime: time.Second, Objective: ObjectiveMatchMargin}
+	decision, err := decideRollout(context.Background(), obs, catalog, 17, budget)
+	if err != nil || decision.CompletedSamples != 1 {
+		t.Fatalf("configured rollout %+v %v", decision, err)
+	}
+}

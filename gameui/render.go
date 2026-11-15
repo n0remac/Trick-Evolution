@@ -260,6 +260,28 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			),
 		))
 	}
+	if public.Phase == domain.PhaseHandComplete || public.Phase == domain.PhaseGameComplete && public.CompletedHands == public.HandNumber {
+		items := []*h.Node{h.Class("hand-awards"), h.NewNode("summary", []*h.Node{h.T("Hand score breakdown")})}
+		totals := map[domain.SeatID]int{}
+		for _, award := range public.HandAwards {
+			totals[award.Seat] += award.Points
+			detail := award.Title + " · " + name(award.Seat) + " +1"
+			if award.Card != "" {
+				detail += " · " + cardLabel(award.Card)
+			}
+			if award.Trick > 0 {
+				detail += fmt.Sprintf(" · trick %d", award.Trick)
+			}
+			if award.Rule == domain.RuleGamePoint {
+				detail += fmt.Sprintf(" · tally %d", award.Tally)
+			}
+			items = append(items, h.P(h.T(detail)))
+		}
+		for _, player := range public.Seats {
+			items = append(items, h.P(h.T(fmt.Sprintf("%s · hand total +%d", name(player.ID), totals[player.ID]))))
+		}
+		parts = append(parts, h.NewNode("details", items))
+	}
 	return h.Section(parts...)
 }
 

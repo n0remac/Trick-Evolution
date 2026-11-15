@@ -374,8 +374,8 @@ func TestSeededTrumpRolloutsCompleteWithTestBudget(t *testing.T) {
 		obs  BotObservation
 		want []CandidateScore
 	}{
-		{"fixed and broken", fixed, []CandidateScore{{Card: "std:C:04", Sum: -6, Samples: 2}, {Card: "std:H:03", Sum: -6, Samples: 2}, {Card: "std:H:04", Sum: -4, Samples: 2}}},
-		{"pitch unset", pitch, []CandidateScore{{Card: "std:C:10", Sum: 4, Samples: 2}, {Card: "std:C:12", Sum: 4, Samples: 2}, {Card: "std:S:05", Sum: -4, Samples: 2}}},
+		{"fixed and broken", fixed, []CandidateScore{{Card: "std:C:04", Sum: -6, Samples: 2}, {Card: "std:H:03", Sum: -6, Samples: 2}, {Card: "std:H:04", Sum: -6, Samples: 2}}},
+		{"pitch unset", pitch, []CandidateScore{{Card: "std:C:10", Sum: 6, Samples: 2}, {Card: "std:C:12", Sum: 6, Samples: 2}, {Card: "std:S:05", Sum: 2, Samples: 2}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			decision, err := decideRollout(context.Background(), tc.obs, catalog, 19, budget)

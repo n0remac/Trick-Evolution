@@ -388,7 +388,7 @@ func TestWebsocketJoinThroughRuleReveal(t *testing.T) {
 	state := *r.state
 	events := append([]domain.Event(nil), r.lastEvents...)
 	r.mu.Unlock()
-	if state.CompletedHands != 3 || len(state.Field) != 16 || events[len(events)-1].Kind != domain.EventRuleRevealed {
+	if state.CompletedHands != 3 || len(state.Field) != len(domain.StartingField(domain.DefaultCatalog()))+1 || events[len(events)-1].Kind != domain.EventRuleRevealed {
 		t.Fatalf("reveal did not occur: %+v, %+v", state.Field, events)
 	}
 	if state.Seats[0].Score+state.Seats[1].Score != 15 {
@@ -483,5 +483,98 @@ func TestOversizedCommandDisconnects(t *testing.T) {
 	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	if _, _, err := conn.ReadMessage(); err == nil {
 		t.Fatal("oversized command left connection open")
+	}
+}
+
+func TestRoomSettingsSyncAuthAndFullMatch(t *testing.T) {
+	s, server := testServer(t)
+	host := joinRoom(t, server.URL, "settings", "Host", "", http.StatusOK)
+	guest := joinRoom(t, server.URL, "settings", "Guest", "", http.StatusOK)
+	a, b := dialRoom(t, server.URL, host), dialRoom(t, server.URL, guest)
+	_ = readMessage(t, a, "lobby")
+	_ = readMessage(t, b, "lobby")
+	settings := `{"handSize":1,"revealEvery":1,"initialRules":["rule.spades_are_trump","rule.high_trump_scores","rule.no_points_for_tricks","rule.game_point"]}`
+	sendCommand(t, b, command{Type: "configure", ID: "guest-edit", Settings: settings})
+	if got := readMessage(t, b, "error"); got.Code != "invalid_config" {
+		t.Fatalf("guest edit: %+v", got)
+	}
+	sendCommand(t, a, command{Type: "configure", ID: "save", Settings: settings})
+	_ = readMessage(t, a, "ack")
+	for _, conn := range []*websocket.Conn{a, b} {
+		lobby := readMessage(t, conn, "lobby")
+		if lobby.Config == nil || lobby.Config.HandSize != 1 || lobby.Config.RevealEvery != 1 || len(lobby.Config.InitialRules) != 4 {
+			t.Fatalf("settings sync: %+v", lobby.Config)
+		}
+	}
+	sendCommand(t, a, command{Type: "configure", ID: "bad-size", Settings: `{"handSize":27,"revealEvery":1,"initialRules":[]}`})
+	if got := readMessage(t, a, "error"); got.Code != "invalid_config" {
+		t.Fatalf("invalid settings: %+v", got)
+	}
+	sendCommand(t, a, command{Type: "reset_rules", ID: "reset"})
+	_ = readMessage(t, a, "ack")
+	for _, conn := range []*websocket.Conn{a, b} {
+		lobby := readMessage(t, conn, "lobby")
+		if lobby.Config == nil || lobby.Config.HandSize != 5 || lobby.Config.RevealEvery != 3 || len(lobby.Config.InitialRules) != 0 {
+			t.Fatalf("reset: %+v", lobby.Config)
+		}
+	}
+	sendCommand(t, a, command{Type: "configure", ID: "save-again", Settings: settings})
+	_ = readMessage(t, a, "ack")
+	for _, conn := range []*websocket.Conn{a, b} {
+		_ = readMessage(t, conn, "lobby")
+	}
+	sendCommand(t, a, command{Type: "start", ID: "start"})
+	_ = readMessage(t, a, "ack")
+	states := []serverMessage{readRevision(t, a, 1), readRevision(t, b, 1)}
+	for hand := 1; hand <= 10; hand++ {
+		for play := 0; play < 2; play++ {
+			turn := states[0].View.Public.Turn
+			idx := 0
+			if turn == guest.Seat {
+				idx = 1
+			}
+			card := states[idx].View.Hand[0]
+			sendCommand(t, []*websocket.Conn{a, b}[idx], command{Type: "play", ID: fmt.Sprintf("h%d-p%d", hand, play), Card: card})
+			ack := readMessage(t, []*websocket.Conn{a, b}[idx], "ack")
+			states[0], states[1] = readRevision(t, a, ack.Revision), readRevision(t, b, ack.Revision)
+		}
+		if states[0].View.Public.CompletedHands != hand {
+			t.Fatalf("hand %d incomplete", hand)
+		}
+		if hand < 10 {
+			sendCommand(t, a, command{Type: "next", ID: fmt.Sprintf("next-%d", hand)})
+			ack := readMessage(t, a, "ack")
+			states[0], states[1] = readRevision(t, a, ack.Revision), readRevision(t, b, ack.Revision)
+		}
+	}
+	if states[0].View.Public.Phase != domain.PhaseGameComplete || len(states[0].View.Public.InitialRules) != 4 {
+		t.Fatal("custom match did not complete")
+	}
+	sendCommand(t, a, command{Type: "configure", ID: "late", Settings: settings})
+	if got := readMessage(t, a, "error"); got.Code != "invalid_config" {
+		t.Fatalf("settings lock %+v", got)
+	}
+	s.rooms["settings"].mu.Lock()
+	actual := s.rooms["settings"].state
+	s.rooms["settings"].mu.Unlock()
+	if actual.Config.HandSize != 1 || actual.Config.RevealEvery != 1 || len(actual.Config.InitialRules) != 4 {
+		t.Fatal("canonical config lost")
+	}
+}
+
+func TestStartRevalidatesHandSizeWithFinalSeats(t *testing.T) {
+	_, server := testServer(t)
+	host := joinRoom(t, server.URL, "seat-limit", "A", "", http.StatusOK)
+	_ = joinRoom(t, server.URL, "seat-limit", "B", "", http.StatusOK)
+	conn := dialRoom(t, server.URL, host)
+	_ = readMessage(t, conn, "lobby")
+	sendCommand(t, conn, command{Type: "configure", ID: "large-hand", Settings: `{"handSize":18,"revealEvery":2,"initialRules":[]}`})
+	_ = readMessage(t, conn, "ack")
+	_ = readMessage(t, conn, "lobby")
+	_ = joinRoom(t, server.URL, "seat-limit", "C", "", http.StatusOK)
+	_ = readMessage(t, conn, "lobby")
+	sendCommand(t, conn, command{Type: "start", ID: "start-too-many"})
+	if got := readMessage(t, conn, "error"); got.Code != "invalid_action" {
+		t.Fatalf("final seat limit %+v", got)
 	}
 }

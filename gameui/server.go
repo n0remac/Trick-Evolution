@@ -65,6 +65,7 @@ type room struct {
 	seen          map[domain.SeatID]map[string]acceptedCommand
 	lastActivity  time.Time
 	server        *Server
+	config        domain.Config
 	botWake       chan struct{}
 	done          chan struct{}
 	ctx           context.Context
@@ -106,6 +107,7 @@ type serverMessage struct {
 	Room     string             `json:"room,omitempty"`
 	Seats    []seatSummary      `json:"seats,omitempty"`
 	View     *domain.PlayerView `json:"view,omitempty"`
+	Config   *domain.Config     `json:"config,omitempty"`
 	Events   []domain.Event     `json:"events,omitempty"`
 	Sequence uint64             `json:"-"`
 }
@@ -114,6 +116,7 @@ type command struct {
 	Type             string        `json:"type"`
 	ID               string        `json:"id"`
 	Card             domain.CardID `json:"card,omitempty"`
+	Settings         string        `json:"settings,omitempty"`
 	ExpectedRevision *uint64       `json:"-"`
 }
 
@@ -139,6 +142,9 @@ func NewServerWithBotOptions(config domain.Config, shuffle func() domain.Shuffle
 	}
 	catalog := domain.DefaultCatalog()
 	if err := catalog.Validate(); err != nil {
+		return nil, err
+	}
+	if err := domain.ValidateInitialRules(config, catalog); err != nil {
 		return nil, err
 	}
 	if shuffle == nil {
@@ -272,7 +278,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	gameRoom := s.rooms[request.Room]
 	if gameRoom == nil {
 		roomContext, cancel := context.WithCancel(context.Background())
-		gameRoom = &room{id: request.Room, clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand), lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{}), ctx: roomContext, cancel: cancel}
+		gameRoom = &room{id: request.Room, config: s.config, clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand), lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{}), ctx: roomContext, cancel: cancel}
 		s.rooms[request.Room] = gameRoom
 	}
 	gameRoom.mu.Lock()
@@ -457,7 +463,11 @@ func (c *client) enqueue(message serverMessage) {
 	if c.html {
 		switch message.Type {
 		case "lobby", "state":
-			data = []byte(renderScreen(message, c.seat, c.room.server.catalog, c.room.server.config))
+			config := c.room.server.config
+			if message.Config != nil {
+				config = *message.Config
+			}
+			data = []byte(renderScreen(message, c.seat, c.room.server.catalog, config))
 		case "error":
 			data = []byte(noticeNode(message.Message).Render())
 		default: // Acknowledgements have no visual update.
@@ -535,6 +545,7 @@ func decodeCommand(data []byte, html bool) (command, error) {
 			Type     string          `json:"type"`
 			ID       string          `json:"id"`
 			Card     domain.CardID   `json:"card"`
+			Settings string          `json:"settings"`
 			Revision string          `json:"revision"`
 			Headers  json.RawMessage `json:"HEADERS"`
 		}
@@ -556,7 +567,7 @@ func decodeCommand(data []byte, html bool) (command, error) {
 		if err != nil {
 			return cmd, fmt.Errorf("invalid revision: %w", err)
 		}
-		cmd = command{Type: envelope.Type, ID: envelope.ID, Card: envelope.Card, ExpectedRevision: &revision}
+		cmd = command{Type: envelope.Type, ID: envelope.ID, Card: envelope.Card, Settings: envelope.Settings, ExpectedRevision: &revision}
 		return cmd, nil
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -601,10 +612,11 @@ func (r *room) publishLocked() {
 		seats[i] = seatSummary{ID: p.ID, Name: p.Name, Online: p.Bot || clients[p.ID] != nil, Host: i == 0, Bot: p.Bot}
 	}
 	state := r.state
+	config := r.config
 	events := append([]domain.Event(nil), r.lastEvents...)
 	r.mu.Unlock()
 	for seat, c := range clients {
-		message := serverMessage{Room: r.id, Seats: seats, Sequence: sequence}
+		message := serverMessage{Room: r.id, Seats: seats, Sequence: sequence, Config: &config}
 		if state == nil {
 			message.Type = "lobby"
 		} else {
@@ -633,7 +645,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 		c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: "stale_session", Message: "reconnect to continue"})
 		return
 	}
-	fingerprint := cmd.Type + ":" + string(cmd.Card)
+	fingerprint := cmd.Type + ":" + string(cmd.Card) + ":" + cmd.Settings
 	if existing, ok := r.seen[c.seat][cmd.ID]; ok {
 		r.mu.Unlock()
 		if existing.fingerprint != fingerprint {
@@ -653,6 +665,52 @@ func (r *room) handleCommand(c *client, cmd command) {
 			c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: "stale_revision", Message: "Game changed. Use the updated controls.", Revision: current})
 			return
 		}
+	}
+	if cmd.Type == "configure" || cmd.Type == "reset_rules" {
+		var updated domain.Config
+		var configErr error
+		if r.state != nil {
+			configErr = errors.New("rules are locked after the match starts")
+		} else if r.seats[0].ID != c.seat {
+			configErr = errors.New("only the host can edit game rules")
+		} else if cmd.Type == "reset_rules" {
+			updated = r.server.config
+		} else {
+			var settings struct {
+				HandSize     int             `json:"handSize"`
+				RevealEvery  int             `json:"revealEvery"`
+				InitialRules []domain.RuleID `json:"initialRules"`
+			}
+			decoder := json.NewDecoder(strings.NewReader(cmd.Settings))
+			decoder.DisallowUnknownFields()
+			if configErr = decoder.Decode(&settings); configErr == nil {
+				if decoder.Decode(new(any)) != io.EOF {
+					configErr = errors.New("trailing settings data")
+				}
+			}
+			if configErr == nil {
+				updated = domain.Config{HandSize: settings.HandSize, RevealEvery: settings.RevealEvery, MaxHands: r.config.MaxHands, InitialRules: settings.InitialRules}
+				configErr = updated.Validate(len(r.seats))
+				if configErr == nil {
+					configErr = domain.ValidateInitialRules(updated, r.server.catalog)
+				}
+			}
+		}
+		if configErr != nil {
+			r.mu.Unlock()
+			c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: "invalid_config", Message: configErr.Error()})
+			return
+		}
+		r.config = updated
+		r.lastActivity = r.server.now()
+		if r.seen[c.seat] == nil {
+			r.seen[c.seat] = make(map[string]acceptedCommand)
+		}
+		r.seen[c.seat][cmd.ID] = acceptedCommand{fingerprint: fingerprint}
+		r.mu.Unlock()
+		c.enqueue(serverMessage{Type: "ack", ID: cmd.ID})
+		r.publishLocked()
+		return
 	}
 	if cmd.Type == "add_bot" {
 		code, detail := "", ""
@@ -707,7 +765,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 		for i, p := range r.seats {
 			ids[i] = p.ID
 		}
-		next, err = domain.NewMatch(ids, r.server.config, r.server.catalog, r.server.shuffle())
+		next, err = domain.NewMatch(ids, r.config, r.server.catalog, r.server.shuffle())
 		if err == nil {
 			next.Revision = 1
 			events = []domain.Event{{Kind: domain.EventHandStarted, Revision: 1, Hand: 1, Seat: next.Leader}}

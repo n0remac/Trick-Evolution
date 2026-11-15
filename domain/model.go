@@ -76,9 +76,10 @@ type Play struct {
 }
 
 type Config struct {
-	HandSize    int
-	RevealEvery int // Completed hands between rule reveals, 3 through 5.
-	MaxHands    int // The match ends after this many completed hands.
+	HandSize     int
+	RevealEvery  int      // Completed hands between rule reveals.
+	MaxHands     int      // The match ends after this many completed hands.
+	InitialRules []RuleID // Optional visible replacements, in selection order.
 }
 
 func DefaultConfig() Config { return Config{HandSize: 5, RevealEvery: 3, MaxHands: 10} }
@@ -87,14 +88,14 @@ func (c Config) Validate(seatCount int) error {
 	if seatCount < 2 || seatCount > 4 {
 		return fmt.Errorf("seat count must be 2 through 4")
 	}
-	if c.HandSize < 1 || c.HandSize > 13 || c.HandSize*seatCount > 52 {
+	if c.HandSize < 1 || c.HandSize > 26 || c.HandSize*seatCount > 52 {
 		return fmt.Errorf("hand size cannot be dealt from one standard deck")
 	}
-	if c.RevealEvery < 3 || c.RevealEvery > 5 {
-		return fmt.Errorf("reveal interval must be 3 through 5 completed hands")
+	if c.RevealEvery < 1 || c.RevealEvery > 100 {
+		return fmt.Errorf("reveal interval must be 1 through 100 completed hands")
 	}
-	if c.MaxHands < c.RevealEvery+1 || c.MaxHands > 100 {
-		return fmt.Errorf("max hands must be between reveal interval + 1 and 100")
+	if c.MaxHands < 1 || c.MaxHands > 100 {
+		return fmt.Errorf("max hands must be between 1 and 100")
 	}
 	return nil
 }
@@ -121,6 +122,8 @@ type MatchState struct {
 	Seats          []Seat
 	Hands          map[SeatID][]CardID
 	Captured       map[SeatID][]CardID
+	DealOwner      map[CardID]SeatID // Private until hand settlement.
+	HandAwards     []HandAward
 	StandardDraw   []CardID
 	RuleDraw       []RuleID
 	CurrentTrick   []Play
@@ -154,6 +157,9 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 	if err := catalog.Validate(); err != nil {
 		return MatchState{}, err
 	}
+	if err := ValidateInitialRules(cfg, catalog); err != nil {
+		return MatchState{}, err
+	}
 	if source == nil {
 		return MatchState{}, fmt.Errorf("shuffle source is required")
 	}
@@ -173,6 +179,17 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 		standardOrder[i] = string(card.ID)
 	}
 	rules := catalog.RuleDeck()
+	selected := map[RuleID]bool{}
+	for _, id := range cfg.InitialRules {
+		selected[id] = true
+	}
+	filtered := rules[:0]
+	for _, id := range rules {
+		if !selected[id] {
+			filtered = append(filtered, id)
+		}
+	}
+	rules = filtered
 	source.Shuffle(len(rules), func(i, j int) { rules[i], rules[j] = rules[j], rules[i] })
 	ruleOrder := make([]string, len(rules))
 	for i, id := range rules {
@@ -201,6 +218,9 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 	if err := catalog.Validate(); err != nil {
 		return MatchState{}, err
 	}
+	if err := ValidateInitialRules(cfg, catalog); err != nil {
+		return MatchState{}, err
+	}
 	if len(records) != 2 || records[0].Kind != StandardDeckKind || records[1].Kind != RuleDeckKind {
 		return MatchState{}, fmt.Errorf("expected standard and rule shuffle records")
 	}
@@ -208,6 +228,17 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 		return MatchState{}, fmt.Errorf("standard shuffle: %w", err)
 	}
 	rules := catalog.RuleDeck()
+	selected := map[RuleID]bool{}
+	for _, id := range cfg.InitialRules {
+		selected[id] = true
+	}
+	filtered := rules[:0]
+	for _, id := range rules {
+		if !selected[id] {
+			filtered = append(filtered, id)
+		}
+	}
+	rules = filtered
 	expected := make([]string, len(rules))
 	for i, id := range rules {
 		expected[i] = string(id)
@@ -267,7 +298,7 @@ func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, r
 	s := MatchState{CatalogVersion: catalog.Version, Config: cfg, Phase: PhasePlayingTrick,
 		Seats: make([]Seat, len(ids)), Hands: make(map[SeatID][]CardID, len(ids)), Captured: make(map[SeatID][]CardID, len(ids)),
 		RuleDraw: make([]RuleID, len(ruleOrder)), HandNumber: 1, TrickNumber: 1,
-		Field:    StartingField(catalog),
+		Field: StartingFieldWithConfig(catalog, cfg), DealOwner: make(map[CardID]SeatID),
 		Shuffles: []ShuffleRecord{{Kind: StandardDeckKind, Order: append([]string(nil), standardOrder...)}, {Kind: RuleDeckKind, Order: append([]string(nil), ruleOrder...)}},
 	}
 	for i, id := range ids {
@@ -281,7 +312,9 @@ func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, r
 	for card := 0; card < cfg.HandSize; card++ {
 		for offset := 1; offset <= len(ids); offset++ {
 			seat := ids[offset%len(ids)]
-			s.Hands[seat] = append(s.Hands[seat], CardID(standardOrder[card*len(ids)+offset-1]))
+			id := CardID(standardOrder[card*len(ids)+offset-1])
+			s.Hands[seat] = append(s.Hands[seat], id)
+			s.DealOwner[id] = seat
 		}
 	}
 	for _, id := range standardOrder[cfg.HandSize*len(ids):] {

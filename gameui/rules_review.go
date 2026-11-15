@@ -22,7 +22,7 @@ func rulesReviewContent(message serverMessage, seat domain.SeatID, catalog domai
 	if message.View != nil {
 		public := message.View.Public
 		if public.HandSize > 0 && public.MaxHands > 0 && public.RevealEvery > 0 {
-			config = domain.Config{HandSize: public.HandSize, MaxHands: public.MaxHands, RevealEvery: public.RevealEvery}
+			config = domain.Config{HandSize: public.HandSize, MaxHands: public.MaxHands, RevealEvery: public.RevealEvery, InitialRules: public.InitialRules}
 		}
 	}
 	starting, err := domain.StartingRules(config, catalog)
@@ -82,7 +82,7 @@ func rulesReviewContent(message serverMessage, seat domain.SeatID, catalog domai
 		h.P(h.Class("review-context"), h.T(intro)),
 		h.NewNode("div", tabNodes),
 		panel("current", defaultTab != "current", renderCurrentRules(current, catalog, lobby, message.View)),
-		panel("starting", defaultTab != "starting", renderStartingRules(starting, catalog)),
+		panel("starting", defaultTab != "starting", renderStartingRules(starting, catalog, config, lobby, host)),
 		panel("changes", defaultTab != "changes", renderRuleChanges(current, catalog)),
 		h.Div(actions...),
 	), nil
@@ -129,7 +129,7 @@ func renderCurrentRules(resolved domain.RuleResolution, catalog domain.Catalog, 
 	return h.Div(parts...)
 }
 
-func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog) *h.Node {
+func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog, config domain.Config, lobby, host bool) *h.Node {
 	cards := []*h.Node{}
 	for _, rule := range starting.ActiveField {
 		definition, ok := catalog.Definition(rule.Instance.DefinitionID)
@@ -137,7 +137,7 @@ func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog)
 			cards = append(cards, renderEffectiveRule(rule, definition, starting.Effective, ""))
 		}
 	}
-	parts := []*h.Node{h.NewNode("h3", []*h.Node{h.T("Starting field cards")}), h.P(h.Class("muted"), h.T("These are the two cards visible on the table when play begins.")), h.Div(append([]*h.Node{h.Class("review-start-cards")}, cards...)...), h.NewNode("h3", []*h.Node{h.T("Active starting baselines")})}
+	parts := []*h.Node{h.NewNode("h3", []*h.Node{h.T("Starting field cards")}), h.P(h.Class("muted"), h.T("The selected visible cards are shown on the table when play begins. Hidden baselines still apply where no card replaces them.")), h.Div(append([]*h.Node{h.Class("review-start-cards")}, cards...)...), h.NewNode("h3", []*h.Node{h.T("Active starting baselines")})}
 	for _, group := range reviewCategories {
 		entries := []*h.Node{}
 		for _, rule := range starting.History {
@@ -153,7 +153,59 @@ func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog)
 			parts = append(parts, reviewGroup(group.label, entries))
 		}
 	}
+	if lobby && host {
+		parts = append(parts, renderSettings(config, catalog))
+	}
+	if !lobby {
+		parts = append(parts, h.P(h.Class("muted"), h.T("Starting settings are locked after play begins.")))
+	}
 	return h.Div(parts...)
+}
+
+func renderSettings(config domain.Config, catalog domain.Catalog) *h.Node {
+	selected := map[domain.RuleID]bool{}
+	for _, id := range config.InitialRules {
+		selected[id] = true
+	}
+	nodes := []*h.Node{h.Id("review-settings-form"), h.Attr("ws-send", ""), h.Class("review-settings"),
+		h.H3(h.T("Game settings")), h.P(h.Class("muted"), h.T("Changes apply to this room. Choose prerequisites before dependent cards; conflicting alternatives cannot both start. Unselected mechanics use their hidden or visible baseline.")),
+		h.Input(h.Type("hidden"), h.Name("type"), h.Value("configure")), h.Input(h.Type("hidden"), h.Name("revision"), h.Value("0")), h.Input(h.Type("hidden"), h.Name("settings"), h.Value("")),
+		h.Label(h.T("Cards per player"), h.Input(h.Type("number"), h.Attr("data-setting", "hand-size"), h.Attr("min", "1"), h.Attr("max", "26"), h.Value(fmt.Sprint(config.HandSize)))),
+		h.Label(h.T("Completed hands between reveals"), h.Input(h.Type("number"), h.Attr("data-setting", "reveal-every"), h.Attr("min", "1"), h.Attr("max", "100"), h.Value(fmt.Sprint(config.RevealEvery)))),
+	}
+	for _, group := range reviewCategories {
+		choices := []*h.Node{}
+		for _, d := range catalog.Definitions {
+			if d.Status != domain.StatusSupported || d.StartActive || d.FieldCategory != group.category {
+				continue
+			}
+			input := []*h.Node{h.Type("checkbox"), h.Attr("data-initial-rule", string(d.ID)), h.Value(string(d.ID))}
+			if selected[d.ID] {
+				input = append(input, h.Attr("checked", ""))
+			}
+			description := d.Text
+			if len(d.Prerequisites) > 0 || len(d.PrerequisiteAny) > 0 {
+				names := []string{}
+				for _, id := range append(append([]domain.RuleID(nil), d.Prerequisites...), d.PrerequisiteAny...) {
+					if needed, ok := catalog.Definition(id); ok {
+						names = append(names, needed.Title)
+					}
+				}
+				connector := " and "
+				if len(d.PrerequisiteAny) > 0 && len(d.Prerequisites) == 0 {
+					connector = " or "
+				}
+				description += " Requires " + strings.Join(names, connector) + "."
+			}
+			choices = append(choices, h.Label(h.Class("review-setting-rule"), h.Input(input...), h.Span(h.NewNode("strong", []*h.Node{h.T(d.Title)}), h.T(" — "+description))))
+		}
+		if len(choices) > 0 {
+			nodes = append(nodes, reviewGroup(group.label, choices))
+		}
+	}
+	nodes = append(nodes, h.Button(h.Type("submit"), h.T("Save game settings")))
+	reset := h.Form(h.Id("review-reset-form"), h.Attr("ws-send", ""), h.Input(h.Type("hidden"), h.Name("type"), h.Value("reset_rules")), h.Input(h.Type("hidden"), h.Name("revision"), h.Value("0")), h.Button(h.Type("submit"), h.T("Reset to defaults")))
+	return h.Div(h.Form(nodes...), reset)
 }
 
 func reviewGroup(label string, entries []*h.Node) *h.Node {
@@ -167,10 +219,18 @@ func renderEffectiveRule(rule domain.ResolvedRule, definition domain.RuleDefinit
 	if definition.StartingVisibility == domain.Hidden {
 		kind = "Hidden baseline"
 	}
-	nodes := []*h.Node{h.Class("review-rule"), h.Attr("data-rule-id", string(definition.ID)), h.Div(h.Class("review-rule-heading"), h.NewNode("strong", []*h.Node{h.T(definition.Title)}), h.Span(h.Class("review-rule-kind"), h.T(kind)))}
+	nodes := []*h.Node{h.Class("review-rule"), h.Attr("data-rule-id", string(definition.ID)), h.Div(h.Class("review-rule-heading"), h.NewNode("strong", []*h.Node{h.T(definition.Title)}), h.Span(h.Class("review-rule-kind"), h.T(kind))), h.P(h.T(definition.Text))}
 	for _, effect := range effects {
 		if effect.InstanceID == rule.Instance.InstanceID {
 			nodes = append(nodes, h.P(h.T(effectDescription(effect))))
+		}
+	}
+	if definition.ID == domain.RuleLowTrump {
+		for _, effect := range effects {
+			if effect.Mechanic == domain.MechanicLowOwner {
+				nodes = append(nodes, h.P(h.T(effectDescription(effect))))
+				break
+			}
 		}
 	}
 	if status != "" {
@@ -225,7 +285,17 @@ func effectDescription(e domain.EffectiveEffect) string {
 	case domain.MechanicTieBreak:
 		return "If eligible ranks tie, the earlier play wins."
 	case domain.MechanicTrickPoints:
+		if e.Value == domain.ValueNoPoints {
+			return "Captured tricks give no direct points."
+		}
 		return "Each captured trick scores one point."
+	case domain.MechanicLowOwner:
+		if e.Value == domain.ValueKeepLow {
+			return "The original holder of Low Trump receives its point."
+		}
+		return "The captor of Low Trump receives its point (default)."
+	case domain.MechanicHighTrump, domain.MechanicLowTrump, domain.MechanicJackTrump, domain.MechanicGamePoint:
+		return "One point at completed-hand settlement when the card or tally qualifies."
 	case domain.MechanicHandLimit:
 		return fmt.Sprintf("The match ends after %d completed hands.", e.Number)
 	case domain.MechanicVictory:
@@ -245,7 +315,15 @@ func renderRuleChanges(current domain.RuleResolution, catalog domain.Catalog) *h
 	}
 	entries := []*h.Node{}
 	for _, rule := range current.History {
-		if rule.Instance.Starting && len(rule.OverriddenBy) == 0 && rule.InactiveReason == "" {
+		evolved := rule.Instance.IntroducedAfterHand > 0
+		for _, child := range rule.OverriddenBy {
+			for _, candidate := range current.History {
+				if candidate.Instance.InstanceID == child && candidate.Instance.IntroducedAfterHand > 0 {
+					evolved = true
+				}
+			}
+		}
+		if !evolved {
 			continue
 		}
 		definition, ok := catalog.Definition(rule.Instance.DefinitionID)
@@ -253,7 +331,7 @@ func renderRuleChanges(current domain.RuleResolution, catalog domain.Catalog) *h
 			continue
 		}
 		label := "Added rule"
-		if rule.Instance.Starting {
+		if rule.Instance.IntroducedAfterHand == 0 {
 			label = "Starting rule"
 		} else if rule.Instance.IntroducedAfterHand > 0 {
 			label = fmt.Sprintf("Revealed after hand %d", rule.Instance.IntroducedAfterHand)

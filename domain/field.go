@@ -14,11 +14,47 @@ func StartingField(catalog Catalog) []RuleInstance {
 	return field
 }
 
+// StartingFieldWithConfig appends explicit visible selections after the
+// mandatory baselines. Selection order is meaningful and never reordered.
+func StartingFieldWithConfig(catalog Catalog, config Config) []RuleInstance {
+	field := StartingField(catalog)
+	for _, id := range config.InitialRules {
+		field = append(field, RuleInstance{InstanceID: fmt.Sprintf("rule:initial:%d", len(field)), DefinitionID: id, Sequence: len(field), IntroducedAfterHand: 0})
+	}
+	return field
+}
+
+func ValidateInitialRules(config Config, catalog Catalog) error {
+	seen := map[RuleID]bool{}
+	field := StartingField(catalog)
+	for _, id := range config.InitialRules {
+		d, ok := catalog.Definition(id)
+		if !ok || d.Status != StatusSupported || d.StartActive || seen[id] {
+			return fmt.Errorf("invalid initial rule %s", id)
+		}
+		seen[id] = true
+		field = append(field, RuleInstance{InstanceID: fmt.Sprintf("rule:initial:%d", len(field)), DefinitionID: id, Sequence: len(field)})
+		r, err := ResolveRules(field, catalog, config)
+		if err != nil || !r.History[len(r.History)-1].Active {
+			return fmt.Errorf("initial rule %s conflicts or lacks a prerequisite", id)
+		}
+		for _, previous := range r.History[len(StartingField(catalog)) : len(r.History)-1] {
+			if !previous.Active {
+				return fmt.Errorf("initial rules contain conflicting alternatives")
+			}
+		}
+	}
+	return nil
+}
+
 func StartingRules(config Config, catalog Catalog) (RuleResolution, error) {
 	if err := config.Validate(2); err != nil {
 		return RuleResolution{}, err
 	}
-	rules, err := ResolveRules(StartingField(catalog), catalog, config)
+	if err := ValidateInitialRules(config, catalog); err != nil {
+		return RuleResolution{}, err
+	}
+	rules, err := ResolveRules(StartingFieldWithConfig(catalog, config), catalog, config)
 	if err != nil {
 		return RuleResolution{}, err
 	}
@@ -238,7 +274,7 @@ func (r RuleResolution) ValidateMatchEffects(config Config) error {
 		{MechanicNextLeader, ValueWinnerLeads, 0}, {MechanicTrump, "", 0},
 		{MechanicPlayRestriction, "", 0}, {MechanicWinnerEligibility, ValueLeadSuit, 0},
 		{MechanicRankComparison, "", 0}, {MechanicTieBreak, ValueFirstPlay, 0},
-		{MechanicTrickPoints, ValueOnePoint, 0}, {MechanicHandLimit, ValueConfigured, config.MaxHands},
+		{MechanicTrickPoints, "", 0}, {MechanicHandLimit, ValueConfigured, config.MaxHands},
 		{MechanicVictory, ValueHighestShared, 0}, {MechanicReveal, ValueConfigured, config.RevealEvery},
 	}
 	for _, check := range checks {

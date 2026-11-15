@@ -48,7 +48,7 @@ func TestStage1SetupReplayAndProjection(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(a, replay) {
 		t.Fatal("replay diverged", err)
 	}
-	if a.Dealer != "north" || a.Leader != "east" || a.Turn != "east" || len(a.RuleDraw) != 5 || len(a.StandardDraw) != 52-cfg.HandSize*len(ids) {
+	if a.Dealer != "north" || a.Leader != "east" || a.Turn != "east" || len(a.RuleDraw) != len(catalog.RuleDeck()) || len(a.StandardDraw) != 52-cfg.HandSize*len(ids) {
 		t.Fatalf("bad setup %+v", a)
 	}
 	for _, id := range ids {
@@ -63,7 +63,7 @@ func TestStage1SetupReplayAndProjection(t *testing.T) {
 	if len(view.ActiveField) != 2 || view.ActiveField[0].Instance.DefinitionID != RuleFollowSuit || view.ActiveField[1].Instance.DefinitionID != RuleHighCardWins {
 		t.Fatalf("visible field %+v", view.ActiveField)
 	}
-	if len(view.Rules) != 15 || len(view.Effective) != 16 {
+	if len(view.Rules) != len(StartingField(catalog)) || len(view.Effective) != 17 {
 		t.Fatalf("baseline history/effects %d/%d", len(view.Rules), len(view.Effective))
 	}
 	for _, want := range []struct {
@@ -105,8 +105,8 @@ func TestInjectedFixtureDeal(t *testing.T) {
 	if !reflect.DeepEqual(state.Hands["b"], []CardID{"std:H:02", "std:H:04", "std:H:06", "std:H:08", "std:H:10"}) || !reflect.DeepEqual(state.Hands["a"], []CardID{"std:H:03", "std:H:05", "std:H:07", "std:H:09", "std:H:11"}) {
 		t.Fatalf("deal changed %+v", state.Hands)
 	}
-	if len(state.RuleDraw) != 5 {
-		t.Fatal("default evolution deck should contain five cards")
+	if len(state.RuleDraw) != len(DefaultCatalog().RuleDeck()) {
+		t.Fatal("default evolution deck size changed")
 	}
 }
 
@@ -115,10 +115,10 @@ func TestCatalogValidation(t *testing.T) {
 	if err := catalog.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Definitions) != 73 {
+	if len(catalog.Definitions) != 82 {
 		t.Fatalf("catalog entries %d", len(catalog.Definitions))
 	}
-	wantDeck := []RuleID{RuleSpadesTrump, RulePitchTrump, RuleFollowOrTrump, RuleBreakSpades, RuleBreakHearts}
+	wantDeck := []RuleID{RuleSpadesTrump, RulePitchTrump, RuleFollowOrTrump, RuleBreakSpades, RuleBreakHearts, RuleHighTrump, RuleLowTrump, RuleCaptureLow, RuleKeepLow, RuleJackTrump, RuleGamePoint, RuleNoPoints, RulePointsPerTrick}
 	if !reflect.DeepEqual(catalog.RuleDeck(), wantDeck) {
 		t.Fatalf("default evolution deck: %v", catalog.RuleDeck())
 	}

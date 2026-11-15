@@ -170,3 +170,29 @@ func TestRulesReviewAfterEndAndReconnect(t *testing.T) {
 		}
 	}
 }
+
+func TestPregameSettingsReviewAndLockedStartingRules(t *testing.T) {
+	cfg := domain.DefaultConfig()
+	cfg.HandSize = 2
+	cfg.RevealEvery = 1
+	cfg.InitialRules = []domain.RuleID{domain.RuleSpadesTrump, domain.RuleLowTrump, domain.RuleKeepLow, domain.RuleNoPoints}
+	state, catalog := reviewFixture(t, cfg)
+	lobby := reviewHTML(t, reviewMessage(nil), "host", catalog, cfg)
+	for _, want := range []string{`id="review-settings-form"`, `id="review-reset-form"`, `data-initial-rule="rule.low_trump_scores"`, `Completed hands between reveals`, `Keep Low`} {
+		if !strings.Contains(lobby, want) {
+			t.Fatalf("settings missing %s", want)
+		}
+	}
+	guest := reviewHTML(t, reviewMessage(nil), "guest", catalog, cfg)
+	if strings.Contains(guest, `id="review-settings-form"`) {
+		t.Fatal("guest can edit settings")
+	}
+	view, err := domain.ProjectForSeat(state, catalog, "host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := reviewHTML(t, reviewMessage(&view), "host", catalog, cfg)
+	if strings.Contains(started, `id="review-settings-form"`) || !strings.Contains(started, "locked after play begins") || !strings.Contains(started, "original holder of Low Trump") {
+		t.Fatal("started rules not locked or low policy missing")
+	}
+}

@@ -75,6 +75,23 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 		value := strength(card)
 		if trump != "" && card.Suit == trump {
 			value += 16 // Save trump when an ordinary card can win or shed.
+			if _, err := resolved.Effect(domain.MechanicLowTrump); err == nil && card.Rank <= 5 {
+				value += 24
+			}
+		}
+		if _, err := resolved.Effect(domain.MechanicGamePoint); err == nil {
+			switch card.Rank {
+			case 10:
+				value += 10
+			case 14:
+				value += 4
+			case 13:
+				value += 3
+			case 12:
+				value += 2
+			case 11:
+				value++
+			}
 		}
 		return value
 	}

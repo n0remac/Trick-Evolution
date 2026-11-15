@@ -151,6 +151,8 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
 	next.Captured = make(map[SeatID][]CardID, len(next.Seats))
+	next.DealOwner = make(map[CardID]SeatID)
+	next.HandAwards = nil
 	dealerIndex := (indexOfSeat(next.Seats, state.Dealer) + 1) % len(next.Seats)
 	next.Dealer = next.Seats[dealerIndex].ID
 	leaderIndex := (dealerIndex + 1) % len(next.Seats)
@@ -161,7 +163,9 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	for card := 0; card < next.Config.HandSize; card++ {
 		for offset := 1; offset <= len(next.Seats); offset++ {
 			seat := next.Seats[(dealerIndex+offset)%len(next.Seats)].ID
-			next.Hands[seat] = append(next.Hands[seat], action.DeckOrder[card*len(next.Seats)+offset-1])
+			id := action.DeckOrder[card*len(next.Seats)+offset-1]
+			next.Hands[seat] = append(next.Hands[seat], id)
+			next.DealOwner[id] = seat
 		}
 	}
 	next.StandardDraw = append([]CardID(nil), action.DeckOrder[next.Config.HandSize*len(next.Seats):]...)
@@ -252,7 +256,11 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 		return state, nil, transitionError(ErrInvalidState, "trick winner is not a seat")
 	}
 	next.Seats[winnerIndex].TricksWon++
-	next.Seats[winnerIndex].Score++ // Provisional Score by Tricks baseline.
+	trickPoints, _ := resolvedRules.Effect(MechanicTrickPoints)
+	if trickPoints.Value == ValueOnePoint {
+		next.Seats[winnerIndex].Score++
+		next.HandAwards = append(next.HandAwards, HandAward{Rule: trickPoints.Source, Title: "Point per Trick", Seat: winner, Trick: next.TrickNumber, Points: 1})
+	}
 	for _, play := range next.CurrentTrick {
 		next.Captured[winner] = append(next.Captured[winner], play.Card)
 	}
@@ -266,6 +274,9 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	}
 	next.Turn = ""
 	next.Phase = PhaseHandComplete
+	if err := settleHandScores(&next, resolvedRules); err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
 	if next.CompletedHands+1 >= next.Config.MaxHands {
 		next.CompletedHands++
 		next.Phase = PhaseGameComplete
@@ -372,6 +383,12 @@ func cloneState(state MatchState) MatchState {
 	next.StandardDraw = slices.Clone(state.StandardDraw)
 	next.RuleDraw = slices.Clone(state.RuleDraw)
 	next.CurrentTrick = slices.Clone(state.CurrentTrick)
+	next.DealOwner = make(map[CardID]SeatID, len(state.DealOwner))
+	for id, owner := range state.DealOwner {
+		next.DealOwner[id] = owner
+	}
+	next.HandAwards = slices.Clone(state.HandAwards)
+	next.Config.InitialRules = slices.Clone(state.Config.InitialRules)
 	next.Field = slices.Clone(state.Field)
 	next.Shuffles = make([]ShuffleRecord, len(state.Shuffles))
 	for i, record := range state.Shuffles {

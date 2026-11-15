@@ -122,7 +122,7 @@ func TestFixedCompleteHand(t *testing.T) {
 	if trickWins != 5 || state.CompletedHands != 1 || state.Phase != PhaseHandComplete || state.Seats[0].Score != 5 || state.Seats[0].TricksWon != 5 || state.Seats[1].Score != 0 || state.Turn != "" {
 		t.Fatalf("incorrect completed hand: %+v", state)
 	}
-	if len(state.Field) != 15 {
+	if len(state.Field) != len(StartingField(DefaultCatalog())) {
 		t.Fatal("rule revealed before cadence boundary")
 	}
 	public, err := ProjectPublic(state, DefaultCatalog())
@@ -306,7 +306,7 @@ func TestCompleteGameReplayAndCadence(t *testing.T) {
 		}
 		assertCardConservation(t, state)
 	}
-	if len(revealHands) != 0 || state.CompletedHands != 10 || len(state.Field) != 15 || state.Revision != uint64(len(actions)) {
+	if len(revealHands) != 0 || state.CompletedHands != 10 || len(state.Field) != len(StartingField(DefaultCatalog())) || state.Revision != uint64(len(actions)) {
 		t.Fatalf("incorrect game boundary or cadence: reveals=%v, state=%+v", revealHands, state)
 	}
 	if state.Seats[0].Score+state.Seats[1].Score != 50 {
@@ -454,7 +454,7 @@ func TestBoundedFullGameRevealAppliesBetweenHands(t *testing.T) {
 			}
 		}
 	}
-	if !reflect.DeepEqual(reveals, []int{3}) || state.CompletedHands != 4 || len(state.Field) != 16 || lastWinner != "a" {
+	if !reflect.DeepEqual(reveals, []int{3}) || state.CompletedHands != 4 || len(state.Field) != len(StartingField(DefaultCatalog()))+1 || lastWinner != "a" {
 		t.Fatalf("bounded match: reveals=%v winner=%s field=%d", reveals, lastWinner, len(state.Field))
 	}
 	if state.Seats[0].Score+state.Seats[1].Score != 4 {

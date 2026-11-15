@@ -167,6 +167,14 @@ h2 { margin: 0 0 .75rem; }
 .review-start-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .45rem; }
 .review-actions { position: sticky; bottom: -1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 1.2rem -1rem -1rem; padding: .7rem 1rem max(.7rem, env(safe-area-inset-bottom)); background: #102b21; border-top: 1px solid #537663; }
 .review-actions .muted { margin: 0; flex: 1 1 100%; }
+.review-settings { display: grid; gap: .8rem; }
+.review-settings > label { display: grid; gap: .35rem; }
+.review-settings input[type="number"] { width: min(100%, 12rem); min-height: 44px; padding: .4rem; }
+.review-setting-rule { display: flex; align-items: flex-start; gap: .65rem; padding: .45rem; min-height: 44px; }
+.review-setting-rule input { flex: none; width: 1.2rem; height: 1.2rem; margin-top: .2rem; }
+.review-settings button, #review-reset-form button { min-height: 44px; }
+.hand-awards { position: absolute; bottom: 5.5rem; left: 50%; transform: translateX(-50%); max-height: 9rem; overflow: auto; width: min(26rem, 90vw); padding: .5rem; background: #102b21ed; z-index: 4; }
+.hand-awards p { margin: .25rem 0; }
 @media (max-width: 600px) {
   #rules-review { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
   .review-header { padding-top: max(.8rem, env(safe-area-inset-top)); }
