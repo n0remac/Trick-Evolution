@@ -5,13 +5,14 @@ import "fmt"
 // HandAward records settled points. Completed-trick awards are projected at
 // early game end; completed-hand awards are projected after hand settlement.
 type HandAward struct {
-	Rule   RuleID
-	Title  string
-	Seat   SeatID
-	Card   CardID
-	Trick  int
-	Tally  int
-	Points int
+	Rule       RuleID
+	Title      string
+	Seat       SeatID
+	Card       CardID
+	HiddenCard bool // Public projection redacts a card still retained in a hand.
+	Trick      int
+	Tally      int
+	Points     int
 }
 
 func gameCardValue(rank uint8) int {

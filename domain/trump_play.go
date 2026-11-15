@@ -222,6 +222,10 @@ func validateHandFacts(state MatchState, rules RuleResolution) error {
 	if state.Phase != PhasePlayingTrick {
 		return nil // A rule revealed after the hand applies from the next deal.
 	}
+	plan, err := HandPlanForRules(state.Config, len(state.Seats), rules)
+	if err != nil || state.DealSize != plan.DealSize || state.TricksPerHand != plan.Tricks || state.TrickNumber > state.TricksPerHand {
+		return fmt.Errorf("invalid frozen hand size or trick count")
+	}
 	if state.HandNumber < 1 || state.TrickNumber < 1 || state.TrickNumber == 1 && len(state.CurrentTrick) < 2 && (state.BrokenSpades || state.BrokenHearts) {
 		return fmt.Errorf("invalid current-hand facts")
 	}

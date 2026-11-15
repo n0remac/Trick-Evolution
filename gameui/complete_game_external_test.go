@@ -239,7 +239,7 @@ func (f *matchFixture) assertConservation() {
 	for _, seat := range public.Seats {
 		capturedCount += seat.CapturedCount
 	}
-	dealt := 5 * len(f.peers)
+	dealt := public.DealSize * len(f.peers)
 	if len(seen) != dealt || len(f.played)+handCount != dealt || capturedCount+len(public.CurrentTrick)+handCount != dealt {
 		f.t.Fatalf("hand conservation: seen=%d played=%d hand=%d captured=%d trick=%d dealt=%d", len(seen), len(f.played), handCount, capturedCount, len(public.CurrentTrick), dealt)
 	}
@@ -308,12 +308,16 @@ func TestCompleteGameBlackBox(t *testing.T) {
 			}
 			var revealHands []int
 			var finalEvents []domain.Event
+			totalTricks, totalPlays := 0, 0
 			for hand := 1; hand <= 10; hand++ {
 				f.played = map[domain.CardID]bool{}
-				for play := 0; play < 5*players; play++ {
+				plays := f.peers[0].view.Public.TricksPerHand * players
+				totalTricks += plays / players
+				totalPlays += plays
+				for play := 0; play < plays; play++ {
 					peer, card := f.legalCard()
 					id, events := f.apply(peer, "play", card)
-					if hand == 10 && play == 5*players-1 {
+					if hand == 10 && play == plays-1 {
 						finalEvents = events
 					}
 					if hand == 1 && play == 0 {
@@ -346,7 +350,7 @@ func TestCompleteGameBlackBox(t *testing.T) {
 					tricks += seat.TricksWon
 					captured += seat.CapturedCount
 				}
-				if score < 0 || tricks != 5*hand || captured != 5*players {
+				if tricks != totalTricks || captured != plays {
 					t.Fatalf("hand %d totals: score=%d tricks=%d captured=%d", hand, score, tricks, captured)
 				}
 				if hand < 10 {
@@ -360,12 +364,12 @@ func TestCompleteGameBlackBox(t *testing.T) {
 			if !reflect.DeepEqual(revealHands, []int{3, 6, 9}) {
 				t.Fatalf("reveal hands: %v", revealHands)
 			}
-			wantRevision := uint64(1 + 10*5*players + 9)
+			wantRevision := uint64(1 + totalPlays + 9)
 			if f.revision != wantRevision {
 				t.Fatalf("final revision %d, want %d", f.revision, wantRevision)
 			}
 			for kind, count := range map[domain.EventKind]int{
-				domain.EventHandStarted: 10, domain.EventCardPlayed: 50 * players, domain.EventTrickWon: 50,
+				domain.EventHandStarted: 10, domain.EventCardPlayed: totalPlays, domain.EventTrickWon: totalTricks,
 				domain.EventHandCompleted: 10, domain.EventRuleRevealed: 3, domain.EventGameCompleted: 1,
 			} {
 				if f.counts[kind] != count {
@@ -374,7 +378,7 @@ func TestCompleteGameBlackBox(t *testing.T) {
 			}
 			final := f.peers[0].view.Public
 			var scores []int
-			best := -1
+			best := final.Seats[0].Score
 			for _, seat := range final.Seats {
 				scores = append(scores, seat.Score)
 				if seat.Score > best {
@@ -389,15 +393,6 @@ func TestCompleteGameBlackBox(t *testing.T) {
 			}
 			if !reflect.DeepEqual(final.Winners, winners) {
 				t.Fatalf("winner projection %v, expected %v", final.Winners, winners)
-			}
-			if total := func() int {
-				n := 0
-				for _, score := range scores {
-					n += score
-				}
-				return n
-			}(); total < 0 {
-				t.Fatalf("final scores %v have invalid total", scores)
 			}
 			if len(finalEvents) == 0 || finalEvents[len(finalEvents)-1].Kind != domain.EventGameCompleted || !reflect.DeepEqual(finalEvents[len(finalEvents)-1].Winners, winners) {
 				t.Fatalf("final game event disagrees with winner projection: %+v", finalEvents)

@@ -549,13 +549,18 @@ func TestRoomSettingsSyncAuthAndFullMatch(t *testing.T) {
 	_ = readMessage(t, a, "ack")
 	states := []serverMessage{readRevision(t, a, 1), readRevision(t, b, 1)}
 	for hand := 1; hand <= 10; hand++ {
-		for play := 0; play < 2; play++ {
+		plays := states[0].View.Public.TricksPerHand * 2
+		for play := 0; play < plays; play++ {
 			turn := states[0].View.Public.Turn
 			idx := 0
 			if turn == guest.Seat {
 				idx = 1
 			}
-			card := states[idx].View.Hand[0]
+			legal, err := domain.LegalCards(*states[idx].View, domain.DefaultCatalog())
+			if err != nil || len(legal) == 0 {
+				t.Fatalf("configured hand has no legal play: %v", err)
+			}
+			card := legal[0]
 			sendCommand(t, []*websocket.Conn{a, b}[idx], command{Type: "play", ID: fmt.Sprintf("h%d-p%d", hand, play), Card: card})
 			ack := readMessage(t, []*websocket.Conn{a, b}[idx], "ack")
 			states[0], states[1] = readRevision(t, a, ack.Revision), readRevision(t, b, ack.Revision)

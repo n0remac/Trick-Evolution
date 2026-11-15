@@ -219,6 +219,21 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			turnText = "Game ended"
 		}
 	}
+	hudDetails := ""
+	if public.DealSize > 0 && (public.DealSize != public.HandSize || public.TricksPerHand != public.DealSize) {
+		hudDetails = fmt.Sprintf("%d cards · %d played tricks", public.DealSize, public.TricksPerHand)
+	}
+	if public.Phase == domain.PhasePlayingTrick && view.Carried != "" {
+		for _, id := range view.Hand {
+			if id == view.Carried {
+				if hudDetails != "" {
+					hudDetails += " · "
+				}
+				hudDetails += "Your carried card: " + cardLabel(id)
+				break
+			}
+		}
+	}
 	parts := []*h.Node{
 		h.Class("game-panel"),
 		h.Attr("data-hand", fmt.Sprint(public.HandNumber)),
@@ -227,6 +242,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			h.Div(h.Class("match-cue"), h.Role("status"), h.Attr("aria-atomic", "true"),
 				h.Span(h.Class("match-event"), h.T(eventNotice(message.Events, catalog, name))),
 				h.NewNode("strong", []*h.Node{h.Class("match-next"), h.T(next)})),
+			h.P(h.Class("hand-plan"), h.T(hudDetails)),
 			rules),
 	}
 	if public.Phase == domain.PhasePlayingTrick {
@@ -241,7 +257,17 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		}
 		parts = append(parts, h.Div(append([]*h.Node{h.Class("play-commands"), h.Attr("hidden", "")}, cards...)...))
 	} else if public.Phase == domain.PhaseHandComplete {
-		parts = append(parts, h.P(h.Class("status hand-status"), h.T("Hand complete")))
+		handStatus := []*h.Node{h.Class("status hand-status"), h.P(h.T("Hand complete"))}
+		if view.Retained != "" {
+			handStatus = append(handStatus, h.P(h.T("Your unplayed "+cardLabel(view.Retained)+" stays in your next hand. Each player receives one fewer new card.")))
+		}
+		if resolved, err := domain.EffectiveForView(public, catalog); err == nil {
+			cfg := domain.Config{HandSize: public.HandSize, RevealEvery: public.RevealEvery, MaxHands: public.MaxHands}
+			if plan, err := domain.HandPlanForRules(cfg, len(public.Seats), resolved); err == nil {
+				handStatus = append(handStatus, h.P(h.T(fmt.Sprintf("Next hand: %d cards per player, %d played tricks.", plan.DealSize, plan.Tricks))))
+			}
+		}
+		parts = append(parts, h.Div(handStatus...))
 		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
 			parts = append(parts, h.Div(h.Class("next-hand"), commandForm("next", "Deal next hand", "", false, "", public.Revision)))
 		}
@@ -262,6 +288,9 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			h.Class("panel game-results"),
 			h.P(h.Class("status"), h.T(status)),
 			h.H2(h.T(label + strings.Join(winners, " and "))),
+		}
+		if view.Retained != "" {
+			results = append(results, h.P(h.T("Your final unplayed "+cardLabel(view.Retained)+" was not captured or scored as a capture.")))
 		}
 		if public.EndedEarly {
 			results = append(results, h.P(h.Class("muted"), h.T("Scores include completed tricks and settled hands. An unfinished trick and its hand bonus do not score.")))
@@ -291,6 +320,8 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			detail := fmt.Sprintf("%s · %s %+d", award.Title, name(award.Seat), award.Points)
 			if award.Card != "" {
 				detail += " · " + cardLabel(award.Card)
+			} else if award.HiddenCard {
+				detail += " · retained card hidden"
 			}
 			if award.Trick > 0 {
 				detail += fmt.Sprintf(" · trick %d", award.Trick)

@@ -13,6 +13,7 @@ import (
 type preparedObservation struct {
 	observation BotObservation
 	config      domain.Config
+	dealSize    int
 	field       []domain.RuleInstance
 	rules       []domain.RuleID
 	unknown     []domain.StandardCard
@@ -27,6 +28,10 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 	view := observation.View
 	public := view.Public
 	config := domain.Config{HandSize: public.HandSize, RevealEvery: public.RevealEvery, MaxHands: public.MaxHands, InitialRules: append([]domain.RuleID(nil), public.InitialRules...)}
+	dealSize := public.DealSize
+	if dealSize == 0 { // Older unit fixtures omit the frozen hand projection.
+		dealSize = config.HandSize
+	}
 	if err := config.Validate(len(public.Seats)); err != nil {
 		return preparedObservation{}, err
 	}
@@ -36,12 +41,12 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 	if err := catalog.Validate(); err != nil {
 		return preparedObservation{}, err
 	}
-	prepared := preparedObservation{observation: observation, config: config, captured: make(map[domain.SeatID][]domain.CardID), voids: make(map[domain.SeatID]map[domain.Suit]bool)}
+	prepared := preparedObservation{observation: observation, config: config, dealSize: dealSize, captured: make(map[domain.SeatID][]domain.CardID), voids: make(map[domain.SeatID]map[domain.Suit]bool)}
 	seatIDs := make(map[domain.SeatID]bool, len(public.Seats))
 	botFound := false
 	handCount := 0
 	for _, seat := range public.Seats {
-		if seat.ID == "" || seatIDs[seat.ID] || seat.HandCount < 0 {
+		if seat.ID == "" || seatIDs[seat.ID] || seat.HandCount < 0 || seat.CarriedCount < 0 || seat.CarriedCount > 1 || seat.RetainedCount != 0 {
 			return preparedObservation{}, fmt.Errorf("invalid public seats")
 		}
 		seatIDs[seat.ID] = true
@@ -52,11 +57,14 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 			if seat.HandCount != len(view.Hand) {
 				return preparedObservation{}, fmt.Errorf("bot hand count mismatch")
 			}
+			if (seat.CarriedCount == 1) != (view.Carried != "") {
+				return preparedObservation{}, fmt.Errorf("bot carried card count mismatch")
+			}
 		} else {
 			prepared.opponents = append(prepared.opponents, seat)
 		}
 	}
-	if !botFound || handCount+len(observation.Played) != config.HandSize*len(public.Seats) {
+	if !botFound || handCount+len(observation.Played) != dealSize*len(public.Seats) {
 		return preparedObservation{}, fmt.Errorf("hand conservation mismatch")
 	}
 	// Completed tricks followed by the visible current trick must exactly
@@ -148,7 +156,7 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 	for _, seat := range prepared.opponents {
 		needed += seat.HandCount
 	}
-	if len(prepared.unknown)-needed != 52-config.HandSize*len(public.Seats) {
+	if len(prepared.unknown)-needed != 52-dealSize*len(public.Seats) {
 		return preparedObservation{}, fmt.Errorf("unknown pool has wrong size")
 	}
 	prepared.field = make([]domain.RuleInstance, len(public.Rules))
@@ -158,6 +166,10 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 	resolved, err := domain.ResolveRules(prepared.field, catalog, config)
 	if err != nil || !reflect.DeepEqual(resolved.History, public.Rules) || !reflect.DeepEqual(resolved.ActiveField, public.ActiveField) || !reflect.DeepEqual(resolved.Effective, public.Effective) {
 		return preparedObservation{}, fmt.Errorf("public rule projection mismatch")
+	}
+	plan, err := domain.HandPlanForRules(config, len(public.Seats), resolved)
+	if err != nil || plan.DealSize != dealSize || public.TricksPerHand != 0 && plan.Tricks != public.TricksPerHand {
+		return preparedObservation{}, fmt.Errorf("public hand plan mismatch")
 	}
 	revealed := make(map[domain.RuleID]bool)
 	for _, instance := range prepared.field {
@@ -239,8 +251,14 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 	state := domain.MatchState{Revision: public.Revision, CatalogVersion: catalog.Version, Config: prepared.config,
 		Phase: public.Phase, Seats: make([]domain.Seat, len(public.Seats)), Hands: make(map[domain.SeatID][]domain.CardID), Captured: make(map[domain.SeatID][]domain.CardID),
 		CurrentTrick: append([]domain.Play(nil), public.CurrentTrick...), TrumpSuit: public.TrumpSuit, BrokenSpades: public.BrokenSpades, BrokenHearts: public.BrokenHearts, Dealer: public.Dealer, Leader: public.Leader, Turn: public.Turn,
-		HandNumber: public.HandNumber, TrickNumber: public.TrickNumber, CompletedHands: public.CompletedHands,
+		HandNumber: public.HandNumber, TrickNumber: public.TrickNumber, DealSize: prepared.dealSize, TricksPerHand: public.TricksPerHand, CompletedHands: public.CompletedHands,
 		Field: append([]domain.RuleInstance(nil), prepared.field...), RuleDraw: append([]domain.RuleID(nil), prepared.rules...)}
+	if state.TricksPerHand == 0 { // Older unit fixtures omit the frozen limit.
+		state.TricksPerHand = prepared.dealSize
+	}
+	if prepared.observation.View.Carried != "" {
+		state.Carried = map[domain.SeatID]domain.CardID{prepared.observation.View.Seat: prepared.observation.View.Carried}
+	}
 	for i, seat := range public.Seats {
 		state.Seats[i] = domain.Seat{ID: seat.ID, Score: seat.Score, TricksWon: seat.TricksWon}
 		state.Captured[seat.ID] = append([]domain.CardID(nil), prepared.captured[seat.ID]...)
@@ -263,6 +281,24 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 		if !used[i] {
 			state.StandardDraw = append(state.StandardDraw, card.ID)
 		}
+	}
+	for _, seat := range prepared.opponents {
+		if seat.CarriedCount == 0 {
+			continue
+		}
+		possible := append([]domain.CardID(nil), state.Hands[seat.ID]...)
+		for _, play := range prepared.observation.Played {
+			if play.Seat == seat.ID {
+				possible = append(possible, play.Card)
+			}
+		}
+		if len(possible) == 0 {
+			return domain.MatchState{}, fmt.Errorf("opponent has no possible carried card")
+		}
+		if state.Carried == nil {
+			state.Carried = make(map[domain.SeatID]domain.CardID)
+		}
+		state.Carried[seat.ID] = possible[random.Intn(len(possible))]
 	}
 	random.Shuffle(len(state.RuleDraw), func(i, j int) { state.RuleDraw[i], state.RuleDraw[j] = state.RuleDraw[j], state.RuleDraw[i] })
 	return state, nil

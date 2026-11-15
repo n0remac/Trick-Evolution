@@ -174,6 +174,7 @@ func renderSettings(config domain.Config, catalog domain.Catalog, settingsStatus
 		h.H3(h.T("Game settings")), h.P(h.Id("review-settings-feedback"), h.Role("status"), h.Attr("aria-live", "polite"), h.T(settingsStatus)), h.P(h.Class("muted"), h.T("Changes apply to this room. Choose prerequisites before dependent cards; conflicting alternatives cannot both start. Unselected mechanics use their hidden or visible baseline.")),
 		h.Input(h.Type("hidden"), h.Name("type"), h.Value("configure")), h.Input(h.Type("hidden"), h.Name("revision"), h.Value("0")), h.Input(h.Type("hidden"), h.Name("settings"), h.Value("")),
 		h.Label(h.T("Cards per player"), h.Input(h.Type("number"), h.Attr("data-setting", "hand-size"), h.Attr("min", "1"), h.Attr("max", "26"), h.Value(fmt.Sprint(config.HandSize)))),
+		h.P(h.Class("muted"), h.T("Expanded Hand adds two cards per player. The full deal must fit 52 cards; Keep One Card needs at least two cards per player.")),
 		h.Label(h.T("Completed hands between reveals"), h.Input(h.Type("number"), h.Attr("data-setting", "reveal-every"), h.Attr("min", "1"), h.Attr("max", "100"), h.Value(fmt.Sprint(config.RevealEvery)))),
 	}
 	for _, group := range reviewCategories {
@@ -247,7 +248,11 @@ func effectDescription(e domain.EffectiveEffect) string {
 	case domain.MechanicDeck:
 		return "Use a standard 52-card deck."
 	case domain.MechanicHandSize:
-		return fmt.Sprintf("Deal %d cards to each player each hand.", e.Number)
+		return fmt.Sprintf("Deal %d cards to each player before active hand modifiers.", e.Number)
+	case domain.MechanicExpandedHand:
+		return "Add two to the configured cards per player at each new deal while active; the increase does not accumulate. The whole deal must fit 52 cards."
+	case domain.MechanicKeepOne:
+		return "Play one fewer trick than cards dealt. Each player keeps their one unplayed card privately for the next hand and receives one fewer new card then. An unplayed card is not captured; a final-hand leftover does not carry onward."
 	case domain.MechanicUnused:
 		return "Undealt cards are out of play for this hand."
 	case domain.MechanicScoreOwnership:

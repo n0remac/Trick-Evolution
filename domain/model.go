@@ -121,6 +121,8 @@ type MatchState struct {
 	Phase          Phase
 	Seats          []Seat
 	Hands          map[SeatID][]CardID
+	Carried        map[SeatID]CardID // Incoming private card for this hand, if any.
+	Retained       map[SeatID]CardID // Private leftover after a completed Keep One hand.
 	Captured       map[SeatID][]CardID
 	DealOwner      map[CardID]SeatID // Private until hand settlement.
 	HandAwards     []HandAward
@@ -135,6 +137,8 @@ type MatchState struct {
 	Turn           SeatID
 	HandNumber     int
 	TrickNumber    int
+	DealSize       int // Effective cards per player, frozen at this hand's deal.
+	TricksPerHand  int // Completed tricks required for this hand.
 	CompletedHands int
 	EndedEarly     bool
 	EndedBy        SeatID
@@ -157,7 +161,7 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 	if err := catalog.Validate(); err != nil {
 		return MatchState{}, err
 	}
-	if err := ValidateInitialRules(cfg, catalog); err != nil {
+	if err := ValidateInitialSetup(cfg, len(ids), catalog); err != nil {
 		return MatchState{}, err
 	}
 	if source == nil {
@@ -195,7 +199,15 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 	for i, id := range rules {
 		ruleOrder[i] = string(id)
 	}
-	state := matchFromOrders(ids, cfg, catalog, standardOrder, ruleOrder)
+	starting, err := StartingRules(cfg, catalog)
+	if err != nil {
+		return MatchState{}, err
+	}
+	plan, err := HandPlanForRules(cfg, len(ids), starting)
+	if err != nil {
+		return MatchState{}, err
+	}
+	state := matchFromOrders(ids, cfg, catalog, standardOrder, ruleOrder, plan)
 	resolved, err := ResolveRules(state.Field, catalog, cfg)
 	if err != nil {
 		return MatchState{}, err
@@ -218,7 +230,7 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 	if err := catalog.Validate(); err != nil {
 		return MatchState{}, err
 	}
-	if err := ValidateInitialRules(cfg, catalog); err != nil {
+	if err := ValidateInitialSetup(cfg, len(ids), catalog); err != nil {
 		return MatchState{}, err
 	}
 	if len(records) != 2 || records[0].Kind != StandardDeckKind || records[1].Kind != RuleDeckKind {
@@ -253,7 +265,15 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 		}
 		seen[id] = true
 	}
-	state := matchFromOrders(ids, cfg, catalog, records[0].Order, records[1].Order)
+	starting, err := StartingRules(cfg, catalog)
+	if err != nil {
+		return MatchState{}, err
+	}
+	plan, err := HandPlanForRules(cfg, len(ids), starting)
+	if err != nil {
+		return MatchState{}, err
+	}
+	state := matchFromOrders(ids, cfg, catalog, records[0].Order, records[1].Order, plan)
 	resolved, err := ResolveRules(state.Field, catalog, cfg)
 	if err != nil {
 		return MatchState{}, err
@@ -294,22 +314,22 @@ func validateOrder(got, expected []string) error {
 	return nil
 }
 
-func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, ruleOrder []string) MatchState {
+func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, ruleOrder []string, plan HandPlan) MatchState {
 	s := MatchState{CatalogVersion: catalog.Version, Config: cfg, Phase: PhasePlayingTrick,
 		Seats: make([]Seat, len(ids)), Hands: make(map[SeatID][]CardID, len(ids)), Captured: make(map[SeatID][]CardID, len(ids)),
-		RuleDraw: make([]RuleID, len(ruleOrder)), HandNumber: 1, TrickNumber: 1,
+		RuleDraw: make([]RuleID, len(ruleOrder)), HandNumber: 1, TrickNumber: 1, DealSize: plan.DealSize, TricksPerHand: plan.Tricks,
 		Field: StartingFieldWithConfig(catalog, cfg), DealOwner: make(map[CardID]SeatID),
 		Shuffles: []ShuffleRecord{{Kind: StandardDeckKind, Order: append([]string(nil), standardOrder...)}, {Kind: RuleDeckKind, Order: append([]string(nil), ruleOrder...)}},
 	}
 	for i, id := range ids {
 		s.Seats[i].ID = id
-		s.Hands[id] = make([]CardID, 0, cfg.HandSize)
+		s.Hands[id] = make([]CardID, 0, plan.DealSize)
 	}
 	for i, id := range ruleOrder {
 		s.RuleDraw[i] = RuleID(id)
 	}
 	// Deal clockwise, one card at a time, starting left of dealer (seat zero).
-	for card := 0; card < cfg.HandSize; card++ {
+	for card := 0; card < plan.DealSize; card++ {
 		for offset := 1; offset <= len(ids); offset++ {
 			seat := ids[offset%len(ids)]
 			id := CardID(standardOrder[card*len(ids)+offset-1])
@@ -317,7 +337,7 @@ func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, r
 			s.DealOwner[id] = seat
 		}
 	}
-	for _, id := range standardOrder[cfg.HandSize*len(ids):] {
+	for _, id := range standardOrder[plan.DealSize*len(ids):] {
 		s.StandardDraw = append(s.StandardDraw, CardID(id))
 	}
 	s.Dealer, s.Leader, s.Turn = ids[0], ids[1%len(ids)], ids[1%len(ids)]

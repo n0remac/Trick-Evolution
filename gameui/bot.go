@@ -68,7 +68,11 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 		}
 		trumpRule, _ := resolved.Effect(domain.MechanicTrump)
 		_, lastBonusRule := resolved.Effect(domain.MechanicLastTrickBonus)
-		saveLastWinner := lastBonusRule == nil && view.Public.TrickNumber == view.Public.HandSize-1 && len(view.Hand) > 1
+		lastTrick := view.Public.TricksPerHand
+		if lastTrick == 0 {
+			lastTrick = view.Public.HandSize
+		}
+		saveLastWinner := lastBonusRule == nil && view.Public.TrickNumber == lastTrick-1 && len(view.Hand) > 1
 		leadValue := func(card domain.StandardCard) int {
 			if trumpRule.Value == domain.ValueFirstLeadTrump && view.Public.TrumpSuit == "" {
 				return counts[card.Suit]*20 + strength(card) - heartPenalty(card)*100
@@ -124,7 +128,11 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 	if trickPoints.Value == domain.ValueOnePoint {
 		baseWin++
 	}
-	if _, err := resolved.Effect(domain.MechanicLastTrickBonus); err == nil && view.Public.TrickNumber == view.Public.HandSize {
+	lastTrick := view.Public.TricksPerHand
+	if lastTrick == 0 {
+		lastTrick = view.Public.HandSize
+	}
+	if _, err := resolved.Effect(domain.MechanicLastTrickBonus); err == nil && view.Public.TrickNumber == lastTrick {
 		baseWin += 2
 	}
 	for _, play := range view.Public.CurrentTrick {

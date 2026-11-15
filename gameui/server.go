@@ -146,7 +146,7 @@ func NewServerWithBotOptions(config domain.Config, shuffle func() domain.Shuffle
 	if err := catalog.Validate(); err != nil {
 		return nil, err
 	}
-	if err := domain.ValidateInitialRules(config, catalog); err != nil {
+	if err := domain.ValidateInitialSetup(config, 2, catalog); err != nil {
 		return nil, err
 	}
 	if shuffle == nil {
@@ -678,6 +678,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 			configErr = errors.New("only the host can edit game rules")
 		} else if cmd.Type == "reset_rules" {
 			updated = r.server.config
+			configErr = domain.ValidateInitialSetup(updated, len(r.seats), r.server.catalog)
 		} else {
 			var settings struct {
 				HandSize     int             `json:"handSize"`
@@ -693,10 +694,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 			}
 			if configErr == nil {
 				updated = domain.Config{HandSize: settings.HandSize, RevealEvery: settings.RevealEvery, MaxHands: r.config.MaxHands, InitialRules: settings.InitialRules}
-				configErr = updated.Validate(len(r.seats))
-				if configErr == nil {
-					configErr = domain.ValidateInitialRules(updated, r.server.catalog)
-				}
+				configErr = domain.ValidateInitialSetup(updated, len(r.seats), r.server.catalog)
 			}
 		}
 		if configErr != nil {

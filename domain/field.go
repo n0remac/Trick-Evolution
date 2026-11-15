@@ -43,6 +43,9 @@ func ValidateInitialRules(config Config, catalog Catalog) error {
 				return fmt.Errorf("initial rules contain conflicting alternatives")
 			}
 		}
+		if _, err := HandPlanForRules(config, 2, r); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -325,6 +328,9 @@ func RecordCompletedHand(state MatchState, catalog Catalog) (MatchState, *RuleIn
 		candidate := append(append([]RuleInstance(nil), next.Field...), instance)
 		resolved, err := ResolveRules(candidate, catalog, next.Config)
 		if err != nil || !resolved.History[len(candidate)-1].Active {
+			continue
+		}
+		if _, err := HandPlanForRules(next.Config, len(next.Seats), resolved); err != nil {
 			continue
 		}
 		next.RuleDraw = append(next.RuleDraw[:index], next.RuleDraw[index+1:]...)

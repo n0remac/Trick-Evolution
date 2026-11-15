@@ -120,6 +120,16 @@ func renderFieldCard(rule domain.ResolvedRule, definition domain.RuleDefinition,
 func shortEffect(effect domain.EffectiveEffect, rule domain.ResolvedRule, public domain.PublicView) string {
 	pending := !rule.Instance.Starting && public.HandNumber <= rule.Instance.IntroducedAfterHand
 	switch effect.Mechanic {
+	case domain.MechanicExpandedHand:
+		if pending {
+			return "+2 cards · next hand"
+		}
+		return "+2 cards per player"
+	case domain.MechanicKeepOne:
+		if pending {
+			return "Keep last card · next hand"
+		}
+		return "Keep 1 unplayed card"
 	case domain.MechanicTrump:
 		if effect.Value == domain.ValueSpadesTrump {
 			if pending {

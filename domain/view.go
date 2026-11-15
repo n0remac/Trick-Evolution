@@ -6,12 +6,16 @@ type PublicSeat struct {
 	TricksWon     int
 	HandCount     int
 	CapturedCount int
+	CarriedCount  int
+	RetainedCount int
 }
 
 type PublicView struct {
 	Revision       uint64
 	Phase          Phase
 	HandSize       int
+	DealSize       int
+	TricksPerHand  int
 	MaxHands       int
 	RevealEvery    int
 	InitialRules   []RuleID
@@ -37,9 +41,11 @@ type PublicView struct {
 }
 
 type PlayerView struct {
-	Public PublicView
-	Seat   SeatID
-	Hand   []CardID
+	Public   PublicView
+	Seat     SeatID
+	Hand     []CardID
+	Carried  CardID
+	Retained CardID
 }
 
 // ProjectPublic contains only information visible to every seat.
@@ -57,7 +63,7 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 	if err := validateHandFacts(state, rules); err != nil {
 		return PublicView{}, transitionError(ErrInvalidState, err.Error())
 	}
-	view := PublicView{Revision: state.Revision, Phase: state.Phase, HandSize: state.Config.HandSize, MaxHands: state.Config.MaxHands, RevealEvery: state.Config.RevealEvery, InitialRules: append([]RuleID(nil), state.Config.InitialRules...), Dealer: state.Dealer, Leader: state.Leader,
+	view := PublicView{Revision: state.Revision, Phase: state.Phase, HandSize: state.Config.HandSize, DealSize: state.DealSize, TricksPerHand: state.TricksPerHand, MaxHands: state.Config.MaxHands, RevealEvery: state.Config.RevealEvery, InitialRules: append([]RuleID(nil), state.Config.InitialRules...), Dealer: state.Dealer, Leader: state.Leader,
 		Turn: state.Turn, HandNumber: state.HandNumber, TrickNumber: state.TrickNumber, CompletedHands: state.CompletedHands,
 		EndedEarly: state.EndedEarly, EndedBy: state.EndedBy,
 		Rules: rules.History, ActiveField: rules.ActiveField, Effective: rules.Effective, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...), TrumpSuit: state.TrumpSuit, BrokenSpades: state.BrokenSpades, BrokenHearts: state.BrokenHearts,
@@ -67,10 +73,26 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 	}
 	if state.Phase == PhaseHandComplete || state.Phase == PhaseGameComplete {
 		view.HandAwards = append([]HandAward(nil), state.HandAwards...)
+		retained := make(map[CardID]bool, len(state.Retained))
+		for _, id := range state.Retained {
+			retained[id] = true
+		}
+		for i := range view.HandAwards {
+			if retained[view.HandAwards[i].Card] {
+				view.HandAwards[i].Card = ""
+				view.HandAwards[i].HiddenCard = true
+			}
+		}
 	}
 	for i, seat := range state.Seats {
 		view.Seats[i] = PublicSeat{ID: seat.ID, Score: seat.Score, TricksWon: seat.TricksWon,
 			HandCount: len(state.Hands[seat.ID]), CapturedCount: len(state.Captured[seat.ID])}
+		if state.Carried[seat.ID] != "" {
+			view.Seats[i].CarriedCount = 1
+		}
+		if state.Retained[seat.ID] != "" {
+			view.Seats[i].RetainedCount = 1
+		}
 	}
 	return view, nil
 }
@@ -86,5 +108,5 @@ func ProjectForSeat(state MatchState, catalog Catalog, seat SeatID) (PlayerView,
 	}
 	hand := make([]CardID, len(state.Hands[seat]))
 	copy(hand, state.Hands[seat])
-	return PlayerView{Public: public, Seat: seat, Hand: hand}, nil
+	return PlayerView{Public: public, Seat: seat, Hand: hand, Carried: state.Carried[seat], Retained: state.Retained[seat]}, nil
 }

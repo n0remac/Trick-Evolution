@@ -126,10 +126,32 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	if len(state.CurrentTrick) != 0 {
 		return state, nil, transitionError(ErrInvalidState, "unfinished trick")
 	}
+	carry := make(map[SeatID]CardID, len(state.Retained))
+	if len(state.Retained) != 0 && len(state.Retained) != len(state.Seats) {
+		return state, nil, transitionError(ErrInvalidState, "retained card count is incomplete")
+	}
 	for _, seat := range state.Seats {
-		if len(state.Hands[seat.ID]) != 0 {
-			return state, nil, transitionError(ErrInvalidState, "previous hand still has cards")
+		id := state.Retained[seat.ID]
+		if id == "" {
+			if len(state.Hands[seat.ID]) != 0 {
+				return state, nil, transitionError(ErrInvalidState, "previous hand still has cards")
+			}
+		} else {
+			if len(state.Hands[seat.ID]) != 1 || state.Hands[seat.ID][0] != id {
+				return state, nil, transitionError(ErrInvalidState, "retained card disagrees with previous hand")
+			}
+			if _, ok := cardByID(id); !ok {
+				return state, nil, transitionError(ErrInvalidState, "retained card is not in the standard deck")
+			}
+			carry[seat.ID] = id
 		}
+	}
+	if len(carry) != len(state.Retained) {
+		return state, nil, transitionError(ErrInvalidState, "retained card belongs to an unknown seat")
+	}
+	plan, err := HandPlanForRules(state.Config, len(state.Seats), resolved)
+	if err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
 	order := make([]string, len(action.DeckOrder))
 	for i, id := range action.DeckOrder {
@@ -143,9 +165,10 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	next.Phase = PhasePlayingTrick
 	next.HandNumber++
 	next.TrickNumber = 1
+	next.DealSize, next.TricksPerHand = plan.DealSize, plan.Tricks
+	next.Carried, next.Retained = carry, nil
 	next.CurrentTrick = nil
 	next.BrokenSpades, next.BrokenHearts = false, false
-	var err error
 	next.TrumpSuit, err = TrumpForTrick(resolved, "", nil)
 	if err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
@@ -157,18 +180,39 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	next.Dealer = next.Seats[dealerIndex].ID
 	leaderIndex := (dealerIndex + 1) % len(next.Seats)
 	next.Leader, next.Turn = next.Seats[leaderIndex].ID, next.Seats[leaderIndex].ID
-	for _, seat := range next.Seats {
-		next.Hands[seat.ID] = make([]CardID, 0, next.Config.HandSize)
+	carriedIDs := make(map[CardID]bool, len(carry))
+	for _, id := range carry {
+		if carriedIDs[id] {
+			return state, nil, transitionError(ErrInvalidState, "duplicate retained card")
+		}
+		carriedIDs[id] = true
 	}
-	for card := 0; card < next.Config.HandSize; card++ {
+	filtered := make([]CardID, 0, 52-len(carry))
+	for _, id := range action.DeckOrder {
+		if !carriedIDs[id] {
+			filtered = append(filtered, id)
+		}
+	}
+	newCards := plan.DealSize
+	if len(carry) > 0 {
+		newCards--
+	}
+	for _, seat := range next.Seats {
+		next.Hands[seat.ID] = make([]CardID, 0, plan.DealSize)
+		if id := carry[seat.ID]; id != "" {
+			next.Hands[seat.ID] = append(next.Hands[seat.ID], id)
+			next.DealOwner[id] = seat.ID
+		}
+	}
+	for card := 0; card < newCards; card++ {
 		for offset := 1; offset <= len(next.Seats); offset++ {
 			seat := next.Seats[(dealerIndex+offset)%len(next.Seats)].ID
-			id := action.DeckOrder[card*len(next.Seats)+offset-1]
+			id := filtered[card*len(next.Seats)+offset-1]
 			next.Hands[seat] = append(next.Hands[seat], id)
 			next.DealOwner[id] = seat
 		}
 	}
-	next.StandardDraw = append([]CardID(nil), action.DeckOrder[next.Config.HandSize*len(next.Seats):]...)
+	next.StandardDraw = append([]CardID(nil), filtered[newCards*len(next.Seats):]...)
 	next.Shuffles = append(next.Shuffles, ShuffleRecord{Kind: StandardDeckKind, Order: order})
 	return next, []Event{{Kind: EventHandStarted, Revision: next.Revision, Hand: next.HandNumber, Seat: next.Leader}}, nil
 }
@@ -271,12 +315,25 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 		Plays: append([]Play(nil), next.CurrentTrick...), Score: next.Seats[winnerIndex].Score})
 	next.CurrentTrick = nil
 	next.Leader, next.Turn = winner, winner
-	if !allHandsEmpty(next) {
+	if next.TrickNumber < next.TricksPerHand {
 		next.TrickNumber++
 		return next, events, nil
 	}
+	leftover := next.DealSize - next.TricksPerHand
+	for _, seat := range next.Seats {
+		if len(next.Hands[seat.ID]) != leftover {
+			return state, nil, transitionError(ErrInvalidState, "hand has wrong number of unplayed cards")
+		}
+	}
 	next.Turn = ""
 	next.Phase = PhaseHandComplete
+	next.Retained = nil
+	if leftover == 1 {
+		next.Retained = make(map[SeatID]CardID, len(next.Seats))
+		for _, seat := range next.Seats {
+			next.Retained[seat.ID] = next.Hands[seat.ID][0]
+		}
+	}
 	scoreLastTrickBonus(&next, resolvedRules, winnerIndex)
 	if err := settleHandScores(&next, resolvedRules); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
@@ -390,6 +447,18 @@ func cloneState(state MatchState) MatchState {
 	next.DealOwner = make(map[CardID]SeatID, len(state.DealOwner))
 	for id, owner := range state.DealOwner {
 		next.DealOwner[id] = owner
+	}
+	if state.Carried != nil {
+		next.Carried = make(map[SeatID]CardID, len(state.Carried))
+		for seat, id := range state.Carried {
+			next.Carried[seat] = id
+		}
+	}
+	if state.Retained != nil {
+		next.Retained = make(map[SeatID]CardID, len(state.Retained))
+		for seat, id := range state.Retained {
+			next.Retained[seat] = id
+		}
 	}
 	next.HandAwards = slices.Clone(state.HandAwards)
 	next.Config.InitialRules = slices.Clone(state.Config.InitialRules)

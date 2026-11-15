@@ -21,6 +21,8 @@ const (
 	NotStarting               FieldVisibility = "not_starting"
 	MechanicDeck              Mechanic        = "deck"
 	MechanicHandSize          Mechanic        = "hand_size"
+	MechanicExpandedHand      Mechanic        = "expanded_hand"
+	MechanicKeepOne           Mechanic        = "keep_one_card"
 	MechanicUnused            Mechanic        = "unused_cards"
 	MechanicScoreOwnership    Mechanic        = "score_ownership"
 	MechanicTurnOrder         Mechanic        = "turn_order"
@@ -47,6 +49,7 @@ const (
 	MechanicReveal            Mechanic        = "reveal"
 	ValueStandardDeck         EffectValue     = "standard_52"
 	ValueConfigured           EffectValue     = "configured"
+	ValuePlusTwo              EffectValue     = "plus_two"
 	ValueOutOfPlay            EffectValue     = "out_of_play"
 	ValueIndividual           EffectValue     = "individual"
 	ValueClockwise            EffectValue     = "clockwise"
@@ -98,6 +101,8 @@ const (
 	RuleAvoidQueenHearts  RuleID     = "rule.avoid_queen_hearts"
 	RuleAvoidHearts       RuleID     = "rule.avoid_hearts"
 	RuleLastTrickBonus    RuleID     = "rule.last_trick_bonus"
+	RuleExpandedHand      RuleID     = "rule.expanded_hand"
+	RuleKeepOne           RuleID     = "rule.keep_one_card"
 	RuleNoPoints          RuleID     = "rule.no_points_for_tricks"
 	RulePointsPerTrick    RuleID     = "rule.points_per_trick"
 	RuleDeckStandard      RuleID     = "baseline.standard_deck"
@@ -157,7 +162,7 @@ type Catalog struct {
 	Definitions []RuleDefinition
 }
 
-const CatalogVersion = 5
+const CatalogVersion = 6
 
 func (c Catalog) Definition(id RuleID) (RuleDefinition, bool) {
 	for _, d := range c.Definitions {
@@ -351,7 +356,7 @@ func baseline(id RuleID, title, text string, category FieldCategory, effect Type
 }
 
 func validTypedEffect(e TypedEffect) bool {
-	values := map[Mechanic]EffectValue{MechanicDeck: ValueStandardDeck, MechanicHandSize: ValueConfigured, MechanicUnused: ValueOutOfPlay, MechanicScoreOwnership: ValueIndividual, MechanicTurnOrder: ValueClockwise, MechanicFirstLeader: ValueLeftOfDealer, MechanicNextLeader: ValueWinnerLeads, MechanicTrump: ValueNoTrump, MechanicBreakSpades: ValueBreakSpades, MechanicBreakHearts: ValueBreakHearts, MechanicPlayRestriction: ValueFollow, MechanicWinnerEligibility: ValueLeadSuit, MechanicRankComparison: ValueHigh, MechanicTieBreak: ValueFirstPlay, MechanicTrickPoints: ValueOnePoint, MechanicLowOwner: ValueCaptureLow, MechanicHighTrump: ValueAward, MechanicLowTrump: ValueAward, MechanicJackTrump: ValueAward, MechanicGamePoint: ValueAward, MechanicAvoidQueenHearts: ValueAward, MechanicAvoidHearts: ValueAward, MechanicLastTrickBonus: ValueAward, MechanicHandLimit: ValueConfigured, MechanicVictory: ValueHighestShared, MechanicReveal: ValueConfigured}
+	values := map[Mechanic]EffectValue{MechanicDeck: ValueStandardDeck, MechanicHandSize: ValueConfigured, MechanicExpandedHand: ValuePlusTwo, MechanicKeepOne: ValueAward, MechanicUnused: ValueOutOfPlay, MechanicScoreOwnership: ValueIndividual, MechanicTurnOrder: ValueClockwise, MechanicFirstLeader: ValueLeftOfDealer, MechanicNextLeader: ValueWinnerLeads, MechanicTrump: ValueNoTrump, MechanicBreakSpades: ValueBreakSpades, MechanicBreakHearts: ValueBreakHearts, MechanicPlayRestriction: ValueFollow, MechanicWinnerEligibility: ValueLeadSuit, MechanicRankComparison: ValueHigh, MechanicTieBreak: ValueFirstPlay, MechanicTrickPoints: ValueOnePoint, MechanicLowOwner: ValueCaptureLow, MechanicHighTrump: ValueAward, MechanicLowTrump: ValueAward, MechanicJackTrump: ValueAward, MechanicGamePoint: ValueAward, MechanicAvoidQueenHearts: ValueAward, MechanicAvoidHearts: ValueAward, MechanicLastTrickBonus: ValueAward, MechanicHandLimit: ValueConfigured, MechanicVictory: ValueHighestShared, MechanicReveal: ValueConfigured}
 	want, ok := values[e.Mechanic]
 	if !ok {
 		return false
@@ -401,7 +406,9 @@ func DefaultCatalog() Catalog {
 	high.StartActive, high.StartingVisibility = true, Visible
 	return Catalog{Version: CatalogVersion, Definitions: []RuleDefinition{
 		baseline(RuleDeckStandard, "Standard Deck", "Use a standard 52-card deck.", FieldHand, TypedEffect{MechanicDeck, ValueStandardDeck, ""}),
-		baseline(RuleHandSize, "Hand Size", "Deal the configured number of cards to each player.", FieldHand, TypedEffect{MechanicHandSize, ValueConfigured, "hand_size"}),
+		baseline(RuleHandSize, "Hand Size", "The configured cards per player are the base deal size before hand modifiers.", FieldHand, TypedEffect{MechanicHandSize, ValueConfigured, "hand_size"}),
+		{ID: RuleExpandedHand, Title: "Expanded Hand", Text: "While active, add two to the configured cards per player at each deal; the increase does not accumulate. A reveal first affects the next deal. The full deal must fit 52 cards.", Category: "rule", Status: StatusSupported, FieldCategory: FieldHand, Effects: []TypedEffect{{Mechanic: MechanicExpandedHand, Value: ValuePlusTwo}}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleKeepOne, Title: "Keep One Card", Text: "Stop each hand with one unplayed card per player. Your last card stays private and joins your next hand; deal one fewer new card then. A final-hand leftover is not captured or scored as a capture.", Category: "rule", Status: StatusSupported, FieldCategory: FieldHand, Effects: []TypedEffect{{Mechanic: MechanicKeepOne, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
 		baseline(RuleUnusedCards, "Unused Cards", "Cards not dealt are out of play for this hand.", FieldHand, TypedEffect{MechanicUnused, ValueOutOfPlay, ""}),
 		baseline(RuleIndividualScore, "Individual Scores", "Each player has an individual score.", FieldScoreVictory, TypedEffect{MechanicScoreOwnership, ValueIndividual, ""}),
 		baseline(RuleClockwise, "Clockwise Play", "Play proceeds clockwise.", FieldPlay, TypedEffect{MechanicTurnOrder, ValueClockwise, ""}),
