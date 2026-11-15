@@ -502,10 +502,17 @@ func TestRoomSettingsSyncAuthAndFullMatch(t *testing.T) {
 	_ = readMessage(t, a, "ack")
 	for _, conn := range []*websocket.Conn{a, b} {
 		lobby := readMessage(t, conn, "lobby")
-		if lobby.Config == nil || lobby.Config.HandSize != 1 || lobby.Config.RevealEvery != 1 || len(lobby.Config.InitialRules) != 4 {
+		if lobby.Config == nil || lobby.Config.HandSize != 1 || lobby.Config.RevealEvery != 1 || len(lobby.Config.InitialRules) != 4 || !strings.Contains(lobby.SettingsStatus, "Settings saved") {
 			t.Fatalf("settings sync: %+v", lobby.Config)
 		}
 	}
+	reconnectedGuest := joinRoom(t, server.URL, "settings", "Guest", guest.Token, http.StatusOK)
+	b = dialRoom(t, server.URL, reconnectedGuest)
+	if lobby := readMessage(t, b, "lobby"); lobby.Config == nil || lobby.Config.HandSize != 1 || len(lobby.Config.InitialRules) != 4 {
+		t.Fatalf("settings reconnect: %+v", lobby.Config)
+	}
+	_ = readMessage(t, a, "lobby")
+	_ = readMessage(t, a, "lobby")
 	sendCommand(t, a, command{Type: "configure", ID: "bad-size", Settings: `{"handSize":27,"revealEvery":1,"initialRules":[]}`})
 	if got := readMessage(t, a, "error"); got.Code != "invalid_config" {
 		t.Fatalf("invalid settings: %+v", got)
@@ -513,15 +520,30 @@ func TestRoomSettingsSyncAuthAndFullMatch(t *testing.T) {
 	sendCommand(t, a, command{Type: "reset_rules", ID: "reset"})
 	_ = readMessage(t, a, "ack")
 	for _, conn := range []*websocket.Conn{a, b} {
-		lobby := readMessage(t, conn, "lobby")
-		if lobby.Config == nil || lobby.Config.HandSize != 5 || lobby.Config.RevealEvery != 3 || len(lobby.Config.InitialRules) != 0 {
+		var lobby serverMessage
+		for tries := 0; tries < 4; tries++ {
+			lobby = readMessage(t, conn, "lobby")
+			if strings.Contains(lobby.SettingsStatus, "Defaults restored") {
+				break
+			}
+		}
+		if lobby.Config == nil || lobby.Config.HandSize != 5 || lobby.Config.RevealEvery != 3 || len(lobby.Config.InitialRules) != 0 || !strings.Contains(lobby.SettingsStatus, "Defaults restored") {
 			t.Fatalf("reset: %+v", lobby.Config)
 		}
 	}
 	sendCommand(t, a, command{Type: "configure", ID: "save-again", Settings: settings})
 	_ = readMessage(t, a, "ack")
 	for _, conn := range []*websocket.Conn{a, b} {
-		_ = readMessage(t, conn, "lobby")
+		found := false
+		for tries := 0; tries < 4; tries++ {
+			if lobby := readMessage(t, conn, "lobby"); lobby.Config != nil && lobby.Config.HandSize == 1 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatal("resaved config did not reach client")
+		}
 	}
 	sendCommand(t, a, command{Type: "start", ID: "start"})
 	_ = readMessage(t, a, "ack")
@@ -576,5 +598,20 @@ func TestStartRevalidatesHandSizeWithFinalSeats(t *testing.T) {
 	sendCommand(t, conn, command{Type: "start", ID: "start-too-many"})
 	if got := readMessage(t, conn, "error"); got.Code != "invalid_action" {
 		t.Fatalf("final seat limit %+v", got)
+	}
+}
+
+func TestHTMLSettingsEnvelopeCarriesPreSendPayload(t *testing.T) {
+	settings := `{"handSize":2,"revealEvery":1,"initialRules":["rule.game_point"]}`
+	data, err := json.Marshal(map[string]any{"type": "configure", "id": "save-ui", "revision": "0", "settings": settings, "HEADERS": map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := decodeCommand(data, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Type != "configure" || cmd.Settings != settings || cmd.ExpectedRevision == nil || *cmd.ExpectedRevision != 0 {
+		t.Fatalf("HTML settings command %+v", cmd)
 	}
 }

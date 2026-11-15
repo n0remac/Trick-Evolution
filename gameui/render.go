@@ -187,24 +187,43 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 	}
 	rules := renderRuleField(public, catalog)
 	next := ""
+	turnText := ""
+	localTurn, botTurn := false, false
 	switch public.Phase {
 	case domain.PhasePlayingTrick:
 		next = name(public.Turn) + " to play"
 		if public.Turn == seat {
 			next = "Your turn"
+			turnText, localTurn = "Your turn · "+name(seat), true
+		} else {
+			turnText = name(public.Turn) + "'s turn"
+			for _, player := range message.Seats {
+				if player.ID == public.Turn && player.Bot {
+					botTurn = true
+					turnText = name(public.Turn) + " (bot) is playing"
+					break
+				}
+			}
 		}
 	case domain.PhaseHandComplete:
 		next = "Waiting for the host to deal"
+		turnText = "Hand complete · waiting for " + name(public.Seats[0].ID) + " to deal"
 		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
 			next = "Deal the next hand"
+			turnText = "Hand complete · deal the next hand"
 		}
 	case domain.PhaseGameComplete:
 		next = "Game complete"
+		turnText = "Game complete"
+		if public.EndedEarly {
+			turnText = "Game ended"
+		}
 	}
 	parts := []*h.Node{
 		h.Class("game-panel"),
 		h.Attr("data-hand", fmt.Sprint(public.HandNumber)),
 		h.Div(h.Class("game-hud"),
+			h.Div(h.Class("turn-indicator"), h.Attr("data-turn", string(public.Turn)), h.Attr("data-phase", string(public.Phase)), h.Attr("data-local", fmt.Sprint(localTurn)), h.Attr("data-bot", fmt.Sprint(botTurn)), h.Role("status"), h.T(turnText)),
 			h.Div(h.Class("match-cue"), h.Role("status"), h.Attr("aria-atomic", "true"),
 				h.Span(h.Class("match-event"), h.T(eventNotice(message.Events, catalog, name))),
 				h.NewNode("strong", []*h.Node{h.Class("match-next"), h.T(next)})),

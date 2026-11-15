@@ -33,6 +33,40 @@ func (r *runner) rulesSmoke() error {
 	if !previewOK {
 		return fmt.Errorf("portrait preview or actual configured numbers unavailable")
 	}
+	if err := page.eval(r.ctx, `(() => {const form=document.getElementById('review-settings-form'); const hand=form.querySelector('[data-setting="hand-size"]'),reveal=form.querySelector('[data-setting="reveal-every"]'),game=form.querySelector('[data-initial-rule="rule.game_point"]'); hand.value='2'; hand.dispatchEvent(new Event('input',{bubbles:true})); reveal.value='1'; reveal.dispatchEvent(new Event('input',{bubbles:true})); game.checked=true; game.dispatchEvent(new Event('input',{bubbles:true})); return document.getElementById('review-settings-feedback').textContent.includes('Unsaved');})()`, &previewOK); err != nil {
+		return err
+	}
+	if !previewOK {
+		return fmt.Errorf("settings edits were not marked unsaved")
+	}
+	if err := page.clickSelector(r.ctx, `#review-settings-form button[type="submit"]`); err != nil {
+		return err
+	}
+	if err := r.waitPage(page, "saved room settings", 12*time.Second, func(s uiState) bool { return strings.Contains(s.SettingsFeedback, "Settings saved") }); err != nil {
+		return err
+	}
+	var saved bool
+	if err := page.eval(r.ctx, `(() => {const form=document.getElementById('review-settings-form'),preview=document.getElementById('review-panel-starting').textContent;return form.querySelector('[data-setting="hand-size"]').value==='2' && form.querySelector('[data-setting="reveal-every"]').value==='1' && form.querySelector('[data-initial-rule="rule.game_point"]').checked && preview.includes('Deal 2 cards') && preview.includes('every 1 completed hands');})()`, &saved); err != nil {
+		return err
+	}
+	if !saved {
+		return fmt.Errorf("saved room settings did not refresh the rules preview")
+	}
+	if err := page.cdp.call(r.ctx, "Page.reload", map[string]any{}, nil); err != nil {
+		return err
+	}
+	if err := r.waitPage(page, "saved lobby reconnect", 15*time.Second, func(s uiState) bool { return s.Connection == "Connected" && s.SeatTiles == 1 }); err != nil {
+		return err
+	}
+	if err := page.clickSelector(r.ctx, "#rules-open"); err != nil {
+		return err
+	}
+	if err := page.eval(r.ctx, `(() => {const form=document.getElementById('review-settings-form');return !!form && form.querySelector('[data-setting="hand-size"]').value==='2' && form.querySelector('[data-setting="reveal-every"]').value==='1' && form.querySelector('[data-initial-rule="rule.game_point"]').checked;})()`, &saved); err != nil {
+		return err
+	}
+	if !saved {
+		return fmt.Errorf("saved room settings were lost on reload")
+	}
 	if err := r.closeReview(page); err != nil {
 		return err
 	}
@@ -56,7 +90,7 @@ func (r *runner) rulesSmoke() error {
 		return err
 	}
 	if err := r.waitPage(page, "started match", 20*time.Second, func(s uiState) bool {
-		return s.Hand == 1 && s.HandCards == 5 && s.Revision >= 1 && !s.ReviewOpen && s.TableReady
+		return s.Hand == 1 && s.HandCards == 2 && s.Revision >= 1 && !s.ReviewOpen && s.TableReady
 	}); err != nil {
 		return err
 	}
@@ -166,19 +200,18 @@ func (r *runner) checkFieldViewport(page *page, width, height int, mobile bool) 
 		return err
 	}
 	var result struct {
-		OK      bool   `json:"ok"`
-		Reason  string `json:"reason"`
-		Top     int    `json:"top"`
-		Height  int    `json:"height"`
-		Columns int    `json:"columns"`
+		OK          bool   `json:"ok"`
+		Reason      string `json:"reason"`
+		Top         int    `json:"top"`
+		Height      int    `json:"height"`
+		FieldHeight int    `json:"fieldHeight"`
 	}
 	const expression = `(async () => {
 		await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 		const field=document.getElementById('game-rules'),hud=document.querySelector('.game-hud'),table=document.getElementById('table3d');
 		const zones=[...field.querySelectorAll('.rule-zone')],cards=[...field.querySelectorAll('.rule-card')];
 		const box=table.getBoundingClientRect(),hudBox=hud.getBoundingClientRect();
-		const columns=getComputedStyle(field).gridTemplateColumns.split(' ').length;
-		const expected=innerWidth<=700?2:4;
+		const fieldBox=field.getBoundingClientRect();
 		const source=document.querySelector('#screen')?.dataset.scene;
 		const payload=source && JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(source), c => c.charCodeAt(0))));
 		const handPoint=window.__trick3d?.project(payload?.selections?.[0]?.pickId);
@@ -187,17 +220,29 @@ func (r *runner) checkFieldViewport(page *page, width, height int, mobile bool) 
 		const ruleButton=document.getElementById('rules-open').getBoundingClientRect();
 		const endButton=document.querySelector('.end-game > button')?.getBoundingClientRect();
 		const separated=!endButton || endButton.right<=ruleButton.left+2;
+		const compact=cards.every(card=>{const rect=card.getBoundingClientRect();return rect.width<=105 && rect.height>=44 && rect.height<=72;});
+		const strip=getComputedStyle(field).display==='flex' && fieldBox.height<=Math.min(96,innerHeight*.18)+3;
+		const indicator=document.querySelector('.turn-indicator');
+		const activeSeat=payload?.seats?.find(seat=>seat.turn);
+		const turnOK=indicator && indicator.dataset.phase==='playing_trick' && indicator.dataset.turn===activeSeat?.id && indicator.textContent.trim().length>0;
+		const target=field.querySelector('.rule-zone:last-child .rule-zone-cards');
+		const clones=[];
+		for(let i=0;i<12;i++){const clone=cards[2].cloneNode(true);clone.dataset.ruleInstance='test-extra-'+i;target.append(clone);clones.push(clone);}
+		await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+		const manyBox=field.getBoundingClientRect(),manyTable=table.getBoundingClientRect();
+		const manyOK=manyBox.height<=Math.min(96,innerHeight*.18)+3 && manyTable.top>=manyBox.bottom+4 && manyTable.height>=120 && field.scrollWidth>field.clientWidth;
+		clones.forEach(clone=>clone.remove());
 		const ok=zones.map(z=>z.dataset.category).join(',')==='hand,play,trick,score_victory' &&
-			cards.length===2 && cards[0].dataset.ruleTitle==='Follow Suit' && cards[1].dataset.ruleTitle==='High Card Wins' &&
-			columns===expected && box.top>=hudBox.bottom+4 && box.height>=120 && box.bottom<=innerHeight+1 &&
+			cards.length===3 && cards[0].dataset.ruleTitle==='Follow Suit' && cards[1].dataset.ruleTitle==='High Card Wins' && cards[2].dataset.ruleTitle==='Game Point' &&
+			strip && compact && turnOK && manyOK && box.top>=hudBox.bottom+4 && box.height>=120 && box.bottom<=innerHeight+1 &&
 			within(handPoint) && within(center) && separated;
-		return {ok,reason:ok?'':'zone, cards, HUD, table projection or controls failed',top:Math.round(box.top),height:Math.round(box.height),columns};
+		return {ok,reason:ok?'':'zones, compact strip, turn, many-card bound, table projection or controls failed',top:Math.round(box.top),height:Math.round(box.height),fieldHeight:Math.round(fieldBox.height)};
 	})()`
 	if err := page.eval(r.ctx, expression, &result); err != nil {
 		return err
 	}
 	if !result.OK {
-		return fmt.Errorf("%dx%d field viewport: %s (table top %d, height %d, columns %d)", width, height, result.Reason, result.Top, result.Height, result.Columns)
+		return fmt.Errorf("%dx%d field viewport: %s (table top %d, height %d, field height %d)", width, height, result.Reason, result.Top, result.Height, result.FieldHeight)
 	}
 	return nil
 }

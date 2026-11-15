@@ -11,7 +11,7 @@
   let runtimePromise = null;
   let selections = new Map();
   let displayedSeats = [];
-  let rulesScroll = 0;
+  let rulesScrollLeft = 0;
   let submittedUpdate = 0;
   let sceneQueue = [];
   let presenting = false;
@@ -159,7 +159,7 @@
     const update = Number(screen.dataset.update);
     if (!Number.isSafeInteger(update) || update <= lastSceneUpdate) return;
     if (!screen.dataset.scene) {
-      rulesScroll = 0;
+      rulesScrollLeft = 0;
       showSeats([]);
       lastSceneUpdate = update;
       resetPresentation();
@@ -168,7 +168,7 @@
       return;
     }
     const rules = screen.querySelector('#game-rules');
-    if (rules) rules.scrollTop = rulesScroll;
+    if (rules) rules.scrollLeft = rulesScrollLeft;
     try {
       const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(screen.dataset.scene), c => c.charCodeAt(0))));
       if (payload.version !== 1) throw new Error('Unsupported card table payload');
@@ -351,14 +351,13 @@
   });
   reviewDialog.addEventListener('submit', event => {
     if (event.target.id === 'review-start-form') closeAfterStart = true;
-    if (event.target.id === 'review-settings-form') {
-      const form = event.target;
-      form.elements.settings.value = JSON.stringify({
-        handSize: Number(form.querySelector('[data-setting="hand-size"]').value),
-        revealEvery: Number(form.querySelector('[data-setting="reveal-every"]').value),
-        initialRules: Array.from(form.querySelectorAll('[data-initial-rule]:checked'), input => input.value)
-      });
-    }
+  });
+  reviewDialog.addEventListener('input', event => {
+    if (!event.target.closest('#review-settings-form')) return;
+    const feedback = document.getElementById('review-settings-feedback');
+    if (feedback) feedback.textContent = 'Unsaved changes. Save game settings before starting.';
+    const start = document.querySelector('#review-start-form button');
+    if (start) start.disabled = true;
   });
 
   document.addEventListener('click', event => {
@@ -401,10 +400,33 @@
       notice('Waiting for connection…');
       return;
     }
+    if (event.target.id === 'review-settings-form') {
+      const form = event.target;
+      if (!form.reportValidity()) { event.preventDefault(); return; }
+      const handSize = form.querySelector('[data-setting="hand-size"]').valueAsNumber;
+      const revealEvery = form.querySelector('[data-setting="reveal-every"]').valueAsNumber;
+      if (!Number.isInteger(handSize) || !Number.isInteger(revealEvery)) {
+        event.preventDefault();
+        const feedback = document.getElementById('review-settings-feedback');
+        if (feedback) feedback.textContent = 'Enter whole numbers for cards and reveal interval.';
+        return;
+      }
+      event.detail.parameters.settings = JSON.stringify({
+        handSize, revealEvery,
+        initialRules: Array.from(form.querySelectorAll('[data-initial-rule]:checked'), input => input.value)
+      });
+      const feedback = document.getElementById('review-settings-feedback');
+      if (feedback) feedback.textContent = 'Saving settings…';
+    }
     event.detail.parameters.id = crypto.randomUUID();
   });
   document.body.addEventListener('htmx:wsBeforeMessage', event => {
     const documentFragment = new DOMParser().parseFromString(event.detail.message, 'text/html');
+    const errorText = documentFragment.querySelector('#notice')?.textContent?.trim();
+    if (errorText && reviewDialog.open) {
+      const feedback = document.getElementById('review-settings-feedback');
+      if (feedback) feedback.textContent = errorText;
+    }
     const screen = documentFragment.querySelector('#screen[data-update]');
     if (!screen) {
       if (documentFragment.querySelector('#notice')) { submittedUpdate = 0; closeAfterStart = false; }
@@ -415,7 +437,7 @@
       event.preventDefault();
       return;
     }
-    rulesScroll = document.getElementById('game-rules')?.scrollTop || 0;
+    rulesScrollLeft = document.getElementById('game-rules')?.scrollLeft || 0;
     if (reviewDialog.open) {
       reviewScroll = document.getElementById('rules-review-content')?.scrollTop || 0;
       reviewFocus = document.activeElement?.dataset.reviewFocus || reviewFocus;

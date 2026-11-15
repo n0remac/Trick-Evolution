@@ -53,26 +53,27 @@ type participant struct {
 }
 
 type room struct {
-	mu            sync.Mutex
-	dispatchMu    sync.Mutex // Serializes accepted actions and snapshot delivery for this room.
-	id            string
-	seats         []participant
-	clients       map[domain.SeatID]*client
-	state         *domain.MatchState
-	lastEvents    []domain.Event
-	publicPlays   []ObservedPlay
-	publicTricks  []ObservedTrick
-	seen          map[domain.SeatID]map[string]acceptedCommand
-	lastActivity  time.Time
-	server        *Server
-	config        domain.Config
-	botWake       chan struct{}
-	done          chan struct{}
-	ctx           context.Context
-	cancel        context.CancelFunc
-	closed        bool
-	workerStarted bool
-	sequence      uint64 // Monotonic for lobby changes and same-revision reconnects.
+	mu             sync.Mutex
+	dispatchMu     sync.Mutex // Serializes accepted actions and snapshot delivery for this room.
+	id             string
+	seats          []participant
+	clients        map[domain.SeatID]*client
+	state          *domain.MatchState
+	lastEvents     []domain.Event
+	publicPlays    []ObservedPlay
+	publicTricks   []ObservedTrick
+	seen           map[domain.SeatID]map[string]acceptedCommand
+	lastActivity   time.Time
+	server         *Server
+	config         domain.Config
+	settingsStatus string
+	botWake        chan struct{}
+	done           chan struct{}
+	ctx            context.Context
+	cancel         context.CancelFunc
+	closed         bool
+	workerStarted  bool
+	sequence       uint64 // Monotonic for lobby changes and same-revision reconnects.
 }
 
 type acceptedCommand struct {
@@ -99,17 +100,18 @@ type seatSummary struct {
 }
 
 type serverMessage struct {
-	Type     string             `json:"type"`
-	ID       string             `json:"id,omitempty"`
-	Code     string             `json:"code,omitempty"`
-	Message  string             `json:"message,omitempty"`
-	Revision uint64             `json:"revision"`
-	Room     string             `json:"room,omitempty"`
-	Seats    []seatSummary      `json:"seats,omitempty"`
-	View     *domain.PlayerView `json:"view,omitempty"`
-	Config   *domain.Config     `json:"config,omitempty"`
-	Events   []domain.Event     `json:"events,omitempty"`
-	Sequence uint64             `json:"-"`
+	Type           string             `json:"type"`
+	ID             string             `json:"id,omitempty"`
+	Code           string             `json:"code,omitempty"`
+	Message        string             `json:"message,omitempty"`
+	Revision       uint64             `json:"revision"`
+	Room           string             `json:"room,omitempty"`
+	Seats          []seatSummary      `json:"seats,omitempty"`
+	View           *domain.PlayerView `json:"view,omitempty"`
+	Config         *domain.Config     `json:"config,omitempty"`
+	SettingsStatus string             `json:"settingsStatus,omitempty"`
+	Events         []domain.Event     `json:"events,omitempty"`
+	Sequence       uint64             `json:"-"`
 }
 
 type command struct {
@@ -613,10 +615,11 @@ func (r *room) publishLocked() {
 	}
 	state := r.state
 	config := r.config
+	settingsStatus := r.settingsStatus
 	events := append([]domain.Event(nil), r.lastEvents...)
 	r.mu.Unlock()
 	for seat, c := range clients {
-		message := serverMessage{Room: r.id, Seats: seats, Sequence: sequence, Config: &config}
+		message := serverMessage{Room: r.id, Seats: seats, Sequence: sequence, Config: &config, SettingsStatus: settingsStatus}
 		if state == nil {
 			message.Type = "lobby"
 		} else {
@@ -702,6 +705,11 @@ func (r *room) handleCommand(c *client, cmd command) {
 			return
 		}
 		r.config = updated
+		if cmd.Type == "reset_rules" {
+			r.settingsStatus = "Defaults restored for this room. They apply when the game starts."
+		} else {
+			r.settingsStatus = "Settings saved for this room. They apply when the game starts."
+		}
 		r.lastActivity = r.server.now()
 		if r.seen[c.seat] == nil {
 			r.seen[c.seat] = make(map[string]acceptedCommand)

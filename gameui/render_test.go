@@ -209,3 +209,49 @@ func TestHTMLWebSocketEnvelopeRejectsStaleActionsAndResyncs(t *testing.T) {
 		t.Fatalf("raw command accepted HTMX envelope: %+v", got)
 	}
 }
+
+func TestPersistentTurnIndicatorUsesAuthoritativePhaseAndSeat(t *testing.T) {
+	catalog := domain.DefaultCatalog()
+	cfg := domain.DefaultConfig()
+	cfg.HandSize = 1
+	state, err := domain.NewMatch([]domain.SeatID{"alice", "bob"}, cfg, catalog, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants := []seatSummary{{ID: "alice", Name: "Alice", Host: true}, {ID: "bob", Name: "Bot 1", Bot: true}}
+	render := func(id domain.SeatID) string {
+		t.Helper()
+		view, err := domain.ProjectForSeat(state, catalog, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return renderScreen(serverMessage{Type: "state", Room: "turn", View: &view, Seats: participants, Sequence: 1}, id, catalog, cfg)
+	}
+	if html := render("alice"); !strings.Contains(html, `data-turn="bob"`) || !strings.Contains(html, `Bot 1 (bot) is playing`) {
+		t.Fatal("opponent bot turn missing")
+	}
+	if html := render("bob"); !strings.Contains(html, `Your turn · Bot 1`) || !strings.Contains(html, `data-local="true"`) {
+		t.Fatal("local turn missing")
+	}
+	state, _, err = domain.Step(state, domain.Action{Kind: domain.ActionPlayCard, Seat: "bob", Card: state.Hands["bob"][0]}, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if html := render("alice"); !strings.Contains(html, `Your turn · Alice`) || !strings.Contains(html, `data-turn="alice"`) {
+		t.Fatal("turn did not advance")
+	}
+	state, _, err = domain.Step(state, domain.Action{Kind: domain.ActionPlayCard, Seat: "alice", Card: state.Hands["alice"][0]}, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if html := render("alice"); !strings.Contains(html, `Hand complete · deal the next hand`) || strings.Contains(html, `data-local="true"`) {
+		t.Fatal("hand completion shows stale turn")
+	}
+	state, _, err = domain.Step(state, domain.Action{Kind: domain.ActionEndGame, Seat: "alice"}, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if html := render("bob"); !strings.Contains(html, `Game ended`) || strings.Contains(html, `data-local="true"`) {
+		t.Fatal("terminal turn is stale")
+	}
+}

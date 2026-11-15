@@ -27,22 +27,24 @@ type scoreLine struct {
 }
 
 type uiState struct {
-	Ready      bool        `json:"ready"`
-	Status     string      `json:"status"`
-	Notice     string      `json:"notice"`
-	Connection string      `json:"connection"`
-	Revision   int         `json:"revision"`
-	Hand       int         `json:"hand"`
-	Rules      []string    `json:"rules"`
-	Scores     []scoreLine `json:"scores"`
-	HandCards  int         `json:"handCards"`
-	LobbyNames []string    `json:"lobbyNames"`
-	SeatTiles  int         `json:"seatTiles"`
-	Winner     string      `json:"winner"`
-	ReviewOpen bool        `json:"reviewOpen"`
-	ReviewTab  string      `json:"reviewTab"`
-	ReviewBack string      `json:"reviewBack"`
-	TableReady bool        `json:"tableReady"`
+	Ready            bool        `json:"ready"`
+	Status           string      `json:"status"`
+	TurnIndicator    string      `json:"turnIndicator"`
+	SettingsFeedback string      `json:"settingsFeedback"`
+	Notice           string      `json:"notice"`
+	Connection       string      `json:"connection"`
+	Revision         int         `json:"revision"`
+	Hand             int         `json:"hand"`
+	Rules            []string    `json:"rules"`
+	Scores           []scoreLine `json:"scores"`
+	HandCards        int         `json:"handCards"`
+	LobbyNames       []string    `json:"lobbyNames"`
+	SeatTiles        int         `json:"seatTiles"`
+	Winner           string      `json:"winner"`
+	ReviewOpen       bool        `json:"reviewOpen"`
+	ReviewTab        string      `json:"reviewTab"`
+	ReviewBack       string      `json:"reviewBack"`
+	TableReady       bool        `json:"tableReady"`
 }
 
 type runResult struct {
@@ -76,6 +78,8 @@ const stateExpression = `(() => {
 	return {
 		ready: Boolean(window.__trickUIReady),
 		status: document.querySelector('.status')?.textContent || (turn ? turn.name + ' to play' : ''),
+		turnIndicator: document.querySelector('.turn-indicator')?.textContent || '',
+		settingsFeedback: document.getElementById('review-settings-feedback')?.textContent || '',
 		notice: document.querySelector('.match-event')?.textContent || document.querySelector('#notice')?.textContent || '',
 		connection: document.querySelector('#connection')?.textContent || '',
 		revision: Number(screen?.dataset.revision) || 0,

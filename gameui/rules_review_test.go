@@ -196,3 +196,14 @@ func TestPregameSettingsReviewAndLockedStartingRules(t *testing.T) {
 		t.Fatal("started rules not locked or low policy missing")
 	}
 }
+
+func TestRulesReviewDisplaysSavedRoomSettingsStatus(t *testing.T) {
+	cfg := domain.DefaultConfig()
+	_, catalog := reviewFixture(t, cfg)
+	message := reviewMessage(nil)
+	message.SettingsStatus = "Settings saved for this room. They apply when the game starts."
+	html := reviewHTML(t, message, "host", catalog, cfg)
+	if !strings.Contains(html, `id="review-settings-feedback"`) || !strings.Contains(html, message.SettingsStatus) || !strings.Contains(html, `data-setting="hand-size"`) {
+		t.Fatal("saved settings feedback missing")
+	}
+}

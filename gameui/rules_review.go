@@ -82,7 +82,7 @@ func rulesReviewContent(message serverMessage, seat domain.SeatID, catalog domai
 		h.P(h.Class("review-context"), h.T(intro)),
 		h.NewNode("div", tabNodes),
 		panel("current", defaultTab != "current", renderCurrentRules(current, catalog, lobby, message.View)),
-		panel("starting", defaultTab != "starting", renderStartingRules(starting, catalog, config, lobby, host)),
+		panel("starting", defaultTab != "starting", renderStartingRules(starting, catalog, config, lobby, host, message.SettingsStatus)),
 		panel("changes", defaultTab != "changes", renderRuleChanges(current, catalog)),
 		h.Div(actions...),
 	), nil
@@ -129,7 +129,7 @@ func renderCurrentRules(resolved domain.RuleResolution, catalog domain.Catalog, 
 	return h.Div(parts...)
 }
 
-func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog, config domain.Config, lobby, host bool) *h.Node {
+func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog, config domain.Config, lobby, host bool, settingsStatus string) *h.Node {
 	cards := []*h.Node{}
 	for _, rule := range starting.ActiveField {
 		definition, ok := catalog.Definition(rule.Instance.DefinitionID)
@@ -154,7 +154,7 @@ func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog,
 		}
 	}
 	if lobby && host {
-		parts = append(parts, renderSettings(config, catalog))
+		parts = append(parts, renderSettings(config, catalog, settingsStatus))
 	}
 	if !lobby {
 		parts = append(parts, h.P(h.Class("muted"), h.T("Starting settings are locked after play begins.")))
@@ -162,13 +162,16 @@ func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog,
 	return h.Div(parts...)
 }
 
-func renderSettings(config domain.Config, catalog domain.Catalog) *h.Node {
+func renderSettings(config domain.Config, catalog domain.Catalog, settingsStatus string) *h.Node {
+	if settingsStatus == "" {
+		settingsStatus = "Save changes before starting. Saved settings apply to this room's next game."
+	}
 	selected := map[domain.RuleID]bool{}
 	for _, id := range config.InitialRules {
 		selected[id] = true
 	}
 	nodes := []*h.Node{h.Id("review-settings-form"), h.Attr("ws-send", ""), h.Class("review-settings"),
-		h.H3(h.T("Game settings")), h.P(h.Class("muted"), h.T("Changes apply to this room. Choose prerequisites before dependent cards; conflicting alternatives cannot both start. Unselected mechanics use their hidden or visible baseline.")),
+		h.H3(h.T("Game settings")), h.P(h.Id("review-settings-feedback"), h.Role("status"), h.Attr("aria-live", "polite"), h.T(settingsStatus)), h.P(h.Class("muted"), h.T("Changes apply to this room. Choose prerequisites before dependent cards; conflicting alternatives cannot both start. Unselected mechanics use their hidden or visible baseline.")),
 		h.Input(h.Type("hidden"), h.Name("type"), h.Value("configure")), h.Input(h.Type("hidden"), h.Name("revision"), h.Value("0")), h.Input(h.Type("hidden"), h.Name("settings"), h.Value("")),
 		h.Label(h.T("Cards per player"), h.Input(h.Type("number"), h.Attr("data-setting", "hand-size"), h.Attr("min", "1"), h.Attr("max", "26"), h.Value(fmt.Sprint(config.HandSize)))),
 		h.Label(h.T("Completed hands between reveals"), h.Input(h.Type("number"), h.Attr("data-setting", "reveal-every"), h.Attr("min", "1"), h.Attr("max", "100"), h.Value(fmt.Sprint(config.RevealEvery)))),

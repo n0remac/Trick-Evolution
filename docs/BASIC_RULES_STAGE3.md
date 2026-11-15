@@ -23,3 +23,7 @@ The field uses `PublicView.ActiveField`, `Rules` history, and `Effective` effect
 - The bounded `rules-smoke` browser mode now checks the field, details, Rules review, legal play, and measured HUD/table geometry at phone portrait, phone landscape, and desktop widths. One local 60-second attempt stopped before page creation because Chromium did not publish `DevToolsActivePort` within 30 seconds; its log was empty. Stage 2 attempts had also timed out in DevTools on this Pi. No viewport assertion completed, so visual, phone/touch, keyboard, and assistive-technology behavior still need a successful browser/manual pass on a less constrained machine. No repeated browser loops were run.
 
 The release gate covers Go behavior and builds, not rendered pixel geometry. The UI geometry contract is encoded in CSS and measured by the browser smoke when Chromium is available.
+
+## Later playtest layout
+
+The compact horizontal rule strip in [Pitch scoring and pregame rules](PITCH_SCORING_AND_PREGAME.md) supersedes the two-column and four-column field layout described above. The field categories, detailed tap dialog, and active rule projection remain the same.
