@@ -22,7 +22,7 @@ func rulesReviewContent(message serverMessage, seat domain.SeatID, catalog domai
 	if message.View != nil {
 		public := message.View.Public
 		if public.HandSize > 0 && public.MaxHands > 0 && public.RevealEvery > 0 {
-			config = domain.Config{HandSize: public.HandSize, MaxHands: public.MaxHands, RevealEvery: public.RevealEvery, InitialRules: public.InitialRules}
+			config = domain.Config{Mode: public.Mode, HandSize: public.HandSize, MaxHands: public.MaxHands, RevealEvery: public.RevealEvery, InitialRules: public.InitialRules}
 		}
 	}
 	starting, err := domain.StartingRules(config, catalog)
@@ -120,7 +120,11 @@ func renderCurrentRules(resolved domain.RuleResolution, catalog domain.Catalog, 
 					}
 				}
 			}
-			entries = append(entries, renderEffectiveRule(rule, definition, resolved.Effective, status))
+			mode := domain.ModeFinite
+			if view != nil {
+				mode = view.Public.Mode
+			}
+			entries = append(entries, renderEffectiveRule(rule, definition, resolved.Effective, status, mode))
 		}
 		if len(entries) > 0 {
 			parts = append(parts, reviewGroup(group.label, entries))
@@ -134,7 +138,7 @@ func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog,
 	for _, rule := range starting.ActiveField {
 		definition, ok := catalog.Definition(rule.Instance.DefinitionID)
 		if ok {
-			cards = append(cards, renderEffectiveRule(rule, definition, starting.Effective, ""))
+			cards = append(cards, renderEffectiveRule(rule, definition, starting.Effective, "", config.Mode))
 		}
 	}
 	parts := []*h.Node{h.NewNode("h3", []*h.Node{h.T("Starting field cards")}), h.P(h.Class("muted"), h.T("The selected visible cards are shown on the table when play begins. Hidden baselines still apply where no card replaces them.")), h.Div(append([]*h.Node{h.Class("review-start-cards")}, cards...)...), h.NewNode("h3", []*h.Node{h.T("Active starting baselines")})}
@@ -146,7 +150,7 @@ func renderStartingRules(starting domain.RuleResolution, catalog domain.Catalog,
 			}
 			definition, ok := catalog.Definition(rule.Instance.DefinitionID)
 			if ok && definition.StartingVisibility == domain.Hidden && definition.FieldCategory == group.category {
-				entries = append(entries, renderEffectiveRule(rule, definition, starting.Effective, ""))
+				entries = append(entries, renderEffectiveRule(rule, definition, starting.Effective, "", config.Mode))
 			}
 		}
 		if len(entries) > 0 {
@@ -218,7 +222,7 @@ func reviewGroup(label string, entries []*h.Node) *h.Node {
 	return h.Section(nodes...)
 }
 
-func renderEffectiveRule(rule domain.ResolvedRule, definition domain.RuleDefinition, effects []domain.EffectiveEffect, status string) *h.Node {
+func renderEffectiveRule(rule domain.ResolvedRule, definition domain.RuleDefinition, effects []domain.EffectiveEffect, status string, mode domain.MatchMode) *h.Node {
 	kind := "Field card"
 	if definition.StartingVisibility == domain.Hidden {
 		kind = "Hidden baseline"
@@ -226,13 +230,13 @@ func renderEffectiveRule(rule domain.ResolvedRule, definition domain.RuleDefinit
 	nodes := []*h.Node{h.Class("review-rule"), h.Attr("data-rule-id", string(definition.ID)), h.Div(h.Class("review-rule-heading"), h.NewNode("strong", []*h.Node{h.T(definition.Title)}), h.Span(h.Class("review-rule-kind"), h.T(kind))), h.P(h.T(definition.Text))}
 	for _, effect := range effects {
 		if effect.InstanceID == rule.Instance.InstanceID {
-			nodes = append(nodes, h.P(h.T(effectDescription(effect))))
+			nodes = append(nodes, h.P(h.T(modeEffectDescription(effect, mode))))
 		}
 	}
 	if definition.ID == domain.RuleLowTrump {
 		for _, effect := range effects {
 			if effect.Mechanic == domain.MechanicLowOwner {
-				nodes = append(nodes, h.P(h.T(effectDescription(effect))))
+				nodes = append(nodes, h.P(h.T(modeEffectDescription(effect, mode))))
 				break
 			}
 		}
@@ -241,6 +245,20 @@ func renderEffectiveRule(rule domain.ResolvedRule, definition domain.RuleDefinit
 		nodes = append(nodes, h.P(h.Class("review-rule-status"), h.T(status)))
 	}
 	return h.NewNode("article", nodes)
+}
+
+func modeEffectDescription(e domain.EffectiveEffect, mode domain.MatchMode) string {
+	if mode == domain.ModeEndless {
+		switch e.Mechanic {
+		case domain.MechanicHandLimit:
+			return "The run continues until you end it or the room expires."
+		case domain.MechanicReveal:
+			return "Drafts, table changes, and holds happen at round boundaries."
+		case domain.MechanicVictory:
+			return "Completed hand points stay in the run score."
+		}
+	}
+	return effectDescription(e)
 }
 
 func effectDescription(e domain.EffectiveEffect) string {

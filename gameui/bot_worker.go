@@ -29,6 +29,9 @@ func (r *room) botTurnLocked() bool {
 	if r.state == nil || r.state.Phase != domain.PhasePlayingTrick {
 		return false
 	}
+	if r.state.Config.Mode == domain.ModeEndless && r.clients[r.seats[0].ID] == nil {
+		return false
+	}
 	for _, seat := range r.seats {
 		if seat.ID == r.state.Turn {
 			return seat.Bot

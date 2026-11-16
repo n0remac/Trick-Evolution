@@ -95,7 +95,7 @@ func renderFieldCard(rule domain.ResolvedRule, definition domain.RuleDefinition,
 	if definition.ID == domain.RuleLowTrump {
 		for _, effect := range public.Effective {
 			if effect.Mechanic == domain.MechanicLowOwner {
-				short = append(short, effectDescription(effect))
+				short = append(short, modeEffectDescription(effect, public.Mode))
 				break
 			}
 		}
@@ -173,7 +173,7 @@ func shortEffect(effect domain.EffectiveEffect, rule domain.ResolvedRule, public
 		}
 		return "Highest eligible card wins"
 	}
-	return effectDescription(effect)
+	return modeEffectDescription(effect, public.Mode)
 }
 
 func suitName(suit domain.Suit) string {
@@ -200,7 +200,7 @@ func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition,
 	}
 	for _, effect := range public.Effective {
 		if effect.InstanceID == rule.Instance.InstanceID {
-			lines = append(lines, effectDescription(effect))
+			lines = append(lines, modeEffectDescription(effect, public.Mode))
 			if effect.Mechanic == domain.MechanicTrump || effect.Mechanic == domain.MechanicBreakSpades || effect.Mechanic == domain.MechanicBreakHearts {
 				lines = append(lines, shortEffect(effect, rule, public)+".")
 			}
@@ -209,7 +209,7 @@ func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition,
 	if definition.ID == domain.RuleLowTrump {
 		for _, effect := range public.Effective {
 			if effect.Mechanic == domain.MechanicLowOwner {
-				lines = append(lines, effectDescription(effect))
+				lines = append(lines, modeEffectDescription(effect, public.Mode))
 				break
 			}
 		}

@@ -37,5 +37,5 @@ func EffectiveForView(view PublicView, catalog Catalog) (RuleResolution, error) 
 	for i, r := range view.Rules {
 		field[i] = r.Instance
 	}
-	return ResolveRules(field, catalog, Config{HandSize: view.HandSize, RevealEvery: view.RevealEvery, MaxHands: view.MaxHands})
+	return ResolveRules(field, catalog, Config{Mode: view.Mode, HandSize: view.HandSize, RevealEvery: view.RevealEvery, MaxHands: view.MaxHands})
 }

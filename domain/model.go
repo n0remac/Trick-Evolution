@@ -42,27 +42,31 @@ func StandardDeck() []StandardCard {
 type Phase string
 
 const (
-	PhaseAwaitingStart Phase = "awaiting_start"
-	PhasePlayingTrick  Phase = "playing_trick"
-	PhaseHandComplete  Phase = "hand_complete"
-	PhaseGameComplete  Phase = "game_complete"
+	PhaseAwaitingStart  Phase = "awaiting_start"
+	PhasePlayingTrick   Phase = "playing_trick"
+	PhaseHandComplete   Phase = "hand_complete"
+	PhaseAwaitingChoice Phase = "awaiting_choice"
+	PhaseGameComplete   Phase = "game_complete"
 )
 
 type ActionKind string
 
 const (
-	ActionStartHand ActionKind = "start_hand"
-	ActionPlayCard  ActionKind = "play_card"
-	ActionEndGame   ActionKind = "end_game"
-	ActionLeaveGame ActionKind = "leave_game"
+	ActionStartHand  ActionKind = "start_hand"
+	ActionPlayCard   ActionKind = "play_card"
+	ActionEndGame    ActionKind = "end_game"
+	ActionLeaveGame  ActionKind = "leave_game"
+	ActionChooseRule ActionKind = "choose_rule"
 )
 
 // Action is the future Step input. Seat is always supplied by a trusted adapter.
 type Action struct {
-	Kind      ActionKind
-	Seat      SeatID
-	Card      CardID   // Only used for play_card.
-	DeckOrder []CardID // Full chosen order, required for start_hand.
+	Kind       ActionKind
+	Seat       SeatID
+	Card       CardID   // Only used for play_card.
+	DeckOrder  []CardID // Full chosen order, required for start_hand.
+	Rule       RuleID
+	BoundaryID string
 }
 
 type Seat struct {
@@ -77,15 +81,26 @@ type Play struct {
 }
 
 type Config struct {
+	Mode         MatchMode
 	HandSize     int
 	RevealEvery  int      // Completed hands between rule reveals.
 	MaxHands     int      // The match ends after this many completed hands.
 	InitialRules []RuleID // Optional visible replacements, in selection order.
 }
 
+type MatchMode string
+
+const (
+	ModeFinite  MatchMode = ""
+	ModeEndless MatchMode = "endless"
+)
+
 func DefaultConfig() Config { return Config{HandSize: 5, RevealEvery: 3, MaxHands: 10} }
 
 func (c Config) Validate(seatCount int) error {
+	if c.Mode != ModeFinite && c.Mode != ModeEndless {
+		return fmt.Errorf("unknown match mode %q", c.Mode)
+	}
 	if seatCount < 2 || seatCount > 4 {
 		return fmt.Errorf("seat count must be 2 through 4")
 	}
@@ -116,35 +131,40 @@ type ShuffleRecord struct {
 }
 
 type MatchState struct {
-	Revision       uint64
-	CatalogVersion int
-	Config         Config
-	Phase          Phase
-	Seats          []Seat
-	Hands          map[SeatID][]CardID
-	Carried        map[SeatID]CardID // Incoming private card for this hand, if any.
-	Retained       map[SeatID]CardID // Private leftover after a completed Keep One hand.
-	Captured       map[SeatID][]CardID
-	DealOwner      map[CardID]SeatID // Private until hand settlement.
-	HandAwards     []HandAward
-	StandardDraw   []CardID
-	RuleDraw       []RuleID
-	CurrentTrick   []Play
-	TrumpSuit      Suit // Empty before Pitch's first lead, or with No Trump.
-	BrokenSpades   bool // Public facts, tracked even before Break Spades is active.
-	BrokenHearts   bool
-	Dealer         SeatID
-	Leader         SeatID
-	Turn           SeatID
-	HandNumber     int
-	TrickNumber    int
-	DealSize       int // Effective cards per player, frozen at this hand's deal.
-	TricksPerHand  int // Completed tricks required for this hand.
-	CompletedHands int
-	EndedEarly     bool
-	EndedBy        SeatID
-	Field          []RuleInstance
-	Shuffles       []ShuffleRecord
+	Revision          uint64
+	CatalogVersion    int
+	Config            Config
+	Phase             Phase
+	Seats             []Seat
+	Hands             map[SeatID][]CardID
+	Carried           map[SeatID]CardID // Incoming private card for this hand, if any.
+	Retained          map[SeatID]CardID // Private leftover after a completed Keep One hand.
+	Captured          map[SeatID][]CardID
+	DealOwner         map[CardID]SeatID // Private until hand settlement.
+	HandAwards        []HandAward
+	StandardDraw      []CardID
+	RuleDraw          []RuleID
+	CurrentTrick      []Play
+	TrumpSuit         Suit // Empty before Pitch's first lead, or with No Trump.
+	BrokenSpades      bool // Public facts, tracked even before Break Spades is active.
+	BrokenHearts      bool
+	Dealer            SeatID
+	Leader            SeatID
+	Turn              SeatID
+	HandNumber        int
+	TrickNumber       int
+	DealSize          int // Effective cards per player, frozen at this hand's deal.
+	TricksPerHand     int // Completed tricks required for this hand.
+	CompletedHands    int
+	EndedEarly        bool
+	EndedBy           SeatID
+	Field             []RuleInstance
+	Round             int
+	RoundHand         int
+	PendingBoundaryID string
+	DraftOptions      []RuleID
+	TableCue          string
+	Shuffles          []ShuffleRecord
 }
 
 // ShuffleSource is injected only at setup. Callers can supply a seeded source
@@ -342,5 +362,9 @@ func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, r
 		s.StandardDraw = append(s.StandardDraw, CardID(id))
 	}
 	s.Dealer, s.Leader, s.Turn = ids[0], ids[1%len(ids)], ids[1%len(ids)]
+	if cfg.Mode == ModeEndless {
+		s.Round, s.RoundHand = 1, 1
+		s.TableCue = "The first round lasts three hands."
+	}
 	return s
 }

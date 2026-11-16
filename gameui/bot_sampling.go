@@ -27,7 +27,7 @@ type preparedObservation struct {
 func prepareObservation(observation BotObservation, catalog domain.Catalog) (preparedObservation, error) {
 	view := observation.View
 	public := view.Public
-	config := domain.Config{HandSize: public.HandSize, RevealEvery: public.RevealEvery, MaxHands: public.MaxHands, InitialRules: append([]domain.RuleID(nil), public.InitialRules...)}
+	config := domain.Config{Mode: public.Mode, HandSize: public.HandSize, RevealEvery: public.RevealEvery, MaxHands: public.MaxHands, InitialRules: append([]domain.RuleID(nil), public.InitialRules...)}
 	dealSize := public.DealSize
 	if dealSize == 0 { // Older unit fixtures omit the frozen hand projection.
 		dealSize = config.HandSize
@@ -252,6 +252,7 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 		Phase: public.Phase, Seats: make([]domain.Seat, len(public.Seats)), Hands: make(map[domain.SeatID][]domain.CardID), Captured: make(map[domain.SeatID][]domain.CardID),
 		CurrentTrick: append([]domain.Play(nil), public.CurrentTrick...), TrumpSuit: public.TrumpSuit, BrokenSpades: public.BrokenSpades, BrokenHearts: public.BrokenHearts, Dealer: public.Dealer, Leader: public.Leader, Turn: public.Turn,
 		HandNumber: public.HandNumber, TrickNumber: public.TrickNumber, DealSize: prepared.dealSize, TricksPerHand: public.TricksPerHand, CompletedHands: public.CompletedHands,
+		Round: public.Round, RoundHand: public.RoundHand, TableCue: public.TableCue,
 		Field: append([]domain.RuleInstance(nil), prepared.field...), RuleDraw: append([]domain.RuleID(nil), prepared.rules...)}
 	if state.TricksPerHand == 0 { // Older unit fixtures omit the frozen limit.
 		state.TricksPerHand = prepared.dealSize

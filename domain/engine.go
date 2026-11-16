@@ -41,6 +41,7 @@ const (
 	EventRuleRevealed  EventKind = "rule_revealed"
 	EventGameEnded     EventKind = "game_ended"
 	EventGameCompleted EventKind = "game_completed"
+	EventRoundDecision EventKind = "round_decision"
 )
 
 // Event has public facts only. A transport can broadcast it without exposing
@@ -91,6 +92,8 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 		return stepEndGame(state, action, seatIndex, true)
 	case ActionLeaveGame:
 		return stepEndGame(state, action, seatIndex, false)
+	case ActionChooseRule:
+		return stepChooseRule(state, action, seatIndex, catalog)
 	default:
 		return state, nil, transitionError(ErrUnknownAction, "action kind is not supported")
 	}
@@ -100,7 +103,7 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 // trick earns no point; its public plays and private hands remain in the
 // terminal snapshot for audit and reconnect.
 func stepEndGame(state MatchState, action Action, seatIndex int, hostOnly bool) (MatchState, []Event, error) {
-	if state.Phase != PhasePlayingTrick && state.Phase != PhaseHandComplete {
+	if state.Phase != PhasePlayingTrick && state.Phase != PhaseHandComplete && state.Phase != PhaseAwaitingChoice {
 		return state, nil, transitionError(ErrWrongPhase, "game is not active")
 	}
 	if hostOnly && seatIndex != 0 {
@@ -119,7 +122,7 @@ func stepEndGame(state MatchState, action Action, seatIndex int, hostOnly bool) 
 }
 
 func stepStartHand(state MatchState, action Action, seatIndex int, resolved RuleResolution) (MatchState, []Event, error) {
-	if state.Phase != PhaseHandComplete || state.CompletedHands >= state.Config.MaxHands {
+	if state.Phase != PhaseHandComplete || state.Config.Mode == ModeFinite && state.CompletedHands >= state.Config.MaxHands {
 		return state, nil, transitionError(ErrWrongPhase, "a new hand cannot start now")
 	}
 	if seatIndex != 0 {
@@ -165,6 +168,9 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	next := cloneState(state)
 	next.Revision++
 	next.Phase = PhasePlayingTrick
+	if next.Config.Mode == ModeEndless {
+		next.RoundHand++
+	}
 	next.HandNumber++
 	next.TrickNumber = 1
 	next.DealSize, next.TricksPerHand = plan.DealSize, plan.Tricks
@@ -340,6 +346,17 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	if err := settleHandScores(&next, resolvedRules); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
+	if next.Config.Mode == ModeEndless {
+		next.CompletedHands++
+		if err := settleEndlessBoundary(&next, catalog); err != nil {
+			return state, nil, transitionError(ErrInvalidState, err.Error())
+		}
+		events = append(events, Event{Kind: EventHandCompleted, Revision: next.Revision, Hand: next.HandNumber})
+		if next.Phase == PhaseAwaitingChoice || next.TableCue != state.TableCue {
+			events = append(events, Event{Kind: EventRoundDecision, Revision: next.Revision, Hand: next.HandNumber})
+		}
+		return next, events, nil
+	}
 	if next.CompletedHands+1 >= next.Config.MaxHands {
 		next.CompletedHands++
 		next.Phase = PhaseGameComplete
@@ -465,6 +482,7 @@ func cloneState(state MatchState) MatchState {
 	next.HandAwards = slices.Clone(state.HandAwards)
 	next.Config.InitialRules = slices.Clone(state.Config.InitialRules)
 	next.Field = slices.Clone(state.Field)
+	next.DraftOptions = slices.Clone(state.DraftOptions)
 	next.Shuffles = make([]ShuffleRecord, len(state.Shuffles))
 	for i, record := range state.Shuffles {
 		next.Shuffles[i] = ShuffleRecord{Kind: record.Kind, Order: slices.Clone(record.Order)}

@@ -67,6 +67,12 @@ func joinScreen(room string) *h.Node {
 	}
 	return h.Section(h.Id("screen"), h.Attr("aria-live", "polite"),
 		h.Section(h.Class("panel join"),
+			h.H2(h.T("Endless Mode")),
+			h.P(h.Class("muted"), h.T("Start a private run with one bot, three cards per player, and rules that change between rounds.")),
+			h.Form(h.Id("endless-form"), h.Class("form-grid"),
+				h.Label(h.T("Your name"), h.Input(h.Name("name"), h.Attr("required", ""), h.Attr("maxlength", "32"))),
+				h.Button(h.Type("submit"), h.T("Start Endless Mode")))),
+		h.Section(h.Class("panel join"),
 			h.H2(h.T("Join a room")),
 			h.P(h.Class("muted"), h.T("Share the room code with friends, or add computer opponents when creating a room. The first player hosts.")),
 			h.Form(h.Id("join-form"), h.Class("form-grid"),
@@ -99,7 +105,31 @@ func commandForm(kind, label string, card domain.CardID, disabled bool, class st
 	return h.Form(children...)
 }
 
+func draftForm(rule domain.RuleID, label, boundary string, revision uint64) *h.Node {
+	return h.Form(h.Attr("ws-send", ""), h.Input(h.Type("hidden"), h.Name("type"), h.Value("choose_rule")),
+		h.Input(h.Type("hidden"), h.Name("revision"), h.Value(fmt.Sprint(revision))),
+		h.Input(h.Type("hidden"), h.Name("boundaryId"), h.Value(boundary)),
+		h.Input(h.Type("hidden"), h.Name("rule"), h.Value(string(rule))),
+		h.Button(h.Type("submit"), h.T(label)))
+}
+
 func renderScreen(message serverMessage, seat domain.SeatID, catalog domain.Catalog, config domain.Config) string {
+	if message.View != nil && message.View.Public.Mode == domain.ModeEndless {
+		catalog.Definitions = append([]domain.RuleDefinition(nil), catalog.Definitions...)
+		for i := range catalog.Definitions {
+			switch catalog.Definitions[i].ID {
+			case domain.RuleHandLimit:
+				catalog.Definitions[i].Title = "Open Run"
+				catalog.Definitions[i].Text = "The run continues across hands and rounds until you end it or the room expires. Completed hand points remain in your run score."
+			case domain.RuleReveal:
+				catalog.Definitions[i].Title = "Round Pacing"
+				catalog.Definitions[i].Text = "Rounds contain complete hands. A round boundary may offer a draft, change a rule automatically, or keep the current field."
+			case domain.RuleVictory:
+				catalog.Definitions[i].Title = "Run Score"
+				catalog.Definitions[i].Text = "Bank points from completed tricks and hands. Scores continue across rounds until the run ends."
+			}
+		}
+	}
 	var content *h.Node
 	if message.Type == "lobby" {
 		content = lobbyPanel(message, seat)
@@ -225,6 +255,8 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			next = "Deal the next hand"
 			turnText = "Hand complete · deal the next hand"
 		}
+	case domain.PhaseAwaitingChoice:
+		next, turnText = "Choose a rule", "Round complete · your rule choice"
 	case domain.PhaseGameComplete:
 		next = "Game complete"
 		turnText = "Game complete"
@@ -235,6 +267,9 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 	hudDetails := ""
 	if public.DealSize > 0 && (public.DealSize != public.HandSize || public.TricksPerHand != public.DealSize) {
 		hudDetails = fmt.Sprintf("%d cards · %d played tricks", public.DealSize, public.TricksPerHand)
+	}
+	if public.Mode == domain.ModeEndless && public.Phase == domain.PhasePlayingTrick {
+		hudDetails = fmt.Sprintf("Hand countdown: %d trick(s) left · Trick %d/%d", public.TricksPerHand-public.TrickNumber+1, public.TrickNumber, public.TricksPerHand)
 	}
 	if public.Phase == domain.PhasePlayingTrick && view.Carried != "" {
 		for _, id := range view.Hand {
@@ -247,17 +282,35 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			}
 		}
 	}
-	parts := []*h.Node{
-		h.Class("game-panel"),
-		h.Attr("data-hand", fmt.Sprint(public.HandNumber)),
-		h.Div(h.Class("game-hud"),
-			h.Div(h.Class("turn-indicator"), h.Attr("data-turn", string(public.Turn)), h.Attr("data-phase", string(public.Phase)), h.Attr("data-local", fmt.Sprint(localTurn)), h.Attr("data-bot", fmt.Sprint(botTurn)), h.Role("status"), h.T(turnText)),
-			h.Div(h.Class("match-cue"), h.Role("status"), h.Attr("aria-atomic", "true"),
-				h.Span(h.Class("match-event"), h.T(eventNotice(message.Events, catalog, name))),
-				h.NewNode("strong", []*h.Node{h.Class("match-next"), h.T(next)})),
-			h.P(h.Class("hand-plan"), h.T(hudDetails)),
-			rules),
+	hud := []*h.Node{h.Class("game-hud"),
+		h.Div(h.Class("turn-indicator"), h.Attr("data-turn", string(public.Turn)), h.Attr("data-phase", string(public.Phase)), h.Attr("data-local", fmt.Sprint(localTurn)), h.Attr("data-bot", fmt.Sprint(botTurn)), h.Role("status"), h.T(turnText)),
+		h.Div(h.Class("match-cue"), h.Role("status"), h.Attr("aria-atomic", "true"),
+			h.Span(h.Class("match-event"), h.T(eventNotice(message.Events, catalog, name))),
+			h.NewNode("strong", []*h.Node{h.Class("match-next"), h.T(next)})),
+		h.P(h.Class("hand-plan"), h.T(hudDetails))}
+	if public.Mode == domain.ModeEndless {
+		countdown := public.RoundLength - public.RoundHand
+		if countdown < 0 {
+			countdown = 0
+		}
+		cue := public.TableCue
+		if public.Phase == domain.PhasePlayingTrick {
+			_, event := domain.EndlessRound(public.Round + 1)
+			action := map[string]string{"draft": "Your rule draft", "table": "The table changes a rule", "hold": "The rules hold"}[event]
+			cue = fmt.Sprintf("%s in %d hand(s).", action, countdown+1)
+		}
+		handInRound := public.RoundHand
+		if handInRound == 0 {
+			handInRound = 1
+		}
+		scores := []*h.Node{h.Class("run-scores"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Endless Mode · Round %d · Hand %d/%d", public.Round, handInRound, public.RoundLength))})}
+		for _, player := range public.Seats {
+			scores = append(scores, h.Span(h.T(fmt.Sprintf("%s: %d", name(player.ID), player.Score))))
+		}
+		hud = append(hud, h.Div(scores...), h.P(h.Class("round-cue"), h.T(cue)))
 	}
+	hud = append(hud, rules)
+	parts := []*h.Node{h.Class("game-panel"), h.Attr("data-hand", fmt.Sprint(public.HandNumber)), h.Div(hud...)}
 	if public.Phase == domain.PhasePlayingTrick {
 		legal, _ := domain.LegalCards(*view, catalog)
 		allowed := make(map[domain.CardID]bool, len(legal))
@@ -284,10 +337,22 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
 			parts = append(parts, h.Div(h.Class("next-hand"), commandForm("next", "Deal next hand", "", false, "", public.Revision)))
 		}
+	} else if public.Phase == domain.PhaseAwaitingChoice {
+		choices := []*h.Node{h.Class("draft-choices"), h.H2(h.T("Choose a rule for the next round"))}
+		for _, id := range public.DraftOptions {
+			if definition, ok := catalog.Definition(id); ok {
+				choices = append(choices, h.Div(h.Class("draft-card"), h.NewNode("strong", []*h.Node{h.T(definition.Title)}), h.P(h.T(definition.Text)), draftForm(id, "Take "+definition.Title, public.PendingBoundaryID, public.Revision)))
+			}
+		}
+		choices = append(choices, draftForm("", "Keep current rules", public.PendingBoundaryID, public.Revision))
+		parts = append(parts, h.Div(choices...))
 	} else if public.Phase == domain.PhaseGameComplete {
 		status := "Game complete"
 		if public.EndedEarly {
 			status = "Game ended by " + name(public.EndedBy)
+		}
+		if public.Mode == domain.ModeEndless {
+			status = "Run ended"
 		}
 		winners := make([]string, 0, len(public.Winners))
 		for _, id := range public.Winners {
@@ -296,6 +361,9 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		label := "Winner: "
 		if len(winners) > 1 {
 			label = "Winners: "
+		}
+		if public.Mode == domain.ModeEndless {
+			label = "Top score: "
 		}
 		results := []*h.Node{
 			h.Class("panel game-results"),
@@ -312,16 +380,20 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		parts = append(parts, h.Div(results...))
 	}
 	if len(message.Seats) > 0 && message.Seats[0].ID == seat && public.Phase != domain.PhaseGameComplete {
+		confirmText, confirmLabel := "End this game for everyone? Completed-trick scores remain; an unfinished trick and hand bonus will not score.", "Confirm end game"
+		if public.Mode == domain.ModeEndless {
+			confirmText, confirmLabel = "End this run? Completed scores remain; an unfinished trick and hand bonus will not score.", "Confirm end run"
+		}
 		parts = append(parts, h.Div(h.Class("end-game"),
-			h.Button(h.Type("button"), h.Attr("data-action", "end-confirm"), h.T("End game")),
+			h.Button(h.Type("button"), h.Attr("data-action", "end-confirm"), h.T(map[bool]string{true: "End run", false: "End game"}[public.Mode == domain.ModeEndless])),
 			h.Div(h.Id("end-confirm"), h.Attr("hidden", ""), h.Class("end-confirm"),
-				h.Span(h.Class("muted"), h.T("End this game for everyone? Completed-trick scores remain; an unfinished trick and hand bonus will not score.")),
-				commandForm("end", "Confirm end game", "", false, "", public.Revision),
+				h.Span(h.Class("muted"), h.T(confirmText)),
+				commandForm("end", confirmLabel, "", false, "", public.Revision),
 				h.Button(h.Type("button"), h.Attr("data-action", "end-cancel"), h.T("Cancel")),
 			),
 		))
 	}
-	if public.Phase != domain.PhaseGameComplete {
+	if public.Phase != domain.PhaseGameComplete && public.Mode != domain.ModeEndless {
 		parts = append(parts, h.Div(h.Class("leave-room"),
 			h.Button(h.Type("button"), h.Attr("data-action", "leave-prompt"), h.T("Leave room")),
 			h.Div(h.Id("leave-confirm"), h.Attr("hidden", ""),
@@ -329,7 +401,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 				h.Button(h.Type("button"), h.Attr("data-action", "leave-room"), h.T("End match and leave")),
 				h.Button(h.Type("button"), h.Attr("data-action", "leave-cancel"), h.T("Cancel")))))
 	}
-	if public.Phase == domain.PhaseHandComplete || public.Phase == domain.PhaseGameComplete {
+	if public.Phase == domain.PhaseHandComplete || public.Phase == domain.PhaseAwaitingChoice || public.Phase == domain.PhaseGameComplete {
 		title := "Hand score breakdown"
 		if public.EndedEarly && public.CompletedHands < public.HandNumber {
 			title = "Completed trick score breakdown"

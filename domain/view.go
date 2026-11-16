@@ -11,33 +11,40 @@ type PublicSeat struct {
 }
 
 type PublicView struct {
-	Revision       uint64
-	Phase          Phase
-	HandSize       int
-	DealSize       int
-	TricksPerHand  int
-	MaxHands       int
-	RevealEvery    int
-	InitialRules   []RuleID
-	HandAwards     []HandAward
-	Seats          []PublicSeat
-	CurrentTrick   []Play
-	TrumpSuit      Suit
-	BrokenSpades   bool
-	BrokenHearts   bool
-	Dealer         SeatID
-	Leader         SeatID
-	Turn           SeatID
-	HandNumber     int
-	TrickNumber    int
-	CompletedHands int
-	EndedEarly     bool
-	EndedBy        SeatID
-	Rules          []ResolvedRule
-	ActiveField    []ResolvedRule
-	Effective      []EffectiveEffect
-	RulesRemaining int
-	Winners        []SeatID
+	Revision          uint64
+	Phase             Phase
+	Mode              MatchMode
+	Round             int
+	RoundHand         int
+	RoundLength       int
+	PendingBoundaryID string
+	DraftOptions      []RuleID
+	TableCue          string
+	HandSize          int
+	DealSize          int
+	TricksPerHand     int
+	MaxHands          int
+	RevealEvery       int
+	InitialRules      []RuleID
+	HandAwards        []HandAward
+	Seats             []PublicSeat
+	CurrentTrick      []Play
+	TrumpSuit         Suit
+	BrokenSpades      bool
+	BrokenHearts      bool
+	Dealer            SeatID
+	Leader            SeatID
+	Turn              SeatID
+	HandNumber        int
+	TrickNumber       int
+	CompletedHands    int
+	EndedEarly        bool
+	EndedBy           SeatID
+	Rules             []ResolvedRule
+	ActiveField       []ResolvedRule
+	Effective         []EffectiveEffect
+	RulesRemaining    int
+	Winners           []SeatID
 }
 
 type PlayerView struct {
@@ -63,7 +70,8 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 	if err := validateHandFacts(state, rules); err != nil {
 		return PublicView{}, transitionError(ErrInvalidState, err.Error())
 	}
-	view := PublicView{Revision: state.Revision, Phase: state.Phase, HandSize: state.Config.HandSize, DealSize: state.DealSize, TricksPerHand: state.TricksPerHand, MaxHands: state.Config.MaxHands, RevealEvery: state.Config.RevealEvery, InitialRules: append([]RuleID(nil), state.Config.InitialRules...), Dealer: state.Dealer, Leader: state.Leader,
+	length, _ := EndlessRound(state.Round)
+	view := PublicView{Revision: state.Revision, Phase: state.Phase, Mode: state.Config.Mode, Round: state.Round, RoundHand: state.RoundHand, RoundLength: length, PendingBoundaryID: state.PendingBoundaryID, DraftOptions: append([]RuleID(nil), state.DraftOptions...), TableCue: state.TableCue, HandSize: state.Config.HandSize, DealSize: state.DealSize, TricksPerHand: state.TricksPerHand, MaxHands: state.Config.MaxHands, RevealEvery: state.Config.RevealEvery, InitialRules: append([]RuleID(nil), state.Config.InitialRules...), Dealer: state.Dealer, Leader: state.Leader,
 		Turn: state.Turn, HandNumber: state.HandNumber, TrickNumber: state.TrickNumber, CompletedHands: state.CompletedHands,
 		EndedEarly: state.EndedEarly, EndedBy: state.EndedBy,
 		Rules: rules.History, ActiveField: rules.ActiveField, Effective: rules.Effective, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...), TrumpSuit: state.TrumpSuit, BrokenSpades: state.BrokenSpades, BrokenHearts: state.BrokenHearts,
@@ -71,7 +79,7 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 	if state.Phase == PhaseGameComplete {
 		view.Winners = gameWinners(state.Seats)
 	}
-	if state.Phase == PhaseHandComplete || state.Phase == PhaseGameComplete {
+	if state.Phase == PhaseHandComplete || state.Phase == PhaseAwaitingChoice || state.Phase == PhaseGameComplete {
 		view.HandAwards = append([]HandAward(nil), state.HandAwards...)
 		retained := make(map[CardID]bool, len(state.Retained))
 		for _, id := range state.Retained {

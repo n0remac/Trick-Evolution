@@ -2,7 +2,8 @@
 (() => {
   const live = document.getElementById('live');
   const connection = document.getElementById('connection');
-  let room = new URLSearchParams(location.search).get('room') || 'default';
+  const route = new URLSearchParams(location.search);
+  let room = route.get('room') || 'default';
   let session = null;
   let terminal = false;
   let leavePending = false;
@@ -199,12 +200,30 @@
   window.addEventListener('pagehide', () => table?.dispose());
 
   const key = () => `trick-evolution:${room}`;
+  const endlessKey = 'trick-evolution:endless';
   const notice = text => { document.getElementById('notice').textContent = text || ''; };
   const setConnection = online => {
     connected = online;
     connection.textContent = online ? 'Connected' : 'Offline';
     connection.classList.toggle('online', online);
   };
+
+  function activateSession(data, fresh = false, endless = false) {
+      room = data.room;
+      session = data;
+      terminal = false;
+      autoReviewPending = fresh && !endless;
+      sessionStorage.setItem(key(), session.token);
+      sessionStorage.setItem(`${key()}:name`, session.name);
+      if (endless) sessionStorage.setItem(endlessKey, JSON.stringify(session));
+      lastUpdate = 0;
+      lastSceneUpdate = 0;
+      resetPresentation();
+      notice('');
+      live.setAttribute('hx-ext', 'ws');
+      live.setAttribute('ws-connect', `/ws/game?room=${encodeURIComponent(room)}&token=${encodeURIComponent(session.token)}&format=html`);
+      htmx.process(live);
+  }
 
   async function join(name, token = '', bots = 0) {
     try {
@@ -214,23 +233,39 @@
       });
       if (!response.ok) {
         const message = (await response.text()).trim();
-        if (token && response.status === 410) sessionStorage.removeItem(key());
+        if (token && response.status === 410) {
+          sessionStorage.removeItem(key());
+          if (room.startsWith('endless-')) sessionStorage.removeItem(endlessKey);
+        }
         throw new Error(message || `Join failed (${response.status})`);
       }
-      session = await response.json();
-      terminal = false;
-      autoReviewPending = !token;
-      sessionStorage.setItem(key(), session.token);
-      sessionStorage.setItem(`${key()}:name`, session.name);
-      lastUpdate = 0;
-      lastSceneUpdate = 0;
-      resetPresentation();
-      notice('');
-      live.setAttribute('hx-ext', 'ws');
-      live.setAttribute('ws-connect', `/ws/game?room=${encodeURIComponent(room)}&token=${encodeURIComponent(session.token)}&format=html`);
-      htmx.process(live);
+      activateSession(await response.json(), !token);
     } catch (error) { notice(error.message); }
   }
+
+  document.getElementById('endless-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const name = form.elements.name.value.trim();
+    if (!name) { form.elements.name.focus(); return; }
+    const submit = form.querySelector('button[type=submit]');
+    submit.disabled = true;
+    try {
+      const saved = sessionStorage.getItem(endlessKey);
+      if (saved) {
+        const prior = JSON.parse(saved);
+        room = prior.room;
+        history.replaceState(null, '', '/game?endless=1');
+        await join(prior.name, prior.token);
+        return;
+      }
+      const response = await fetch('/game/endless', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})});
+      if (!response.ok) throw new Error((await response.text()).trim() || 'Could not start run.');
+      history.replaceState(null, '', '/game?endless=1');
+      activateSession(await response.json(), true, true);
+    } catch (error) { notice(error.message); }
+    finally { submit.disabled = false; }
+  });
 
   document.getElementById('join-form').addEventListener('submit', async event => {
     event.preventDefault();
@@ -259,6 +294,7 @@
       });
       if (!response.ok && response.status !== 410) throw new Error((await response.text()).trim() || 'Could not leave room.');
       sessionStorage.removeItem(key());
+      if (room.startsWith('endless-')) sessionStorage.removeItem(endlessKey);
       session = null;
       terminal = true;
       live.removeAttribute('ws-connect');
@@ -390,7 +426,12 @@
       reviewDialog.close();
     } else if (action === 'return-to-join') {
       sessionStorage.removeItem(key());
-      location.reload();
+      if (room.startsWith('endless-')) {
+        sessionStorage.removeItem(endlessKey);
+        location.href = '/game';
+      } else {
+        location.reload();
+      }
     } else if (action === 'leave-prompt' || action === 'leave-cancel') {
       const confirm = document.getElementById('leave-confirm');
       if (confirm) confirm.hidden = action !== 'leave-prompt';
@@ -455,6 +496,7 @@
     if (closure) {
       terminal = true;
       sessionStorage.removeItem(key());
+      if (room.startsWith('endless-')) sessionStorage.removeItem(endlessKey);
       session = null;
       live.removeAttribute('ws-connect');
       setConnection(false);
@@ -484,8 +526,22 @@
   });
 
   const form = document.getElementById('join-form');
+  const endlessForm = document.getElementById('endless-form');
   form.elements.name.value = sessionStorage.getItem(`${key()}:name`) || '';
+  endlessForm.elements.name.value = form.elements.name.value;
+  for (const [source, target] of [[form.elements.name, endlessForm.elements.name], [endlessForm.elements.name, form.elements.name]]) {
+    source.addEventListener('input', () => { target.value = source.value; });
+  }
   window.__trickUIReady = true;
-  const savedToken = sessionStorage.getItem(key());
-  if (savedToken) join(form.elements.name.value || 'Guest', savedToken);
+  const savedEndless = sessionStorage.getItem(endlessKey);
+  if (route.get('endless') === '1' && !route.has('room') && savedEndless) {
+    try {
+      const prior = JSON.parse(savedEndless);
+      room = prior.room;
+      join(prior.name, prior.token);
+    } catch (_) { sessionStorage.removeItem(endlessKey); }
+  } else {
+    const savedToken = sessionStorage.getItem(key());
+    if (savedToken) join(form.elements.name.value || 'Guest', savedToken);
+  }
 })();

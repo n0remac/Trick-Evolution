@@ -123,6 +123,8 @@ type command struct {
 	Type             string        `json:"type"`
 	ID               string        `json:"id"`
 	Card             domain.CardID `json:"card,omitempty"`
+	Rule             domain.RuleID `json:"rule,omitempty"`
+	BoundaryID       string        `json:"boundaryId,omitempty"`
 	Settings         string        `json:"settings,omitempty"`
 	ExpectedRevision *uint64       `json:"-"`
 }
@@ -237,6 +239,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /game/vendor/htmx-ext-ws-2.0.4.min.js", serveHTMXWS)
 	browser3d.Register(mux)
 	mux.HandleFunc("POST /game/join", s.join)
+	mux.HandleFunc("POST /game/endless", s.startEndless)
 	mux.HandleFunc("POST /game/leave", s.leave)
 	mux.HandleFunc("GET /ws/game", s.websocket)
 	return mux
@@ -579,6 +582,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	}
 	go c.writePump()
 	gameRoom.publish()
+	gameRoom.signalBot()
 	c.readPump()
 }
 
@@ -687,12 +691,14 @@ func decodeCommand(data []byte, html bool) (command, error) {
 	var cmd command
 	if html {
 		var envelope struct {
-			Type     string          `json:"type"`
-			ID       string          `json:"id"`
-			Card     domain.CardID   `json:"card"`
-			Settings string          `json:"settings"`
-			Revision string          `json:"revision"`
-			Headers  json.RawMessage `json:"HEADERS"`
+			Type       string          `json:"type"`
+			ID         string          `json:"id"`
+			Card       domain.CardID   `json:"card"`
+			Rule       domain.RuleID   `json:"rule"`
+			BoundaryID string          `json:"boundaryId"`
+			Settings   string          `json:"settings"`
+			Revision   string          `json:"revision"`
+			Headers    json.RawMessage `json:"HEADERS"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(data))
 		decoder.DisallowUnknownFields()
@@ -712,7 +718,7 @@ func decodeCommand(data []byte, html bool) (command, error) {
 		if err != nil {
 			return cmd, fmt.Errorf("invalid revision: %w", err)
 		}
-		cmd = command{Type: envelope.Type, ID: envelope.ID, Card: envelope.Card, Settings: envelope.Settings, ExpectedRevision: &revision}
+		cmd = command{Type: envelope.Type, ID: envelope.ID, Card: envelope.Card, Rule: envelope.Rule, BoundaryID: envelope.BoundaryID, Settings: envelope.Settings, ExpectedRevision: &revision}
 		return cmd, nil
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -803,7 +809,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 		c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: "stale_session", Message: "reconnect to continue"})
 		return
 	}
-	fingerprint := cmd.Type + ":" + string(cmd.Card) + ":" + cmd.Settings
+	fingerprint := cmd.Type + ":" + string(cmd.Card) + ":" + string(cmd.Rule) + ":" + cmd.BoundaryID + ":" + cmd.Settings
 	if existing, ok := r.seen[c.seat][cmd.ID]; ok {
 		r.mu.Unlock()
 		if existing.fingerprint != fingerprint {
@@ -937,6 +943,12 @@ func (r *room) handleCommand(c *client, cmd command) {
 			break
 		}
 		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionPlayCard, Seat: c.seat, Card: cmd.Card}, r.server.catalog)
+	case "choose_rule":
+		if r.state == nil {
+			err = errors.New("game has not started")
+			break
+		}
+		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionChooseRule, Seat: c.seat, Rule: cmd.Rule, BoundaryID: cmd.BoundaryID}, r.server.catalog)
 	case "next":
 		if r.state == nil {
 			err = errors.New("game has not started")
@@ -1000,7 +1012,11 @@ func (r *room) handleCommand(c *client, cmd command) {
 	r.mu.Unlock()
 	c.enqueue(serverMessage{Type: "ack", ID: cmd.ID, Revision: next.Revision})
 	if complete {
-		r.finishClosedLocked(true, "Game complete. Room closed.")
+		reason := "Game complete. Room closed."
+		if r.config.Mode == domain.ModeEndless {
+			reason = "Run ended. Room closed."
+		}
+		r.finishClosedLocked(true, reason)
 		return
 	}
 	r.publishLocked()
