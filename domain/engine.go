@@ -88,7 +88,9 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 	case ActionStartHand:
 		return stepStartHand(state, action, seatIndex, resolved)
 	case ActionEndGame:
-		return stepEndGame(state, action, seatIndex)
+		return stepEndGame(state, action, seatIndex, true)
+	case ActionLeaveGame:
+		return stepEndGame(state, action, seatIndex, false)
 	default:
 		return state, nil, transitionError(ErrUnknownAction, "action kind is not supported")
 	}
@@ -97,11 +99,11 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 // stepEndGame closes a started match at its current score. An unfinished
 // trick earns no point; its public plays and private hands remain in the
 // terminal snapshot for audit and reconnect.
-func stepEndGame(state MatchState, action Action, seatIndex int) (MatchState, []Event, error) {
+func stepEndGame(state MatchState, action Action, seatIndex int, hostOnly bool) (MatchState, []Event, error) {
 	if state.Phase != PhasePlayingTrick && state.Phase != PhaseHandComplete {
 		return state, nil, transitionError(ErrWrongPhase, "game is not active")
 	}
-	if seatIndex != 0 {
+	if hostOnly && seatIndex != 0 {
 		return state, nil, transitionError(ErrNotHost, "only the host may end the game")
 	}
 	next := cloneState(state)

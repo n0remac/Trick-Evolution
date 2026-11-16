@@ -168,30 +168,27 @@ func (r *runner) rulesSmoke() error {
 	if err != nil {
 		return err
 	}
-	if err := page.cdp.call(r.ctx, "Page.reload", map[string]any{}, nil); err != nil {
-		return err
-	}
-	if err := r.waitPage(page, "ended game reconnect", 20*time.Second, func(s uiState) bool {
-		return s.Revision == final.Revision && s.Winner == final.Winner && s.Connection == "Connected" && !s.ReviewOpen
+	if err := r.waitPage(page, "closed game result", 20*time.Second, func(s uiState) bool {
+		return s.Revision == final.Revision && s.Winner == final.Winner && s.Connection == "Offline" && !s.ReviewOpen
 	}); err != nil {
 		return err
 	}
 	if err := page.clickSelector(r.ctx, "#rules-open"); err != nil {
 		return err
 	}
-	var reconnectOK bool
-	const reconnect = `(() => {const dialog=document.getElementById('rules-review'),changes=document.getElementById('review-panel-changes').textContent,history=window.__trickPresentation().history;return dialog.open && dialog.querySelector('[data-review-tab="current"]').getAttribute('aria-selected')==='true' && changes.includes('No rule changes yet') && document.querySelector('#rules-review-content [data-action="review-close"]').textContent==='Back to game' && !history.some(x=>x.kind==='landing');})()`
-	if err := page.eval(r.ctx, reconnect, &reconnectOK); err != nil {
+	var finalReviewOK bool
+	const finalReview = `(() => {const dialog=document.getElementById('rules-review'),changes=document.getElementById('review-panel-changes').textContent;return dialog.open && dialog.querySelector('[data-review-tab="current"]').getAttribute('aria-selected')==='true' && changes.includes('No rule changes yet') && document.querySelector('#rules-review-content [data-action="review-close"]').textContent==='Back to game';})()`
+	if err := page.eval(r.ctx, finalReview, &finalReviewOK); err != nil {
 		return err
 	}
-	if !reconnectOK {
-		return fmt.Errorf("reconnect rules or presentation restoration incorrect")
+	if !finalReviewOK {
+		return fmt.Errorf("final rules review incorrect")
 	}
 	if err := r.closeReview(page); err != nil {
 		return err
 	}
 	r.result.Final = final
-	r.steps = append(r.steps, "portrait automatic preview kept revision zero; host reviewed and started; four zones and measured table space fit portrait, landscape and desktop; card details and rules remained accessible; a trick scored after close; ended-game reconnect restored current rules without replaying landing animation")
+	r.steps = append(r.steps, "portrait automatic preview kept revision zero; host reviewed and started; four zones and measured table space fit portrait, landscape and desktop; card details and rules remained accessible; a trick scored after close; final rules remained available after room closure")
 	return r.checkConsole()
 }
 

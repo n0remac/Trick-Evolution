@@ -18,11 +18,12 @@ With Chromium or Chrome installed, choose **one** browser mode for a run:
 
 ```sh
 scripts/test-release.sh --browser-smoke
+scripts/test-release.sh --browser-lifecycle-smoke
 scripts/test-release.sh --browser-bot-smoke
 scripts/test-release.sh --browser-full
 ```
 
-The fast smoke joins two isolated browser contexts and plays the first trick. The bot smoke joins alone, adds a bot from the lobby, scores a trick, ends the game from the UI, reloads the terminal state, and returns to join. The `3d-smoke` mode tests pointer selection, local motion, an accepted bot play, renderer reconciliation, resize and reconnect on a phone-size viewport. Full mode uses the actual UI to finish all ten hands, checks the rule reveals and scoreboard after every hand, and reloads the guest during hand 5 and after game completion. It has a 180-second overall bound; smoke modes have 45 seconds. All launch headless Chromium with background timer throttling disabled. Use `--browser-bin /path/to/chrome` or `BROWSER_BIN=/path/to/chrome` if auto-detection does not find the browser. Use `--artifacts DIR` to choose where reports and failure files go. The runner can also be invoked directly:
+The fast smoke joins two isolated browser contexts and plays the first trick. The lifecycle smoke continues with guest leave, final results, immediate code reuse, and host end in the reused room. The bot smoke joins alone, adds a bot from the lobby, scores a trick, ends the game from the UI, keeps the final result visible, and returns to join. The `3d-smoke` mode tests pointer selection, local motion, an accepted bot play, renderer reconciliation, resize and reconnect on a phone-size viewport. Full mode uses the actual UI to finish all ten hands, checks the rule reveals and scoreboard after every hand, and reloads the guest during hand 5. The full run has a 180-second overall bound; the lifecycle and rules smokes have 75 seconds; other smoke modes have 45 seconds. All launch headless Chromium with background timer throttling disabled. Use `--browser-bin /path/to/chrome` or `BROWSER_BIN=/path/to/chrome` if auto-detection does not find the browser. Use `--artifacts DIR` to choose where reports and failure files go. The runner can also be invoked directly:
 
 ```sh
 go run ./cmd/browser-e2e -mode full -browser /usr/bin/chromium
@@ -41,7 +42,7 @@ The optional `scripts/test-release.sh --race` runs the targeted concurrent-room 
 - Every hand conserves its dealt cards across private hands, visible plays, and public captured counts; exactly 50 tricks and 50 points are awarded in each match.
 - Scores total 50 points in each complete match. The public winners and final game event agree with the highest score; new evolution cards may change the old seeded score splits.
 - Public payloads and each opponent's payload omit all unplayed private cards at every revision.
-- A midgame reconnect restores the private hand; a completed-game reconnect restores the final state. Replayed action IDs do not advance the revision. Cross-room tokens and forged identity fields are refused. Play and next-hand commands are refused after game completion.
+- A midgame reconnect restores the private hand. Completion delivers each final result and a terminal closure, then releases the code. Old tokens and forged identity fields are refused after closure. Replayed action IDs do not advance the revision while the room remains active.
 
 The browser runner asserts ten hand boundaries, a shared evolving field after reveals at 3/6/9, score totals and winner text, and absence of JavaScript exceptions. Its separate smoke mode reaches one awarded trick. These checks exercise the real page and its WebSocket connection, rather than calling `domain.Step` directly.
 

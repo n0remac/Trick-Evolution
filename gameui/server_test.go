@@ -186,18 +186,19 @@ func TestLobbyAddBotAndHostEndGame(t *testing.T) {
 	if reflect.DeepEqual(finalA.View.Hand, finalB.View.Hand) {
 		t.Fatal("private hands crossed seats")
 	}
-	sendCommand(t, a, command{Type: "end", ID: "host-end"})
-	if got := readMessage(t, a, "ack"); got.Revision != 2 {
-		t.Fatalf("duplicate end not idempotent: %+v", got)
+	for _, conn := range []*websocket.Conn{a, b} {
+		if closed := readMessage(t, conn, "room_closed"); closed.Type != "room_closed" {
+			t.Fatal("missing terminal closure")
+		}
 	}
-	sendCommand(t, a, command{Type: "next", ID: "after-end"})
-	if got := readMessage(t, a, "error"); got.Revision != 2 {
-		t.Fatalf("post-end command advanced match: %+v", got)
+	s.mu.Lock()
+	_, exists := s.rooms["control"]
+	s.mu.Unlock()
+	if exists {
+		t.Fatal("ended room still registered")
 	}
-	reconnected := dialRoom(t, web.URL, host)
-	if snapshot := readRevision(t, reconnected, 2); snapshot.View == nil || !snapshot.View.Public.EndedEarly || snapshot.View.Public.EndedBy != host.Seat {
-		t.Fatalf("reconnect lost early end: %+v", snapshot)
-	}
+	joinRoom(t, web.URL, "control", "Old", host.Token, http.StatusGone)
+	joinRoom(t, web.URL, "control", "New", "", http.StatusOK)
 }
 
 func TestEndCancelsPendingBotTurn(t *testing.T) {
@@ -212,11 +213,11 @@ func TestEndCancelsPendingBotTurn(t *testing.T) {
 	sendCommand(t, conn, command{Type: "start", ID: "start"})
 	_ = readMessage(t, conn, "ack")
 	_ = readRevision(t, conn, 1)
+	r := s.rooms["stop-bot"]
 	sendCommand(t, conn, command{Type: "end", ID: "end"})
 	_ = readMessage(t, conn, "ack")
 	_ = readRevision(t, conn, 2)
 	time.Sleep(250 * time.Millisecond)
-	r := s.rooms["stop-bot"]
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.state.Revision != 2 || r.state.Phase != domain.PhaseGameComplete || r.ctx.Err() == nil {
@@ -548,6 +549,7 @@ func TestRoomSettingsSyncAuthAndFullMatch(t *testing.T) {
 	sendCommand(t, a, command{Type: "start", ID: "start"})
 	_ = readMessage(t, a, "ack")
 	states := []serverMessage{readRevision(t, a, 1), readRevision(t, b, 1)}
+	gameRoom := s.rooms["settings"]
 	for hand := 1; hand <= 10; hand++ {
 		plays := states[0].View.Public.TricksPerHand * 2
 		for play := 0; play < plays; play++ {
@@ -577,13 +579,11 @@ func TestRoomSettingsSyncAuthAndFullMatch(t *testing.T) {
 	if states[0].View.Public.Phase != domain.PhaseGameComplete || len(states[0].View.Public.InitialRules) != 4 {
 		t.Fatal("custom match did not complete")
 	}
-	sendCommand(t, a, command{Type: "configure", ID: "late", Settings: settings})
-	if got := readMessage(t, a, "error"); got.Code != "invalid_config" {
-		t.Fatalf("settings lock %+v", got)
-	}
-	s.rooms["settings"].mu.Lock()
-	actual := s.rooms["settings"].state
-	s.rooms["settings"].mu.Unlock()
+	_ = readMessage(t, a, "room_closed")
+	_ = readMessage(t, b, "room_closed")
+	gameRoom.mu.Lock()
+	actual := gameRoom.state
+	gameRoom.mu.Unlock()
 	if actual.Config.HandSize != 1 || actual.Config.RevealEvery != 1 || len(actual.Config.InitialRules) != 4 {
 		t.Fatal("canonical config lost")
 	}

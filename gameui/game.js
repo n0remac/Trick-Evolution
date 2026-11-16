@@ -4,6 +4,8 @@
   const connection = document.getElementById('connection');
   let room = new URLSearchParams(location.search).get('room') || 'default';
   let session = null;
+  let terminal = false;
+  let leavePending = false;
   let connected = false;
   let lastUpdate = 0;
   let lastSceneUpdate = 0;
@@ -212,10 +214,11 @@
       });
       if (!response.ok) {
         const message = (await response.text()).trim();
-        if (token) sessionStorage.removeItem(key());
+        if (token && response.status === 410) sessionStorage.removeItem(key());
         throw new Error(message || `Join failed (${response.status})`);
       }
       session = await response.json();
+      terminal = false;
       autoReviewPending = !token;
       sessionStorage.setItem(key(), session.token);
       sessionStorage.setItem(`${key()}:name`, session.name);
@@ -244,6 +247,25 @@
     try { await join(form.elements.name.value.trim(), '', Number(form.elements.bots.value)); }
     finally { submit.disabled = false; }
   });
+
+  async function leaveRoom() {
+    if (!session || leavePending) return;
+    leavePending = true;
+    const lobby = document.querySelector('#screen')?.dataset.kind === 'lobby';
+    try {
+      const response = await fetch('/game/leave', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({room: session.room, seat: session.seat, token: session.token})
+      });
+      if (!response.ok && response.status !== 410) throw new Error((await response.text()).trim() || 'Could not leave room.');
+      sessionStorage.removeItem(key());
+      session = null;
+      terminal = true;
+      live.removeAttribute('ws-connect');
+      if (lobby || response.status === 410) location.reload();
+    } catch (error) { notice(error.message); }
+    finally { leavePending = false; }
+  }
 
   const ruleDetails = document.getElementById('rule-details');
   ruleDetails.addEventListener('click', event => {
@@ -366,9 +388,14 @@
       openReview('start', 'starting', 'review-start');
     } else if (action === 'review-close') {
       reviewDialog.close();
-    } else if (action === 'leave') {
+    } else if (action === 'return-to-join') {
       sessionStorage.removeItem(key());
       location.reload();
+    } else if (action === 'leave-prompt' || action === 'leave-cancel') {
+      const confirm = document.getElementById('leave-confirm');
+      if (confirm) confirm.hidden = action !== 'leave-prompt';
+    } else if (action === 'leave-room') {
+      leaveRoom();
     } else if (action === 'end-confirm' || action === 'end-cancel') {
       const confirm = document.getElementById('end-confirm');
       if (confirm) confirm.hidden = action !== 'end-confirm';
@@ -391,10 +418,12 @@
   document.body.addEventListener('htmx:wsClose', event => {
     if (event.detail.elt !== live) return;
     setConnection(false);
+    if (terminal) return;
     resetPresentation();
     if (session) notice('Connection lost. Reconnecting…');
   });
   document.body.addEventListener('htmx:wsConfigSend', event => {
+    if (terminal || leavePending) { event.preventDefault(); return; }
     if (!connected) {
       event.preventDefault();
       notice('Waiting for connection…');
@@ -422,6 +451,15 @@
   });
   document.body.addEventListener('htmx:wsBeforeMessage', event => {
     const documentFragment = new DOMParser().parseFromString(event.detail.message, 'text/html');
+    const closure = documentFragment.querySelector('#room-closed[data-terminal]');
+    if (closure) {
+      terminal = true;
+      sessionStorage.removeItem(key());
+      session = null;
+      live.removeAttribute('ws-connect');
+      setConnection(false);
+      notice(closure.dataset.message || 'Room closed.');
+    }
     const errorText = documentFragment.querySelector('#notice')?.textContent?.trim();
     if (errorText && reviewDialog.open) {
       const feedback = document.getElementById('review-settings-feedback');

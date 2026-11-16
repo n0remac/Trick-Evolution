@@ -35,6 +35,7 @@ func pageNode(room string) *h.Node {
 				h.Span(h.Id("connection"), h.Class("connection"), h.T("Offline")),
 			),
 			h.Div(h.Id("notice"), h.Class("notice"), h.Role("status"), h.Attr("aria-live", "polite")),
+			h.Div(h.Id("room-closed"), h.Attr("hidden", "")),
 			h.Section(h.Id("table3d"), h.Class("table3d"), h.Attr("hidden", ""), h.Attr("aria-label", "3D card table"),
 				h.NewNode("canvas", []*h.Node{h.Id("table3d-canvas"), h.Attr("aria-label", "Your cards on a 3D table")}),
 				h.Div(h.Id("table3d-drop-hint"), h.Class("table3d-drop-hint"), h.T("Release here to play")),
@@ -137,6 +138,17 @@ func renderScreen(message serverMessage, seat domain.SeatID, catalog domain.Cata
 	return screen.Render() + review.Render() + noticeNode("").Render()
 }
 
+func renderClosure(message serverMessage) string {
+	marker := h.Div(h.Id("room-closed"), h.Attr("hidden", ""), h.Attr("data-terminal", "true"), h.Attr("data-message", message.Message), h.Attr("hx-swap-oob", "outerHTML"))
+	if message.Code != "lobby" {
+		return marker.Render()
+	}
+	screen := h.Section(h.Id("screen"), h.Attr("hx-swap-oob", "outerHTML"), h.Attr("data-kind", "closed"),
+		h.Section(h.Class("panel"), h.H2(h.T("Room closed")), h.P(h.T(message.Message)),
+			h.Button(h.Type("button"), h.Attr("data-action", "return-to-join"), h.T("Return to join"))))
+	return marker.Render() + screen.Render()
+}
+
 func lobbyPanel(message serverMessage, seat domain.SeatID) *h.Node {
 	tiles := make([]*h.Node, 0, len(message.Seats))
 	for _, p := range message.Seats {
@@ -164,6 +176,7 @@ func lobbyPanel(message serverMessage, seat domain.SeatID) *h.Node {
 	} else {
 		controls = append(controls, h.P(h.Class("muted"), h.T("Waiting for the host to start.")))
 	}
+	controls = append(controls, h.Button(h.Type("button"), h.Attr("data-action", "leave-room"), h.T("Leave room")))
 	return h.Section(h.Class("panel"),
 		h.H2(h.T("Room "+message.Room)),
 		h.P(h.Class("muted"), h.T("Invite friends with this page URL or add bots. Two to four seats can play.")),
@@ -295,7 +308,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		if public.EndedEarly {
 			results = append(results, h.P(h.Class("muted"), h.T("Scores include completed tricks and settled hands. An unfinished trick and its hand bonus do not score.")))
 		}
-		results = append(results, h.Button(h.Type("button"), h.Attr("data-action", "leave"), h.T("Return to join")))
+		results = append(results, h.Button(h.Type("button"), h.Attr("data-action", "return-to-join"), h.T("Return to join")))
 		parts = append(parts, h.Div(results...))
 	}
 	if len(message.Seats) > 0 && message.Seats[0].ID == seat && public.Phase != domain.PhaseGameComplete {
@@ -307,6 +320,14 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 				h.Button(h.Type("button"), h.Attr("data-action", "end-cancel"), h.T("Cancel")),
 			),
 		))
+	}
+	if public.Phase != domain.PhaseGameComplete {
+		parts = append(parts, h.Div(h.Class("leave-room"),
+			h.Button(h.Type("button"), h.Attr("data-action", "leave-prompt"), h.T("Leave room")),
+			h.Div(h.Id("leave-confirm"), h.Attr("hidden", ""),
+				h.P(h.T("Leaving ends this match for everyone. Completed scores will be final.")),
+				h.Button(h.Type("button"), h.Attr("data-action", "leave-room"), h.T("End match and leave")),
+				h.Button(h.Type("button"), h.Attr("data-action", "leave-cancel"), h.T("Cancel")))))
 	}
 	if public.Phase == domain.PhaseHandComplete || public.Phase == domain.PhaseGameComplete {
 		title := "Hand score breakdown"

@@ -114,15 +114,23 @@ func (r *room) runBots() {
 			}
 			r.recordPublicEventsLocked(r.state, events)
 			r.state = &next
+			complete := next.Phase == domain.PhaseGameComplete
+			if complete {
+				r.closeLocked()
+			}
 			r.lastEvents = events
 			r.lastActivity = r.server.now()
 			if r.server.botOptions.Mode == BotModeRollout {
 				log.Printf("bot decision room=%s revision=%d seat=%s card=%s seed=%d objective=%s samples=%d steps=%d reason=%s scores=%v", r.id, revision, seat, decision.Card, decision.Seed, r.server.botOptions.Budget.Objective, decision.CompletedSamples, decision.Steps, decision.Reason, decision.Scores)
 			}
 			r.mu.Unlock()
-			r.publishLocked()
+			if complete {
+				r.finishClosedLocked(true, "Game complete. Room closed.")
+			} else {
+				r.publishLocked()
+			}
 			r.dispatchMu.Unlock()
-			if next.Phase == domain.PhaseGameComplete {
+			if complete {
 				return
 			}
 		}

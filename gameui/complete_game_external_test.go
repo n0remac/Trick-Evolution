@@ -397,17 +397,24 @@ func TestCompleteGameBlackBox(t *testing.T) {
 			if len(finalEvents) == 0 || finalEvents[len(finalEvents)-1].Kind != domain.EventGameCompleted || !reflect.DeepEqual(finalEvents[len(finalEvents)-1].Winners, winners) {
 				t.Fatalf("final game event disagrees with winner projection: %+v", finalEvents)
 			}
-			if players == 2 {
-				f.reconnect(1)
-			}
-			for _, kind := range []string{"play", "next"} {
-				f.serial++
-				id := fmt.Sprintf("post-%d", f.serial)
-				f.write(0, map[string]any{"type": kind, "id": id, "card": "std:H:02"})
-				rejected := f.read(0, func(m matchMessage) bool { return m.Type == "error" && m.ID == id })
-				if rejected.Revision != f.revision || rejected.Code == "" {
-					t.Fatalf("post-game %s was accepted: %+v", kind, rejected)
+			for i := range f.peers {
+				closed := f.read(i, func(m matchMessage) bool { return m.Type == "room_closed" })
+				if closed.Type != "room_closed" {
+					t.Fatal("missing terminal closure")
 				}
+			}
+			body, _ := json.Marshal(map[string]string{"room": "complete", "name": "Old", "token": f.peers[0].session.Token})
+			response, err := matchHTTPClient.Post(f.base+"/game/join", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != http.StatusGone {
+				t.Fatalf("expired token returned %d", response.StatusCode)
+			}
+			fresh := f.join("complete", "New", "")
+			if fresh.Seat == f.peers[0].session.Seat {
+				t.Fatal("reused room kept old seat")
 			}
 		})
 	}

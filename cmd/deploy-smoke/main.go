@@ -35,7 +35,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "deploy smoke:", err)
 		os.Exit(1)
 	}
-	fmt.Println("HTTP health and two-client WebSocket start/reconnect passed")
+	fmt.Println("HTTP health, two-client WebSocket start/reconnect, closure, and code reuse passed")
 }
 
 func check(base, commit, connectIP string) error {
@@ -157,5 +157,41 @@ func check(base, commit, connectIP string) error {
 		return err
 	}
 	defer b.Close()
-	return read(b, "state", 1)
+	if err := read(b, "state", 1); err != nil {
+		return err
+	}
+	if err := a.WriteJSON(map[string]string{"type": "end", "id": "deploy-end"}); err != nil {
+		return err
+	}
+	for _, conn := range []*websocket.Conn{a, b} {
+		if err := read(conn, "state", 2); err != nil {
+			return err
+		}
+		if err := read(conn, "room_closed", 0); err != nil {
+			return err
+		}
+	}
+	oldBody, _ := json.Marshal(map[string]string{"room": room, "name": "Old", "token": host.Token})
+	old, err := client.Post(strings.TrimRight(base, "/")+"/game/join", "application/json", bytes.NewReader(oldBody))
+	if err != nil {
+		return err
+	}
+	old.Body.Close()
+	if old.StatusCode != http.StatusGone {
+		return fmt.Errorf("closed-room token returned HTTP %d", old.StatusCode)
+	}
+	fresh, err := join("Reuse check")
+	if err != nil {
+		return err
+	}
+	leaveBody, _ := json.Marshal(map[string]string{"room": room, "seat": fresh.Seat, "token": fresh.Token})
+	left, err := client.Post(strings.TrimRight(base, "/")+"/game/leave", "application/json", bytes.NewReader(leaveBody))
+	if err != nil {
+		return err
+	}
+	left.Body.Close()
+	if left.StatusCode != http.StatusOK {
+		return fmt.Errorf("temporary room cleanup returned HTTP %d", left.StatusCode)
+	}
+	return nil
 }

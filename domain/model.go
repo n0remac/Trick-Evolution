@@ -54,6 +54,7 @@ const (
 	ActionStartHand ActionKind = "start_hand"
 	ActionPlayCard  ActionKind = "play_card"
 	ActionEndGame   ActionKind = "end_game"
+	ActionLeaveGame ActionKind = "leave_game"
 )
 
 // Action is the future Step input. Seat is always supplied by a trusted adapter.

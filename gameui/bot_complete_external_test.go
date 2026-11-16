@@ -231,23 +231,12 @@ func TestBotCompleteGameBlackBox(t *testing.T) {
 					if total < 0 || !reflect.DeepEqual(message.View.Public.Winners, winners) {
 						t.Fatalf("bad final score/winners: %+v", message.View.Public)
 					}
-					_ = conn.Close()
-					join(host.Token, 0, http.StatusOK)
-					conn = dial()
-					final := read()
-					if final.Type != "state" || final.Revision != revision || !reflect.DeepEqual(*final.View, wantView) {
-						t.Fatal("completed match reconnect changed state")
+					if closed := read(); closed.Type != "room_closed" {
+						t.Fatalf("missing terminal closure: %+v", closed)
 					}
-					send("play", "std:H:02")
-					for {
-						rejected := read()
-						if rejected.Type == "error" {
-							if rejected.Revision != revision {
-								t.Fatal("post-game action advanced revision")
-							}
-							return
-						}
-					}
+					join(host.Token, 0, http.StatusGone)
+					join("", 0, http.StatusOK)
+					return
 				}
 				if expected.Phase == domain.PhaseHandComplete && expected.CompletedHands == 4 && !reconnected {
 					_ = conn.Close()

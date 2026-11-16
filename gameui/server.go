@@ -83,12 +83,17 @@ type acceptedCommand struct {
 
 type client struct {
 	conn     *websocket.Conn
-	send     chan []byte
+	send     chan outbound
 	done     chan struct{}
 	stopOnce sync.Once
 	room     *room
 	seat     domain.SeatID
 	html     bool
+}
+
+type outbound struct {
+	data     []byte
+	terminal bool
 }
 
 type seatSummary struct {
@@ -232,6 +237,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /game/vendor/htmx-ext-ws-2.0.4.min.js", serveHTMXWS)
 	browser3d.Register(mux)
 	mux.HandleFunc("POST /game/join", s.join)
+	mux.HandleFunc("POST /game/leave", s.leave)
 	mux.HandleFunc("GET /ws/game", s.websocket)
 	return mux
 }
@@ -279,6 +285,11 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	s.pruneLocked()
 	gameRoom := s.rooms[request.Room]
 	if gameRoom == nil {
+		if request.Token != "" {
+			s.mu.Unlock()
+			http.Error(w, "room is closed", http.StatusGone)
+			return
+		}
 		roomContext, cancel := context.WithCancel(context.Background())
 		gameRoom = &room{id: request.Room, config: s.config, clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand), lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{}), ctx: roomContext, cancel: cancel}
 		s.rooms[request.Room] = gameRoom
@@ -360,6 +371,112 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	gameRoom.publish()
 }
 
+// Leave is authenticated by the same room, seat and token returned by join.
+// dispatchMu serializes it with plays, bot moves and snapshots.
+func (s *Server) leave(w http.ResponseWriter, request *http.Request) {
+	request.Body = http.MaxBytesReader(w, request.Body, 1024)
+	var input struct {
+		Room  string        `json:"room"`
+		Seat  domain.SeatID `json:"seat"`
+		Token string        `json:"token"`
+	}
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF || !roomPattern.MatchString(input.Room) || input.Seat == "" || input.Token == "" {
+		http.Error(w, "invalid leave request", http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	gameRoom := s.rooms[input.Room]
+	s.mu.Unlock()
+	if gameRoom == nil {
+		http.Error(w, "room is closed", http.StatusGone)
+		return
+	}
+	gameRoom.dispatchMu.Lock()
+	defer gameRoom.dispatchMu.Unlock()
+	s.mu.Lock()
+	gameRoom.mu.Lock()
+	if s.rooms[input.Room] != gameRoom || gameRoom.closed {
+		gameRoom.mu.Unlock()
+		s.mu.Unlock()
+		http.Error(w, "room is closed", http.StatusGone)
+		return
+	}
+	index := -1
+	for i, seat := range gameRoom.seats {
+		if !seat.Bot && seat.ID == input.Seat && seat.Token == input.Token {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		gameRoom.mu.Unlock()
+		s.mu.Unlock()
+		http.Error(w, "invalid session", http.StatusUnauthorized)
+		return
+	}
+	departing := gameRoom.seats[index]
+	if gameRoom.state == nil && index > 0 {
+		client := gameRoom.clients[departing.ID]
+		delete(gameRoom.clients, departing.ID)
+		delete(gameRoom.seen, departing.ID)
+		gameRoom.seats = append(gameRoom.seats[:index], gameRoom.seats[index+1:]...)
+		gameRoom.lastActivity = s.now()
+		gameRoom.mu.Unlock()
+		s.mu.Unlock()
+		if client != nil {
+			client.enqueue(serverMessage{Type: "room_closed", Code: "lobby", Message: "You left the room."})
+		}
+		gameRoom.publishLocked()
+	} else {
+		if gameRoom.state != nil {
+			next, events, err := domain.Step(*gameRoom.state, domain.Action{Kind: domain.ActionLeaveGame, Seat: departing.ID}, s.catalog)
+			if err != nil {
+				gameRoom.mu.Unlock()
+				s.mu.Unlock()
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			gameRoom.recordPublicEventsLocked(gameRoom.state, events)
+			gameRoom.state, gameRoom.lastEvents = &next, events
+		}
+		gameRoom.closeLocked()
+		gameRoom.mu.Unlock()
+		s.mu.Unlock()
+		gameRoom.finishClosedLocked(gameRoom.state != nil, departing.Name+" left the room.")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, `{"accepted":true}`)
+}
+
+// The caller holds dispatchMu and has already marked the room closed under
+// room.mu. Registry removal uses server.mu -> room.mu, like join and prune.
+func (r *room) finishClosedLocked(final bool, reason string) {
+	r.server.mu.Lock()
+	r.mu.Lock()
+	if r.server.rooms[r.id] == r {
+		delete(r.server.rooms, r.id)
+	}
+	clients := make([]*client, 0, len(r.clients))
+	for _, c := range r.clients {
+		clients = append(clients, c)
+	}
+	r.mu.Unlock()
+	r.server.mu.Unlock()
+	if final {
+		r.publishSnapshotLocked(true)
+	}
+	code := "final"
+	if !final {
+		code = "lobby"
+	}
+	for _, c := range clients {
+		c.enqueue(serverMessage{Type: "room_closed", Room: r.id, Code: code, Message: reason})
+	}
+}
+
 func (s *Server) pruneLocked() {
 	for id, gameRoom := range s.rooms {
 		gameRoom.mu.Lock()
@@ -439,9 +556,16 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	c := &client{conn: conn, send: make(chan []byte, 16), done: make(chan struct{}), room: gameRoom, seat: seat, html: format == "html"}
+	c := &client{conn: conn, send: make(chan outbound, 16), done: make(chan struct{}), room: gameRoom, seat: seat, html: format == "html"}
 	gameRoom.mu.Lock()
-	if gameRoom.closed {
+	valid := false
+	for _, p := range gameRoom.seats {
+		if !p.Bot && p.ID == seat && p.Token == token {
+			valid = true
+			break
+		}
+	}
+	if gameRoom.closed || !valid {
 		gameRoom.mu.Unlock()
 		c.stop()
 		return
@@ -472,6 +596,8 @@ func (c *client) enqueue(message serverMessage) {
 			data = []byte(renderScreen(message, c.seat, c.room.server.catalog, config))
 		case "error":
 			data = []byte(noticeNode(message.Message).Render())
+		case "room_closed":
+			data = []byte(renderClosure(message))
 		default: // Acknowledgements have no visual update.
 			return
 		}
@@ -483,10 +609,23 @@ func (c *client) enqueue(message serverMessage) {
 			return
 		}
 	}
+	item := outbound{data: data, terminal: message.Type == "room_closed"}
+	final := message.Type == "state" && message.View != nil && message.View.Public.Phase == domain.PhaseGameComplete
+	if item.terminal || final {
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-c.done:
+		case c.send <- item:
+		case <-timer.C:
+			c.stop()
+		}
+		return
+	}
 	select {
 	case <-c.done:
 		return
-	case c.send <- data:
+	case c.send <- item:
 	default:
 		c.stop() // A slow client can rejoin; it cannot stall the room.
 	}
@@ -500,9 +639,13 @@ func (c *client) writePump() {
 		select {
 		case <-c.done:
 			return
-		case data := <-c.send:
+		case item := <-c.send:
 			_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			if err := c.conn.WriteMessage(websocket.TextMessage, item.data); err != nil {
+				return
+			}
+			if item.terminal {
+				_ = c.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "room closed"), time.Now().Add(5*time.Second))
 				return
 			}
 		case <-ticker.C:
@@ -585,12 +728,16 @@ func decodeCommand(data []byte, html bool) (command, error) {
 
 func (r *room) detach(c *client) {
 	r.mu.Lock()
+	changed := false
 	if r.clients[c.seat] == c {
 		delete(r.clients, c.seat)
+		changed = !r.closed
 	}
 	r.lastActivity = r.server.now()
 	r.mu.Unlock()
-	r.publish()
+	if changed {
+		r.publish()
+	}
 }
 
 func (r *room) publish() {
@@ -602,7 +749,15 @@ func (r *room) publish() {
 // publishLocked snapshots room data under its state lock and performs all
 // projection, JSON encoding, and network queueing after releasing that lock.
 func (r *room) publishLocked() {
+	r.publishSnapshotLocked(false)
+}
+
+func (r *room) publishSnapshotLocked(allowClosed bool) {
 	r.mu.Lock()
+	if r.closed && !allowClosed {
+		r.mu.Unlock()
+		return
+	}
 	r.sequence++
 	sequence := r.sequence
 	seats := make([]seatSummary, len(r.seats))
@@ -827,8 +982,9 @@ func (r *room) handleCommand(c *client, cmd command) {
 	}
 	r.recordPublicEventsLocked(r.state, events)
 	r.state = &next
-	if next.EndedEarly {
-		r.cancel()
+	complete := next.Phase == domain.PhaseGameComplete
+	if complete {
+		r.closeLocked()
 	}
 	r.lastEvents = events
 	r.lastActivity = r.server.now()
@@ -843,6 +999,10 @@ func (r *room) handleCommand(c *client, cmd command) {
 	r.seen[c.seat][cmd.ID] = acceptedCommand{fingerprint: fingerprint, revision: next.Revision}
 	r.mu.Unlock()
 	c.enqueue(serverMessage{Type: "ack", ID: cmd.ID, Revision: next.Revision})
+	if complete {
+		r.finishClosedLocked(true, "Game complete. Room closed.")
+		return
+	}
 	r.publishLocked()
 	if launchWorker {
 		go r.runBots()

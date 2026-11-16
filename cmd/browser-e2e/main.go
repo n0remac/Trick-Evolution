@@ -101,19 +101,19 @@ const stateExpression = `(() => {
 func main() { os.Exit(runMain()) }
 
 func runMain() int {
-	mode := flag.String("mode", "smoke", "smoke, rules-smoke, bot-smoke, 3d-smoke, or full")
+	mode := flag.String("mode", "smoke", "smoke, lifecycle-smoke, rules-smoke, bot-smoke, 3d-smoke, or full")
 	browserPath := flag.String("browser", "", "Chromium/Chrome executable (auto-detected if empty)")
 	artifactRoot := flag.String("artifacts", "artifacts/browser-e2e", "directory for run reports and failure artifacts")
 	timeLimit := flag.Duration("timeout", 0, "overall time bound (default: 45s smoke, 150s full)")
 	flag.Parse()
-	if *mode != "smoke" && *mode != "rules-smoke" && *mode != "bot-smoke" && *mode != "3d-smoke" && *mode != "full" {
-		fmt.Fprintln(os.Stderr, "-mode must be smoke, rules-smoke, bot-smoke, 3d-smoke, or full")
+	if *mode != "smoke" && *mode != "lifecycle-smoke" && *mode != "rules-smoke" && *mode != "bot-smoke" && *mode != "3d-smoke" && *mode != "full" {
+		fmt.Fprintln(os.Stderr, "-mode must be smoke, lifecycle-smoke, rules-smoke, bot-smoke, 3d-smoke, or full")
 		return 2
 	}
 	if *timeLimit == 0 {
 		if *mode == "full" {
 			*timeLimit = 180 * time.Second
-		} else if *mode == "rules-smoke" {
+		} else if *mode == "rules-smoke" || *mode == "lifecycle-smoke" {
 			*timeLimit = 75 * time.Second
 		} else {
 			*timeLimit = 45 * time.Second
@@ -219,7 +219,7 @@ func (r *runner) run(explicitBrowser string) error {
 	}
 	r.steps = append(r.steps, "two isolated browser contexts joined and received first private hands")
 	limit := 0
-	if r.mode == "smoke" {
+	if r.mode == "smoke" || r.mode == "lifecycle-smoke" {
 		limit = 3
 	}
 	if err := r.autoplay(limit); err != nil {
@@ -227,6 +227,12 @@ func (r *runner) run(explicitBrowser string) error {
 	}
 	if r.mode == "smoke" {
 		return r.smoke()
+	}
+	if r.mode == "lifecycle-smoke" {
+		if err := r.smoke(); err != nil {
+			return err
+		}
+		return r.lifecycleSmoke()
 	}
 	return r.full()
 }
@@ -314,11 +320,8 @@ func (r *runner) botSmoke() error {
 	if err != nil {
 		return err
 	}
-	if err := r.alice.cdp.call(r.ctx, "Page.reload", map[string]any{}, nil); err != nil {
-		return err
-	}
-	if err := r.waitPage(r.alice, "ended-game reload", 20*time.Second, func(s uiState) bool {
-		return s.Status == "Game ended by Alice" && s.Revision == final.Revision && s.Connection == "Connected"
+	if err := r.waitPage(r.alice, "closed room result", 10*time.Second, func(s uiState) bool {
+		return s.Status == "Game ended by Alice" && s.Revision == final.Revision && s.Connection == "Offline"
 	}); err != nil {
 		return err
 	}
@@ -331,7 +334,7 @@ func (r *runner) botSmoke() error {
 		return err
 	}
 	r.result.Final = final
-	r.steps = append(r.steps, "one browser added a bot from the lobby, scored a trick, ended the game, reloaded its final state, and returned to join")
+	r.steps = append(r.steps, "one browser added a bot, scored a trick, ended the game, kept its final result until Return to join")
 	return r.checkConsole()
 }
 
@@ -413,6 +416,61 @@ func (r *runner) smoke() error {
 	return r.checkConsole()
 }
 
+func (r *runner) lifecycleSmoke() error {
+	if err := r.bob.click(r.ctx, "Leave room"); err != nil {
+		return err
+	}
+	if err := r.bob.click(r.ctx, "End match and leave"); err != nil {
+		return err
+	}
+	if _, _, err := r.waitBoth("guest departure results", 15*time.Second, func(a, b uiState) bool {
+		return a.Status == "Game ended by Bob" && b.Status == a.Status && a.Winner != "" && a.Winner == b.Winner && totalPoints(a.Scores) == 1 && totalPoints(b.Scores) == 1 && a.Connection == "Offline" && b.Connection == "Offline"
+	}); err != nil {
+		return err
+	}
+	for _, page := range []*page{r.alice, r.bob} {
+		if err := page.click(r.ctx, "Return to join"); err != nil {
+			return err
+		}
+	}
+	if err := r.join(r.alice, "Alice"); err != nil {
+		return err
+	}
+	if err := r.join(r.bob, "Bob"); err != nil {
+		return err
+	}
+	if _, _, err := r.waitBoth("reused room lobby", 15*time.Second, func(a, b uiState) bool { return a.SeatTiles == 2 && b.SeatTiles == 2 }); err != nil {
+		return err
+	}
+	if err := r.closeReview(r.alice); err != nil {
+		return err
+	}
+	if err := r.closeReview(r.bob); err != nil {
+		return err
+	}
+	if err := r.startFromLobby(r.alice); err != nil {
+		return err
+	}
+	if _, _, err := r.waitBoth("reused room match", 15*time.Second, func(a, b uiState) bool { return a.Revision == 1 && b.Revision == 1 }); err != nil {
+		return err
+	}
+	if err := r.alice.click(r.ctx, "End game"); err != nil {
+		return err
+	}
+	if err := r.alice.click(r.ctx, "Confirm end game"); err != nil {
+		return err
+	}
+	a, _, err := r.waitBoth("host end results", 15*time.Second, func(a, b uiState) bool {
+		return a.Status == "Game ended by Alice" && b.Status == a.Status && a.Winner != "" && a.Winner == b.Winner && a.Connection == "Offline" && b.Connection == "Offline"
+	})
+	if err != nil {
+		return err
+	}
+	r.result.Final = a
+	r.steps = append(r.steps, "Bob left an active two-browser match; both saw final results; the code was reused; Alice ended the new match; both saw final results")
+	return r.checkConsole()
+}
+
 func (r *runner) full() error {
 	for hand := 1; hand <= 10; hand++ {
 		phase := "Hand complete"
@@ -464,15 +522,12 @@ func (r *runner) full() error {
 	if err := r.stopAutoplay(); err != nil {
 		return err
 	}
-	if err := r.bob.cdp.call(r.ctx, "Page.reload", map[string]any{}, nil); err != nil {
-		return err
-	}
-	if err := r.waitPage(r.bob, "completed-game reload", 25*time.Second, func(s uiState) bool {
-		return s.Status == "Game complete" && s.Revision == 110 && s.Winner == r.result.Final.Winner && s.Connection == "Connected"
+	if _, _, err := r.waitBoth("closed completed game", 15*time.Second, func(a, b uiState) bool {
+		return a.Status == "Game complete" && b.Status == a.Status && a.Connection == "Offline" && b.Connection == "Offline" && a.Winner == b.Winner
 	}); err != nil {
 		return err
 	}
-	r.steps = append(r.steps, "Bob reloaded after game completion and recovered final result")
+	r.steps = append(r.steps, "Both browsers retained final results after the completed room closed")
 	return r.checkConsole()
 }
 
