@@ -26,6 +26,7 @@ import (
 )
 
 const roomIdleTTL = 2 * time.Hour
+const automaticDealDelay = 2300 * time.Millisecond
 
 var roomPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 var actionPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
@@ -39,6 +40,7 @@ type Server struct {
 	config     domain.Config
 	shuffle    shuffleFactory
 	botDelay   time.Duration
+	dealDelay  time.Duration
 	botOptions BotOptions
 	now        func() time.Time
 	done       chan struct{}
@@ -74,6 +76,9 @@ type room struct {
 	closed         bool
 	workerStarted  bool
 	sequence       uint64 // Monotonic for lobby changes and same-revision reconnects.
+	dealReadyAt    time.Time
+	dealScheduled  uint64
+	pendingReview  domain.RuleID
 }
 
 type acceptedCommand struct {
@@ -115,6 +120,7 @@ type serverMessage struct {
 	View           *domain.PlayerView `json:"view,omitempty"`
 	Config         *domain.Config     `json:"config,omitempty"`
 	SettingsStatus string             `json:"settingsStatus,omitempty"`
+	ReviewRule     domain.RuleID      `json:"reviewRule,omitempty"`
 	Events         []domain.Event     `json:"events,omitempty"`
 	Sequence       uint64             `json:"-"`
 }
@@ -170,7 +176,7 @@ func NewServerWithBotOptions(config domain.Config, shuffle func() domain.Shuffle
 	if options.SeedFactory == nil {
 		options.SeedFactory = randomSeed
 	}
-	s := &Server{rooms: make(map[string]*room), catalog: catalog, config: config, shuffle: shuffle, botDelay: defaultBotDelay, botOptions: options, now: time.Now, done: make(chan struct{})}
+	s := &Server{rooms: make(map[string]*room), catalog: catalog, config: config, shuffle: shuffle, botDelay: defaultBotDelay, dealDelay: automaticDealDelay, botOptions: options, now: time.Now, done: make(chan struct{})}
 	go s.cleanupLoop()
 	return s, nil
 }
@@ -583,6 +589,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	go c.writePump()
 	gameRoom.publish()
 	gameRoom.signalBot()
+	gameRoom.scheduleAutomaticDeal()
 	c.readPump()
 }
 
@@ -777,10 +784,11 @@ func (r *room) publishSnapshotLocked(allowClosed bool) {
 	state := r.state
 	config := r.config
 	settingsStatus := r.settingsStatus
+	reviewRule := r.pendingReview
 	events := append([]domain.Event(nil), r.lastEvents...)
 	r.mu.Unlock()
 	for seat, c := range clients {
-		message := serverMessage{Room: r.id, Seats: seats, Sequence: sequence, Config: &config, SettingsStatus: settingsStatus}
+		message := serverMessage{Room: r.id, Seats: seats, Sequence: sequence, Config: &config, SettingsStatus: settingsStatus, ReviewRule: reviewRule}
 		if state == nil {
 			message.Type = "lobby"
 		} else {
@@ -911,6 +919,28 @@ func (r *room) handleCommand(c *client, cmd command) {
 		r.publishLocked()
 		return
 	}
+	if cmd.Type == "continue_rule" {
+		if r.state == nil || r.state.Phase != domain.PhaseHandComplete || r.pendingReview == "" || r.seats[0].ID != c.seat {
+			revision := uint64(0)
+			if r.state != nil {
+				revision = r.state.Revision
+			}
+			r.mu.Unlock()
+			c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: "wrong_phase", Message: "no rule review is pending", Revision: revision})
+			return
+		}
+		r.pendingReview = ""
+		revision := r.state.Revision
+		if r.seen[c.seat] == nil {
+			r.seen[c.seat] = make(map[string]acceptedCommand)
+		}
+		r.seen[c.seat][cmd.ID] = acceptedCommand{fingerprint: fingerprint, revision: revision}
+		r.mu.Unlock()
+		c.enqueue(serverMessage{Type: "ack", ID: cmd.ID, Revision: revision})
+		r.publishLocked()
+		r.scheduleAutomaticDeal()
+		return
+	}
 	var next domain.MatchState
 	var events []domain.Event
 	var err error
@@ -962,6 +992,10 @@ func (r *room) handleCommand(c *client, cmd command) {
 			err = errors.New("hand is not complete")
 			break
 		}
+		if r.pendingReview != "" {
+			err = errors.New("continue the rule review first")
+			break
+		}
 		deck := domain.StandardDeck()
 		r.server.shuffle().Shuffle(len(deck), func(i, j int) { deck[i], deck[j] = deck[j], deck[i] })
 		order := make([]domain.CardID, len(deck))
@@ -993,17 +1027,17 @@ func (r *room) handleCommand(c *client, cmd command) {
 		return
 	}
 	r.recordPublicEventsLocked(r.state, events)
-	if r.config.Mode == domain.ModeEndless && cmd.Type == "next" && len(next.Seats) != len(r.seats) {
-		participants := make([]participant, len(next.Seats))
-		participants[0] = r.seats[0]
-		for i := 1; i < len(next.Seats); i++ {
-			participants[i] = participant{ID: next.Seats[i].ID, Name: fmt.Sprintf("Bot %d", i), Bot: true}
-		}
-		r.seats = participants
+	r.markDealBoundaryLocked(events)
+	if cmd.Type == "choose_rule" && cmd.Rule != "" {
+		r.pendingReview = cmd.Rule
+	}
+	if cmd.Type == "next" {
+		r.syncEndlessRosterLocked(next)
 	}
 	r.state = &next
 	complete := next.Phase == domain.PhaseGameComplete
 	if complete {
+		r.pendingReview = ""
 		r.closeLocked()
 	}
 	r.lastEvents = events
@@ -1028,6 +1062,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 		return
 	}
 	r.publishLocked()
+	r.scheduleAutomaticDeal()
 	if launchWorker {
 		go r.runBots()
 	}

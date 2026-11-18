@@ -257,7 +257,7 @@ func TestPersistentTurnIndicatorUsesAuthoritativePhaseAndSeat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html, payload := render("alice"); !strings.Contains(html, `data-next="Deal the next hand"`) || payload.Seats[0].Turn || payload.Seats[1].Turn {
+	if html, payload := render("alice"); !strings.Contains(html, `data-next="Dealing next hand soon"`) || payload.Seats[0].Turn || payload.Seats[1].Turn {
 		t.Fatal("hand completion shows stale turn")
 	}
 	state, _, err = domain.Step(state, domain.Action{Kind: domain.ActionEndGame, Seat: "alice"}, catalog)

@@ -20,7 +20,6 @@
   let presenting = false;
   let presentationEpoch = 0;
   let restoring = true;
-  let pendingDeal = false;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const seenEvents = new Set();
   const presentationLog = [];
@@ -109,16 +108,9 @@
     form.requestSubmit(button);
   }
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-  function finishPendingDeal() {
-    if (!pendingDeal || presenting || sceneQueue.length || !connected) return;
-    pendingDeal = false;
-    const form = document.querySelector('#screen .next-hand form');
-    if (form) form.requestSubmit(form.querySelector('button'));
-  }
   async function drainScenes() {
     if (presenting || !table) return;
     presenting = true;
-    shell.classList.add('presentation-active');
     const epoch = presentationEpoch;
     try {
       while (sceneQueue.length && epoch === presentationEpoch) {
@@ -163,7 +155,7 @@
       }
     } catch (error) {
       fallbackTable(error);
-    } finally { if (epoch === presentationEpoch) { presenting = false; shell.classList.remove('presentation-active'); if (sceneQueue.length && table) drainScenes(); else finishPendingDeal(); } }
+    } finally { if (epoch === presentationEpoch) { presenting = false; if (sceneQueue.length && table) drainScenes(); } }
   }
   function fallbackTable(error) {
     table?.dispose(); table = null; runtimePromise = null;
@@ -179,8 +171,6 @@
     restoring = true;
     seenEvents.clear();
     submittedUpdate = 0;
-    pendingDeal = false;
-    shell.classList.remove('presentation-active');
     table?.cancel();
   }
   async function applyScene() {
@@ -519,11 +509,6 @@
     if (!connected) {
       event.preventDefault();
       notice('Waiting for connection…');
-      return;
-    }
-    if (event.target.closest?.('.next-hand') && (presenting || sceneQueue.length)) {
-      event.preventDefault();
-      pendingDeal = true;
       return;
     }
     if (event.target.id === 'review-settings-form') {

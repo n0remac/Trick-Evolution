@@ -496,9 +496,6 @@ func (r *runner) full() error {
 		if err := r.stopAutoplay(); err != nil {
 			return err
 		}
-		if err := r.alice.click(r.ctx, "Deal next hand"); err != nil {
-			return err
-		}
 		if _, _, err := r.waitBoth(fmt.Sprintf("hand %d deal", hand+1), 20*time.Second, func(a, b uiState) bool {
 			return a.Hand == hand+1 && b.Hand == hand+1 && a.Revision == wantRevision+1 && b.Revision == wantRevision+1 && a.HandCards == 5 && b.HandCards == 5
 		}); err != nil {

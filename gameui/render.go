@@ -238,9 +238,12 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			next = name(public.Turn) + " to play"
 		}
 	case domain.PhaseHandComplete:
-		next = "Waiting for " + name(public.Seats[0].ID) + " to deal"
-		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
-			next = "Deal the next hand"
+		next = "Dealing next hand soon"
+		if message.ReviewRule != "" {
+			next = "Waiting for " + name(public.Seats[0].ID) + " to continue"
+			if len(message.Seats) > 0 && message.Seats[0].ID == seat {
+				next = "Continue to the next hand"
+			}
 		}
 	case domain.PhaseAwaitingChoice:
 		next = "Choose a rule"
@@ -315,8 +318,17 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			}
 		}
 		parts = append(parts, h.Div(handStatus...))
-		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
-			parts = append(parts, h.Div(h.Class("next-hand"), commandForm("next", "Deal next hand", "", false, "", public.Revision)))
+		if message.ReviewRule != "" {
+			if definition, ok := catalog.Definition(message.ReviewRule); ok {
+				card := []*h.Node{h.Class("new-rule-review"), h.NewNode("strong", []*h.Node{h.Class("new-rule-title"), h.T(definition.Title)}), h.P(h.Class("new-rule-text"), h.T(definition.Text))}
+				contents := []*h.Node{h.Class("new-rule-overlay"), h.H2(h.T("A new rule is being added")), h.Div(card...)}
+				if len(message.Seats) > 0 && message.Seats[0].ID == seat {
+					contents = append(contents, commandForm("continue_rule", "Continue", "", false, "", public.Revision))
+				} else {
+					contents = append(contents, h.P(h.T("Waiting for the host to continue.")))
+				}
+				parts = append(parts, h.Div(contents...))
+			}
 		}
 	} else if public.Phase == domain.PhaseAwaitingChoice {
 		choices := []*h.Node{h.Class("draft-choices"), h.H2(h.T("Choose a rule for the next round"))}
