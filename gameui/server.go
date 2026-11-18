@@ -993,6 +993,14 @@ func (r *room) handleCommand(c *client, cmd command) {
 		return
 	}
 	r.recordPublicEventsLocked(r.state, events)
+	if r.config.Mode == domain.ModeEndless && cmd.Type == "next" && len(next.Seats) != len(r.seats) {
+		participants := make([]participant, len(next.Seats))
+		participants[0] = r.seats[0]
+		for i := 1; i < len(next.Seats); i++ {
+			participants[i] = participant{ID: next.Seats[i].ID, Name: fmt.Sprintf("Bot %d", i), Bot: true}
+		}
+		r.seats = participants
+	}
 	r.state = &next
 	complete := next.Phase == domain.PhaseGameComplete
 	if complete {

@@ -82,6 +82,7 @@ type Play struct {
 
 type Config struct {
 	Mode         MatchMode
+	OpenRounds   int // Open rounds between Endless short games; zero uses the playtest default.
 	HandSize     int
 	RevealEvery  int      // Completed hands between rule reveals.
 	MaxHands     int      // The match ends after this many completed hands.
@@ -95,11 +96,16 @@ const (
 	ModeEndless MatchMode = "endless"
 )
 
-func DefaultConfig() Config { return Config{HandSize: 5, RevealEvery: 3, MaxHands: 10} }
+func DefaultConfig() Config {
+	return Config{HandSize: 5, RevealEvery: 3, MaxHands: 10, OpenRounds: defaultOpenRounds}
+}
 
 func (c Config) Validate(seatCount int) error {
 	if c.Mode != ModeFinite && c.Mode != ModeEndless {
 		return fmt.Errorf("unknown match mode %q", c.Mode)
+	}
+	if c.OpenRounds < 0 || c.OpenRounds > 100 {
+		return fmt.Errorf("open rounds must be between 1 and 100, or zero for the default")
 	}
 	if seatCount < 2 || seatCount > 4 {
 		return fmt.Errorf("seat count must be 2 through 4")
@@ -164,7 +170,18 @@ type MatchState struct {
 	PendingBoundaryID string
 	DraftOptions      []RuleID
 	TableCue          string
+	RunScores         map[SeatID]int // Includes bots temporarily outside the active roster.
+	ShortGameRound    int            // 1 through 3 while a short game is active.
+	ShortGameNumber   int
+	ShortGameScores   map[SeatID]int
+	ShortGameResult   *ShortGameResult
 	Shuffles          []ShuffleRecord
+}
+
+type ShortGameResult struct {
+	Number  int
+	Scores  map[SeatID]int
+	Winners []SeatID
 }
 
 // ShuffleSource is injected only at setup. Callers can supply a seeded source
@@ -365,6 +382,10 @@ func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, r
 	if cfg.Mode == ModeEndless {
 		s.Round, s.RoundHand = 1, 1
 		s.TableCue = "The first round lasts three hands."
+		s.RunScores = make(map[SeatID]int, len(ids))
+		for _, id := range ids {
+			s.RunScores[id] = 0
+		}
 	}
 	return s
 }

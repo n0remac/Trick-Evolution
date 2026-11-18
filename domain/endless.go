@@ -2,6 +2,86 @@ package domain
 
 import "fmt"
 
+const (
+	defaultOpenRounds = 3
+	shortGameRounds   = 3
+)
+
+func openRounds(config Config) int {
+	if config.OpenRounds > 0 {
+		return config.OpenRounds
+	}
+	return defaultOpenRounds
+}
+
+func endlessCyclePosition(round int, config Config) int {
+	return (round-1)%(openRounds(config)+shortGameRounds) + 1
+}
+
+func lastOpenRound(state MatchState) bool {
+	return endlessCyclePosition(state.Round, state.Config) == openRounds(state.Config)
+}
+
+func endlessCue(state MatchState, cue string) string {
+	if lastOpenRound(state) {
+		return "A three-round game starts after this round. " + cue
+	}
+	return cue
+}
+
+// The first three open rounds grow from one to three bots. The roster then
+// stays fixed for all three rounds of the short game and repeats.
+func endlessRosterSize(round int, config Config) int {
+	position := endlessCyclePosition(round, config)
+	if position > openRounds(config) {
+		position = openRounds(config)
+	}
+	if position > 3 {
+		position = 3
+	}
+	return position + 1
+}
+
+func endlessNextRoster(state MatchState, rules RuleResolution) ([]Seat, bool) {
+	if state.Config.Mode != ModeEndless || state.RoundHand != 0 {
+		return nil, false
+	}
+	count := endlessRosterSize(state.Round, state.Config)
+	if count == len(state.Seats) {
+		return nil, false
+	}
+	if _, err := HandPlanForRules(state.Config, count, rules); err != nil {
+		return nil, false
+	}
+	seats := make([]Seat, count)
+	seats[0] = state.Seats[0]
+	for i := 1; i < count; i++ {
+		id := SeatID(fmt.Sprintf("bot:%d", i))
+		seats[i] = Seat{ID: id, Score: state.RunScores[id]}
+	}
+	return seats, true
+}
+
+func finishShortGame(state *MatchState) {
+	best := -1
+	var winners []SeatID
+	for _, seat := range state.Seats {
+		score := state.ShortGameScores[seat.ID]
+		if score > best {
+			best, winners = score, []SeatID{seat.ID}
+		} else if score == best {
+			winners = append(winners, seat.ID)
+		}
+	}
+	scores := make(map[SeatID]int, len(state.ShortGameScores))
+	for id, points := range state.ShortGameScores {
+		scores[id] = points
+	}
+	state.ShortGameResult = &ShortGameResult{Number: state.ShortGameNumber, Scores: scores, Winners: winners}
+	state.ShortGameRound = 0
+	state.ShortGameScores = nil
+}
+
 // EndlessRound returns the number of complete hands and boundary event for a round.
 // The late cadence is deliberately deterministic so a run can be replayed.
 func EndlessRound(round int) (int, string) {
@@ -157,11 +237,26 @@ func retireEndlessRule(state *MatchState, catalog Catalog) (RuleID, bool) {
 func settleEndlessBoundary(state *MatchState, catalog Catalog) error {
 	length, _ := EndlessRound(state.Round)
 	if state.RoundHand < length {
-		state.TableCue = fmt.Sprintf("Round %d: %d hand(s) until the next round.", state.Round, length-state.RoundHand)
+		state.TableCue = endlessCue(*state, fmt.Sprintf("Round %d: %d hand(s) until the next round.", state.Round, length-state.RoundHand))
 		return nil
+	}
+	if state.ShortGameRound == shortGameRounds {
+		finishShortGame(state)
 	}
 	state.Round++
 	state.RoundHand = 0
+	position := endlessCyclePosition(state.Round, state.Config)
+	if position == openRounds(state.Config)+1 {
+		state.ShortGameNumber++
+		state.ShortGameRound = 1
+		state.ShortGameScores = make(map[SeatID]int, len(state.Seats))
+		for _, seat := range state.Seats {
+			state.ShortGameScores[seat.ID] = 0
+		}
+		state.ShortGameResult = nil
+	} else if state.ShortGameRound > 0 {
+		state.ShortGameRound++
+	}
 	state.PendingBoundaryID = ""
 	state.DraftOptions = nil
 	_, event := EndlessRound(state.Round)
@@ -171,7 +266,7 @@ func settleEndlessBoundary(state *MatchState, catalog Catalog) error {
 		if len(state.DraftOptions) > 0 {
 			state.PendingBoundaryID = fmt.Sprintf("round:%d:after:%d", state.Round, state.CompletedHands)
 			state.Phase = PhaseAwaitingChoice
-			state.TableCue = fmt.Sprintf("Round %d: choose a rule or keep the field.", state.Round)
+			state.TableCue = endlessCue(*state, fmt.Sprintf("Round %d: choose a rule or keep the field.", state.Round))
 			return nil
 		}
 		state.TableCue = fmt.Sprintf("Round %d: no eligible change; rules stay the same.", state.Round)
@@ -179,7 +274,7 @@ func settleEndlessBoundary(state *MatchState, catalog Catalog) error {
 		for _, id := range state.RuleDraw {
 			if applyEndlessRule(state, catalog, id) {
 				definition, _ := catalog.Definition(id)
-				state.TableCue = "The table added " + definition.Title + "."
+				state.TableCue = endlessCue(*state, "The table added "+definition.Title+".")
 				return nil
 			}
 		}
@@ -192,6 +287,7 @@ func settleEndlessBoundary(state *MatchState, catalog Catalog) error {
 	case "hold":
 		state.TableCue = fmt.Sprintf("Round %d: rules stay the same.", state.Round)
 	}
+	state.TableCue = endlessCue(*state, state.TableCue)
 	return nil
 }
 
@@ -215,9 +311,9 @@ func stepChooseRule(state MatchState, action Action, seatIndex int, catalog Cata
 			return state, nil, transitionError(ErrInvalidState, "rule is not an eligible choice")
 		}
 		definition, _ := catalog.Definition(action.Rule)
-		next.TableCue = "You chose " + definition.Title + "."
+		next.TableCue = endlessCue(next, "You chose "+definition.Title+".")
 	} else {
-		next.TableCue = "You kept the current rules."
+		next.TableCue = endlessCue(next, "You kept the current rules.")
 	}
 	next.PendingBoundaryID, next.DraftOptions = "", nil
 	next.Phase = PhaseHandComplete

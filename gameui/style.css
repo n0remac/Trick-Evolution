@@ -97,6 +97,9 @@ h2 { margin: 0 0 .75rem; }
 .hand-plan:empty { display: none; }
 .run-scores { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .25rem .75rem; font-size: .74rem; text-align: center; }
 .run-scores strong { color: #ffe09a; }
+.short-game-scores { color: #f8e6bd; }
+.short-game-result { margin: .4rem auto; padding: .65rem .8rem; max-width: 38rem; border: 1px solid #e8c46a; border-radius: .65rem; background: #3b351f; color: #fff0bd; text-align: center; }
+.short-game-result p { margin: .3rem 0 0; }
 .round-cue { margin: 0; color: #ffe09a; font-size: .78rem; text-align: center; }
 .rule-field {
   display: flex; flex-wrap: nowrap; align-items: stretch; gap: .25rem;

@@ -73,12 +73,13 @@ func TestEndlessCadenceScoreAndOnceOnlyDraft(t *testing.T) {
 	if state.Phase == PhaseGameComplete || state.HandNumber != 12 || drafts < 2 || tables < 1 || holds < 1 {
 		t.Fatalf("progression: hands=%d drafts=%d tables=%d holds=%d phase=%s", state.CompletedHands, drafts, tables, holds, state.Phase)
 	}
-	total := 0
 	for _, seat := range state.Seats {
-		total += seat.Score
+		if seat.Score != state.RunScores[seat.ID] {
+			t.Fatalf("run score for %s lost at roster change", seat.ID)
+		}
 	}
-	if total != 67 {
-		t.Fatalf("banked score = %d, want 67", total)
+	if state.ShortGameResult == nil || state.ShortGameResult.Number != 1 || state.ShortGameRound != 0 {
+		t.Fatalf("missing short-game result: %+v", state.ShortGameResult)
 	}
 }
 
@@ -121,7 +122,7 @@ func TestEndlessCandidatesKeepLegalFieldAndDependencies(t *testing.T) {
 	}
 }
 
-func TestEndlessKeepOneCarryAcrossDraft(t *testing.T) {
+func TestEndlessKeepOneResetsAtRosterChange(t *testing.T) {
 	catalog := DefaultCatalog()
 	cfg := DefaultConfig()
 	cfg.Mode, cfg.HandSize, cfg.InitialRules = ModeEndless, 3, []RuleID{RuleKeepOne}
@@ -154,13 +155,127 @@ func TestEndlessKeepOneCarryAcrossDraft(t *testing.T) {
 	if state.Phase != PhaseAwaitingChoice {
 		t.Fatal("third hand did not wait for draft")
 	}
-	prior := state.Retained["human"]
 	state, _, err = Step(state, Action{Kind: ActionChooseRule, Seat: "human", Rule: RuleLastTrickBonus, BoundaryID: state.PendingBoundaryID}, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
 	state, _, err = Step(state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()}, catalog)
-	if err != nil || state.Carried["human"] != prior || state.DealSize != 3 || state.TricksPerHand != 2 {
-		t.Fatalf("carry across draft: %+v, %v", state.Carried, err)
+	if err != nil || len(state.Seats) != 3 || len(state.Carried) != 0 || len(state.Retained) != 0 || state.DealSize != 3 || state.TricksPerHand != 2 {
+		t.Fatalf("fresh roster deal: seats=%d carry=%+v, %v", len(state.Seats), state.Carried, err)
+	}
+	for _, seat := range state.Seats {
+		if len(state.Hands[seat.ID]) != 3 {
+			t.Fatalf("%s did not get a full fresh deal", seat.ID)
+		}
+	}
+}
+
+func TestEndlessShortGameTimelineAndScores(t *testing.T) {
+	catalog := DefaultCatalog()
+	cfg := DefaultConfig()
+	cfg.Mode, cfg.HandSize = ModeEndless, 3
+	state, err := NewMatch([]SeatID{"human", "bot:1"}, cfg, catalog, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gameStart map[SeatID]int
+	seenNotice, seenResult := false, false
+	for state.Round < 7 || state.Round == 7 && state.RoundHand == 0 {
+		if state.Round == 3 {
+			if !strings.Contains(state.TableCue, "A three-round game starts after this round") {
+				t.Fatal("last open round lost announcement")
+			}
+			seenNotice = true
+		}
+		if state.Round >= 4 && state.Round <= 6 {
+			if len(state.Seats) != 4 && state.RoundHand > 0 {
+				t.Fatalf("short game roster changed: round %d seats %d", state.Round, len(state.Seats))
+			}
+			if state.ShortGameRound != state.Round-3 {
+				t.Fatalf("short game progress %d in round %d", state.ShortGameRound, state.Round)
+			}
+			if gameStart == nil {
+				gameStart = make(map[SeatID]int)
+				for id, score := range state.RunScores {
+					gameStart[id] = score
+				}
+			}
+		}
+		switch state.Phase {
+		case PhasePlayingTrick:
+			state = handAction(t, state, Action{Kind: ActionPlayCard, Seat: state.Turn, Card: legalCard(state, catalog)})
+		case PhaseAwaitingChoice:
+			state = handAction(t, state, Action{Kind: ActionChooseRule, Seat: "human", BoundaryID: state.PendingBoundaryID})
+		case PhaseHandComplete:
+			state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
+			switch state.Round {
+			case 2:
+				if len(state.Seats) != 3 {
+					t.Fatal("round 2 must have three seats")
+				}
+			case 3:
+				if len(state.Seats) != 4 {
+					t.Fatal("round 3 must have four seats")
+				}
+			}
+		default:
+			t.Fatalf("unexpected phase %s", state.Phase)
+		}
+		if state.Round == 7 && state.ShortGameResult != nil {
+			seenResult = true
+		}
+	}
+	if !seenNotice || !seenResult || state.ShortGameResult == nil || state.ShortGameResult.Number != 1 {
+		t.Fatal("timeline did not reach short-game result")
+	}
+	result := state.ShortGameResult
+	for id, points := range result.Scores {
+		if points != state.RunScores[id]-gameStart[id] {
+			t.Fatalf("game points for %s = %d, run delta %d", id, points, state.RunScores[id]-gameStart[id])
+		}
+	}
+	best := -1
+	for _, points := range result.Scores {
+		if points > best {
+			best = points
+		}
+	}
+	for _, id := range result.Winners {
+		if result.Scores[id] != best {
+			t.Fatalf("nonwinner %s reported as winner", id)
+		}
+	}
+	if len(state.Seats) != 2 || state.ShortGameResult == nil || state.ShortGameRound != 0 || !strings.Contains(state.TableCue, "fresh deal") {
+		t.Fatalf("result or open play lost: %+v", state)
+	}
+	for _, seat := range state.Seats {
+		if seat.Score != state.RunScores[seat.ID] {
+			t.Fatal("run score lost after roster reduction")
+		}
+	}
+}
+
+func TestEndlessIllegalRosterChangeKeepsCurrentSeats(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode, cfg.HandSize = ModeEndless, 18
+	state, err := NewMatch([]SeatID{"human", "bot:1"}, cfg, DefaultCatalog(), identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for state.Round == 1 {
+		if state.Phase == PhasePlayingTrick {
+			state = finishHand(t, state)
+		} else if state.Phase == PhaseHandComplete {
+			state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
+		} else {
+			t.Fatalf("phase %s", state.Phase)
+		}
+	}
+	if state.Phase == PhaseAwaitingChoice {
+		state = handAction(t, state, Action{Kind: ActionChooseRule, Seat: "human", BoundaryID: state.PendingBoundaryID})
+	}
+	state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
+	if len(state.Seats) != 2 || state.DealSize != 18 {
+		t.Fatal("illegal three-seat deal changed roster")
 	}
 }

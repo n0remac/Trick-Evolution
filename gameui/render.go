@@ -297,17 +297,53 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		if public.Phase == domain.PhasePlayingTrick {
 			_, event := domain.EndlessRound(public.Round + 1)
 			action := map[string]string{"draft": "Your rule draft", "table": "The table changes a rule", "hold": "The rules hold"}[event]
-			cue = fmt.Sprintf("%s in %d hand(s).", action, countdown+1)
+			cue += fmt.Sprintf(" %s in %d hand(s).", action, countdown+1)
 		}
 		handInRound := public.RoundHand
 		if handInRound == 0 {
 			handInRound = 1
 		}
-		scores := []*h.Node{h.Class("run-scores"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Endless Mode · Round %d · Hand %d/%d", public.Round, handInRound, public.RoundLength))})}
-		for _, player := range public.Seats {
-			scores = append(scores, h.Span(h.T(fmt.Sprintf("%s: %d", name(player.ID), player.Score))))
+		scores := []*h.Node{h.Class("run-scores"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Endless Mode · Round %d · Hand %d/%d · Run Score", public.Round, handInRound, public.RoundLength))})}
+		ids := []domain.SeatID{public.Seats[0].ID, "bot:1", "bot:2", "bot:3"}
+		for _, id := range ids {
+			if score, ok := public.RunScores[id]; ok {
+				label := name(id)
+				if strings.HasPrefix(string(id), "bot:") && label == string(id) {
+					label = "Bot " + strings.TrimPrefix(string(id), "bot:")
+				}
+				scores = append(scores, h.Span(h.T(fmt.Sprintf("%s: %d", label, score))))
+			}
 		}
-		hud = append(hud, h.Div(scores...), h.P(h.Class("round-cue"), h.T(cue)))
+		hud = append(hud, h.Div(scores...))
+		if public.ShortGameRound > 0 {
+			gameScores := []*h.Node{h.Class("run-scores short-game-scores"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Three-round game %d · Round %d/3 · Game Score", public.ShortGameNumber, public.ShortGameRound))})}
+			for _, player := range public.Seats {
+				gameScores = append(gameScores, h.Span(h.T(fmt.Sprintf("%s: %d", name(player.ID), public.ShortGameScores[player.ID]))))
+			}
+			hud = append(hud, h.Div(gameScores...))
+		}
+		if result := public.ShortGameResult; result != nil {
+			winners := make([]string, 0, len(result.Winners))
+			for _, id := range result.Winners {
+				winners = append(winners, name(id))
+			}
+			label := "Winner: "
+			if len(winners) > 1 {
+				label = "Tie: "
+			}
+			resultScores := make([]string, 0, len(result.Scores))
+			for _, id := range []domain.SeatID{public.Seats[0].ID, "bot:1", "bot:2", "bot:3"} {
+				if score, ok := result.Scores[id]; ok {
+					playerName := name(id)
+					if strings.HasPrefix(string(id), "bot:") && playerName == string(id) {
+						playerName = "Bot " + strings.TrimPrefix(string(id), "bot:")
+					}
+					resultScores = append(resultScores, fmt.Sprintf("%s %d", playerName, score))
+				}
+			}
+			hud = append(hud, h.Div(h.Class("short-game-result"), h.Role("status"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Three-round game %d complete · %s%s", result.Number, label, strings.Join(winners, " and ")))}), h.P(h.T(strings.Join(resultScores, " · ")))))
+		}
+		hud = append(hud, h.P(h.Class("round-cue"), h.T(cue)))
 	}
 	hud = append(hud, rules)
 	parts := []*h.Node{h.Class("game-panel"), h.Attr("data-hand", fmt.Sprint(public.HandNumber)), h.Div(hud...)}
@@ -324,8 +360,11 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		parts = append(parts, h.Div(append([]*h.Node{h.Class("play-commands"), h.Attr("hidden", "")}, cards...)...))
 	} else if public.Phase == domain.PhaseHandComplete {
 		handStatus := []*h.Node{h.Class("status hand-status"), h.P(h.T("Hand complete"))}
-		if view.Retained != "" {
+		if view.Retained != "" && public.NextRosterSize == 0 {
 			handStatus = append(handStatus, h.P(h.T("Your unplayed "+cardLabel(view.Retained)+" stays in your next hand. Each player receives one fewer new card.")))
+		}
+		if public.NextRosterSize > 0 {
+			handStatus = append(handStatus, h.P(h.T(fmt.Sprintf("Next round: %d players. Everyone gets a fresh deal; carried cards reset.", public.NextRosterSize))))
 		}
 		if resolved, err := domain.EffectiveForView(public, catalog); err == nil {
 			cfg := domain.Config{HandSize: public.HandSize, RevealEvery: public.RevealEvery, MaxHands: public.MaxHands}

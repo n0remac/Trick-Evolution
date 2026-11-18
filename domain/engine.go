@@ -131,6 +131,14 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	if len(state.CurrentTrick) != 0 {
 		return state, nil, transitionError(ErrInvalidState, "unfinished trick")
 	}
+	rosterChanged := false
+	if seats, ok := endlessNextRoster(state, resolved); ok {
+		state = cloneState(state)
+		state.Seats = seats
+		state.Hands = make(map[SeatID][]CardID, len(seats))
+		state.Retained, state.Carried = nil, nil
+		rosterChanged = true
+	}
 	carry := make(map[SeatID]CardID, len(state.Retained))
 	if len(state.Retained) != 0 && len(state.Retained) != len(state.Seats) {
 		return state, nil, transitionError(ErrInvalidState, "retained card count is incomplete")
@@ -222,6 +230,9 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	}
 	next.StandardDraw = append([]CardID(nil), filtered[newCards*len(next.Seats):]...)
 	next.Shuffles = append(next.Shuffles, ShuffleRecord{Kind: StandardDeckKind, Order: order})
+	if rosterChanged {
+		next.TableCue = endlessCue(next, fmt.Sprintf("The table now has %d players. Everyone received a fresh deal.", len(next.Seats)))
+	}
 	return next, []Event{{Kind: EventHandStarted, Revision: next.Revision, Hand: next.HandNumber, Seat: next.Leader}}, nil
 }
 
@@ -324,6 +335,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	next.CurrentTrick = nil
 	next.Leader, next.Turn = winner, winner
 	if next.TrickNumber < next.TricksPerHand {
+		recordEndlessPoints(state, &next)
 		next.TrickNumber++
 		return next, events, nil
 	}
@@ -347,6 +359,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
 	if next.Config.Mode == ModeEndless {
+		recordEndlessPoints(state, &next)
 		next.CompletedHands++
 		if err := settleEndlessBoundary(&next, catalog); err != nil {
 			return state, nil, transitionError(ErrInvalidState, err.Error())
@@ -374,6 +387,25 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 		events = append(events, Event{Kind: EventRuleRevealed, Revision: next.Revision, Hand: next.HandNumber, Rule: revealed.DefinitionID, RuleInstanceID: revealed.InstanceID})
 	}
 	return next, events, nil
+}
+
+func recordEndlessPoints(before MatchState, next *MatchState) {
+	if next.Config.Mode != ModeEndless {
+		return
+	}
+	if next.RunScores == nil {
+		next.RunScores = make(map[SeatID]int)
+	}
+	for i, seat := range next.Seats {
+		points := seat.Score - before.Seats[i].Score
+		if points == 0 {
+			continue
+		}
+		next.RunScores[seat.ID] += points
+		if next.ShortGameRound > 0 {
+			next.ShortGameScores[seat.ID] += points
+		}
+	}
 }
 
 func indexOfSeat(seats []Seat, id SeatID) int {
@@ -483,6 +515,27 @@ func cloneState(state MatchState) MatchState {
 	next.Config.InitialRules = slices.Clone(state.Config.InitialRules)
 	next.Field = slices.Clone(state.Field)
 	next.DraftOptions = slices.Clone(state.DraftOptions)
+	if state.RunScores != nil {
+		next.RunScores = make(map[SeatID]int, len(state.RunScores))
+		for id, score := range state.RunScores {
+			next.RunScores[id] = score
+		}
+	}
+	if state.ShortGameScores != nil {
+		next.ShortGameScores = make(map[SeatID]int, len(state.ShortGameScores))
+		for id, score := range state.ShortGameScores {
+			next.ShortGameScores[id] = score
+		}
+	}
+	if state.ShortGameResult != nil {
+		result := *state.ShortGameResult
+		result.Scores = make(map[SeatID]int, len(state.ShortGameResult.Scores))
+		for id, score := range state.ShortGameResult.Scores {
+			result.Scores[id] = score
+		}
+		result.Winners = slices.Clone(result.Winners)
+		next.ShortGameResult = &result
+	}
 	next.Shuffles = make([]ShuffleRecord, len(state.Shuffles))
 	for i, record := range state.Shuffles {
 		next.Shuffles[i] = ShuffleRecord{Kind: record.Kind, Order: slices.Clone(record.Order)}

@@ -58,6 +58,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 		}
 	}
 	serial, drafts, tables, holds := 0, 0, 0, 0
+	noticeReconnect, gameReconnect, resultReconnect := false, false, false
 	for message.View.Public.CompletedHands < 12 {
 		public := message.View.Public
 		switch public.Phase {
@@ -117,16 +118,42 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 		if strings.Contains(message.View.Public.TableCue, "rules stay the same") {
 			holds++
 		}
+		public = message.View.Public
+		var reconnect bool
+		switch {
+		case public.Round == 3 && !noticeReconnect && strings.Contains(public.TableCue, "A three-round game starts after this round"):
+			noticeReconnect, reconnect = true, true
+		case public.ShortGameRound > 0 && !gameReconnect:
+			gameReconnect, reconnect = true, true
+		case public.ShortGameResult != nil && !resultReconnect:
+			resultReconnect, reconnect = true, true
+		}
+		if reconnect {
+			before := public
+			_ = conn.Close()
+			conn = dialRoom(t, web.URL, session)
+			message = readMessage(t, conn, "state")
+			after := message.View.Public
+			if after.Round != before.Round || after.ShortGameRound != before.ShortGameRound || after.TableCue != before.TableCue || (after.ShortGameResult == nil) != (before.ShortGameResult == nil) {
+				t.Fatal("reconnect lost Endless event")
+			}
+			if resultReconnect && after.ShortGameResult != nil {
+				html := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
+				if !strings.Contains(html, "Three-round game 1 complete") || !strings.Contains(html, "Winner:") && !strings.Contains(html, "Tie:") {
+					t.Fatal("result is not readable alongside open play")
+				}
+			}
+		}
 	}
-	if message.View.Public.Phase == domain.PhaseGameComplete || drafts < 2 || tables == 0 || holds == 0 {
+	if message.View.Public.Phase == domain.PhaseGameComplete || drafts < 2 || tables == 0 || holds == 0 || !noticeReconnect || !gameReconnect || !resultReconnect {
 		t.Fatalf("progression: hands=%d drafts=%d tables=%d holds=%d", message.View.Public.CompletedHands, drafts, tables, holds)
 	}
 	total := 0
-	for _, seat := range message.View.Public.Seats {
-		total += seat.Score
+	for _, score := range message.View.Public.RunScores {
+		total += score
 	}
-	if total != 67 {
-		t.Fatalf("score = %d, want 67", total)
+	if total <= 0 || len(message.View.Public.RunScores) != 4 {
+		t.Fatalf("run score ledger = %+v", message.View.Public.RunScores)
 	}
 	sendCommand(t, conn, command{Type: "end", ID: "end-run"})
 	final := readMessage(t, conn, "state")

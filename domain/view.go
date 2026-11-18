@@ -20,6 +20,12 @@ type PublicView struct {
 	PendingBoundaryID string
 	DraftOptions      []RuleID
 	TableCue          string
+	RunScores         map[SeatID]int
+	ShortGameRound    int
+	ShortGameNumber   int
+	ShortGameScores   map[SeatID]int
+	ShortGameResult   *ShortGameResult
+	NextRosterSize    int
 	HandSize          int
 	DealSize          int
 	TricksPerHand     int
@@ -76,6 +82,31 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 		EndedEarly: state.EndedEarly, EndedBy: state.EndedBy,
 		Rules: rules.History, ActiveField: rules.ActiveField, Effective: rules.Effective, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...), TrumpSuit: state.TrumpSuit, BrokenSpades: state.BrokenSpades, BrokenHearts: state.BrokenHearts,
 		Seats: make([]PublicSeat, len(state.Seats))}
+	if state.Config.Mode == ModeEndless {
+		if seats, ok := endlessNextRoster(state, rules); ok {
+			view.NextRosterSize = len(seats)
+		}
+		view.RunScores = make(map[SeatID]int, len(state.RunScores))
+		for id, score := range state.RunScores {
+			view.RunScores[id] = score
+		}
+		view.ShortGameRound, view.ShortGameNumber = state.ShortGameRound, state.ShortGameNumber
+		if state.ShortGameScores != nil {
+			view.ShortGameScores = make(map[SeatID]int, len(state.ShortGameScores))
+			for id, score := range state.ShortGameScores {
+				view.ShortGameScores[id] = score
+			}
+		}
+		if state.ShortGameResult != nil {
+			result := *state.ShortGameResult
+			result.Scores = make(map[SeatID]int, len(result.Scores))
+			for id, score := range state.ShortGameResult.Scores {
+				result.Scores[id] = score
+			}
+			result.Winners = append([]SeatID(nil), result.Winners...)
+			view.ShortGameResult = &result
+		}
+	}
 	if state.Phase == PhaseGameComplete {
 		view.Winners = gameWinners(state.Seats)
 	}
