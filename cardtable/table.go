@@ -23,19 +23,21 @@ type Seat struct {
 	Name          string        `json:"name"`
 	Count         int           `json:"count"`
 	Score         int           `json:"score"`
+	ScoreLabel    string        `json:"scoreLabel"`
 	Tricks        int           `json:"tricks"`
 	LabelPosition scene.Vec3    `json:"labelPosition"`
 	Turn          bool          `json:"turn"`
 	Self          bool          `json:"self"`
 }
 type Presentation struct {
-	ID       string                `json:"id"`
-	Kind     domain.EventKind      `json:"kind"`
-	Revision uint64                `json:"revision"`
-	Seat     domain.SeatID         `json:"seat"`
-	Card     domain.CardID         `json:"card,omitempty"`
-	Plays    []domain.Play         `json:"plays,omitempty"`
-	Motion   animation.Description `json:"motion"`
+	ID       string                  `json:"id"`
+	Kind     domain.EventKind        `json:"kind"`
+	Revision uint64                  `json:"revision"`
+	Seat     domain.SeatID           `json:"seat"`
+	Card     domain.CardID           `json:"card,omitempty"`
+	Plays    []domain.Play           `json:"plays,omitempty"`
+	Motion   animation.Description   `json:"motion"`
+	Motions  []animation.Description `json:"motions,omitempty"`
 }
 type Payload struct {
 	Version           int                `json:"version"`
@@ -127,7 +129,11 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 		if offset == 0 {
 			label[2] = 4.95
 		}
-		seats = append(seats, Seat{ID: s.ID, Count: s.HandCount, Score: s.Score, Tricks: s.TricksWon,
+		score, scoreLabel := s.Score, "Score"
+		if view.Public.Mode == domain.ModeEndless && view.Public.ShortGameRound > 0 {
+			score, scoreLabel = view.Public.ShortGameScores[s.ID], "Game score"
+		}
+		seats = append(seats, Seat{ID: s.ID, Count: s.HandCount, Score: score, ScoreLabel: scoreLabel, Tricks: s.TricksWon,
 			LabelPosition: label, Turn: view.Public.Phase == domain.PhasePlayingTrick && s.ID == view.Public.Turn, Self: s.ID == view.Seat})
 		if offset == 0 {
 			continue
@@ -251,12 +257,33 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 				return Payload{}, err
 			}
 			payload.PresentationScene = &staged
-			target := scene.Identity()
-			target.Position = scene.Vec3{0, .9, 0}
-			item.Motion = animation.New(cardID(event.Plays[0].Card), animation.Step{To: target, DurationMS: 300, Easing: "easeInOutCubic"})
+			winner := 0
+			for i, s := range seats {
+				if s.ID == event.Seat {
+					winner = i
+					break
+				}
+			}
+			position := seatPosition(winner, len(seats))
+			for i, play := range event.Plays {
+				lift := scene.Identity()
+				lift.Position = scene.Vec3{position[0] * .42, .35 + float64(i)*.025, position[2] * .42}
+				lift.Scale = scene.Vec3{.85, .85, .85}
+				collected := lift
+				collected.Position = scene.Vec3{position[0], .12 + float64(i)*.025, position[2]}
+				collected.Scale = scene.Vec3{.65, .65, .65}
+				item.Motions = append(item.Motions, animation.New(cardID(play.Card),
+					animation.Step{To: lift, DurationMS: 240, Easing: "easeInOutCubic"},
+					animation.Step{To: collected, DurationMS: 260, Easing: "easeOutCubic"}))
+			}
 		}
 		if len(item.Motion.Steps) > 0 {
 			if err := item.Motion.Validate(); err != nil {
+				return Payload{}, err
+			}
+		}
+		for _, motion := range item.Motions {
+			if err := motion.Validate(); err != nil {
 				return Payload{}, err
 			}
 		}

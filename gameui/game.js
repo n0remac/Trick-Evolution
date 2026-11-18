@@ -20,6 +20,8 @@
   let presenting = false;
   let presentationEpoch = 0;
   let restoring = true;
+  let pendingDeal = false;
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const seenEvents = new Set();
   const presentationLog = [];
   const tableShell = document.getElementById('table3d');
@@ -79,8 +81,8 @@
       const name = document.createElement('strong');
       name.textContent = seat.name;
       const score = document.createElement('span');
-      score.textContent = `· ${seat.score} pts`;
-      label.setAttribute('aria-label', `${seat.name}, ${seat.score} points${seat.turn ? ', to play' : ''}`);
+      score.textContent = `· ${seat.score}`;
+      label.setAttribute('aria-label', `${seat.name}, ${seat.scoreLabel || 'score'} ${seat.score}${seat.turn ? ', to play' : ''}`);
       label.append(name, score);
       return label;
     }));
@@ -107,9 +109,16 @@
     form.requestSubmit(button);
   }
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  function finishPendingDeal() {
+    if (!pendingDeal || presenting || sceneQueue.length || !connected) return;
+    pendingDeal = false;
+    const form = document.querySelector('#screen .next-hand form');
+    if (form) form.requestSubmit(form.querySelector('button'));
+  }
   async function drainScenes() {
     if (presenting || !table) return;
     presenting = true;
+    shell.classList.add('presentation-active');
     const epoch = presentationEpoch;
     try {
       while (sceneQueue.length && epoch === presentationEpoch) {
@@ -120,8 +129,9 @@
         selections = new Map(cards.map(item => [item.pickId, item]));
         tableShell.hidden = false;
         measureTableSpace();
-        if (!events.length || restoring || document.hidden) { table.apply(payload.scene, cards); showSeats(payload.seats || []); restoring = false; continue; }
+        if (!events.length || restoring || document.hidden || reducedMotion.matches) { table.apply(payload.scene, cards); showSeats(payload.seats || []); restoring = false; continue; }
         table.apply(payload.presentationScene || payload.scene, cards);
+        const completesTrick = events.some(event => event.kind === 'trick_won');
         for (const event of events) {
           if (epoch !== presentationEpoch) break;
           if (event.kind === 'card_played') {
@@ -129,15 +139,21 @@
             const landed = await Promise.race([table.animate(event.motion), wait(1800).then(() => false)]);
             markPresentation('landed', event.id, landed);
             if (epoch !== presentationEpoch) break;
-            // The pause follows the visible landing, including when the next update is queued.
-            await wait(event.seat === payload.seats?.find(s => s.self)?.id ? 180 : 420);
+            // A completed trick uses its shared face-up hold after the final landing.
+            if (!completesTrick) await wait(event.seat === payload.seats?.find(s => s.self)?.id ? 180 : 420);
             markPresentation('landing-pause-end', event.id);
           } else if (event.kind === 'trick_won') {
             markPresentation('collection-hold', event.id);
-            await wait(650);
+            await wait(520);
             if (epoch !== presentationEpoch) break;
             markPresentation('collection-start', event.id);
-            if (event.motion?.steps?.length) await Promise.race([table.animate(event.motion), wait(1200)]);
+            const motions = event.motions || (event.motion?.steps?.length ? [event.motion] : []);
+            if (motions.length) await Promise.race([table.animateAll(motions), wait(1400)]);
+            if (epoch !== presentationEpoch) break;
+            markPresentation('collection-end', event.id);
+            const winner = (payload.seats || []).findIndex(seat => seat.id === event.seat);
+            seatLabels.children[winner]?.classList.add('winner');
+            await wait(320);
           }
         }
         if (epoch === presentationEpoch) {
@@ -145,7 +161,16 @@
           showSeats(payload.seats || []);
         }
       }
-    } finally { if (epoch === presentationEpoch) { presenting = false; if (sceneQueue.length) drainScenes(); } }
+    } catch (error) {
+      fallbackTable(error);
+    } finally { if (epoch === presentationEpoch) { presenting = false; shell.classList.remove('presentation-active'); if (sceneQueue.length && table) drainScenes(); else finishPendingDeal(); } }
+  }
+  function fallbackTable(error) {
+    table?.dispose(); table = null; runtimePromise = null;
+    tableShell.hidden = true;
+    shell.classList.add('table-fallback');
+    document.querySelectorAll('.play-commands').forEach(node => { node.hidden = false; });
+    notice(`3D table unavailable: ${error.message}`);
   }
   function resetPresentation() {
     presentationEpoch++;
@@ -154,6 +179,8 @@
     restoring = true;
     seenEvents.clear();
     submittedUpdate = 0;
+    pendingDeal = false;
+    shell.classList.remove('presentation-active');
     table?.cancel();
   }
   async function applyScene() {
@@ -176,6 +203,7 @@
       const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(screen.dataset.scene), c => c.charCodeAt(0))));
       if (payload.version !== 1) throw new Error('Unsupported card table payload');
       tableShell.hidden = false;
+      shell.classList.remove('table-fallback');
       measureTableSpace();
       if (!table) {
         runtimePromise ||= import('/game/browser3d/runtime.js');
@@ -192,11 +220,34 @@
       drainScenes();
     } catch (error) {
       lastSceneUpdate = update;
-      tableShell.hidden = true;
-      notice(`3D table unavailable: ${error.message}`);
+      fallbackTable(error);
     }
   }
   new MutationObserver(applyScene).observe(live, {childList: true, subtree: true});
+  let cueTimer = 0;
+  const announcedResults = new Set();
+  function syncCue() {
+    const cue = document.querySelector('#screen .match-cue');
+    if (!cue || cue.dataset.ready) return;
+    cue.dataset.ready = 'true';
+    clearTimeout(cueTimer);
+    let immediate = cue.dataset.event;
+    if (cue.dataset.resultNumber && !announcedResults.has(cue.dataset.resultNumber)) {
+      announcedResults.add(cue.dataset.resultNumber);
+      immediate = cue.dataset.result;
+    }
+    cue.textContent = immediate || cue.dataset.next || '';
+    if (immediate) cueTimer = setTimeout(() => { if (cue.isConnected) cue.textContent = cue.dataset.next || ''; }, 1400);
+  }
+  new MutationObserver(syncCue).observe(live, {childList: true, subtree: true});
+  let scoresOpen = false;
+  live.addEventListener('toggle', event => {
+    if (event.target.matches?.('.scores-control')) scoresOpen = event.target.open;
+  }, true);
+  new MutationObserver(() => {
+    const scores = document.querySelector('#screen .scores-control');
+    if (scores && scoresOpen) scores.open = true;
+  }).observe(live, {childList: true, subtree: true});
   window.addEventListener('pagehide', () => table?.dispose());
 
   const key = () => `trick-evolution:${room}`;
@@ -468,6 +519,11 @@
     if (!connected) {
       event.preventDefault();
       notice('Waiting for connection…');
+      return;
+    }
+    if (event.target.closest?.('.next-hand') && (presenting || sceneQueue.length)) {
+      event.preventDefault();
+      pendingDeal = true;
       return;
     }
     if (event.target.id === 'review-settings-form') {

@@ -90,6 +90,53 @@ func TestTableSceneAndCompletedTrickPresentation(t *testing.T) {
 	if len(payload.PresentationScene.Nodes) != len(payload.Scene.Nodes)+2 {
 		t.Fatalf("completed cards were not retained for collection")
 	}
+	if got := len(payload.Presentations[1].Motions); got != 2 {
+		t.Fatalf("collection moves %d cards, want 2", got)
+	}
+}
+
+func TestCollectionTargetsEveryWinnerSeat(t *testing.T) {
+	ids := []domain.SeatID{"a", "b", "c", "d"}
+	plays := []domain.Play{{Seat: "a", Card: "std:H:02"}, {Seat: "b", Card: "std:C:03"}}
+	for total := 2; total <= 4; total++ {
+		for winner := 0; winner < total; winner++ {
+			view := domain.PlayerView{Seat: "a"}
+			for _, id := range ids[:total] {
+				view.Public.Seats = append(view.Public.Seats, domain.PublicSeat{ID: id})
+			}
+			event := domain.Event{Kind: domain.EventTrickWon, Seat: ids[winner], Plays: plays}
+			payload, err := Build(view, domain.DefaultCatalog(), event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			motions := payload.Presentations[0].Motions
+			if len(motions) != len(plays) {
+				t.Fatalf("%d seats, winner %s: %d motions", total, ids[winner], len(motions))
+			}
+			position := seatPosition(winner, total)
+			for _, motion := range motions {
+				end := motion.Steps[len(motion.Steps)-1].To.Position
+				if end[0] != position[0] || end[2] != position[2] {
+					t.Fatalf("%d seats, winner %s: target %v, want %v", total, ids[winner], end, position)
+				}
+			}
+		}
+	}
+}
+
+func TestSeatScoreUsesActiveShortGame(t *testing.T) {
+	view := domain.PlayerView{Seat: "a"}
+	view.Public.Mode = domain.ModeEndless
+	view.Public.Seats = []domain.PublicSeat{{ID: "a", Score: 24}, {ID: "b", Score: 19}}
+	view.Public.ShortGameRound = 2
+	view.Public.ShortGameScores = map[domain.SeatID]int{"a": 4, "b": 6}
+	payload, err := Build(view, domain.DefaultCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Seats[0].Score != 4 || payload.Seats[0].ScoreLabel != "Game score" || payload.Seats[1].Score != 6 {
+		t.Fatalf("short-game seat scores: %+v", payload.Seats)
+	}
 }
 
 func TestHandSortAndStack(t *testing.T) {

@@ -230,122 +230,64 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 	}
 	rules := renderRuleField(public, catalog)
 	next := ""
-	turnText := ""
-	localTurn, botTurn := false, false
 	switch public.Phase {
 	case domain.PhasePlayingTrick:
-		next = name(public.Turn) + " to play"
 		if public.Turn == seat {
 			next = "Your turn"
-			turnText, localTurn = "Your turn · "+name(seat), true
 		} else {
-			turnText = name(public.Turn) + "'s turn"
-			for _, player := range message.Seats {
-				if player.ID == public.Turn && player.Bot {
-					botTurn = true
-					turnText = name(public.Turn) + " (bot) is playing"
-					break
-				}
-			}
+			next = name(public.Turn) + " to play"
 		}
 	case domain.PhaseHandComplete:
-		next = "Waiting for the host to deal"
-		turnText = "Hand complete · waiting for " + name(public.Seats[0].ID) + " to deal"
+		next = "Waiting for " + name(public.Seats[0].ID) + " to deal"
 		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
 			next = "Deal the next hand"
-			turnText = "Hand complete · deal the next hand"
 		}
 	case domain.PhaseAwaitingChoice:
-		next, turnText = "Choose a rule", "Round complete · your rule choice"
+		next = "Choose a rule"
 	case domain.PhaseGameComplete:
 		next = "Game complete"
-		turnText = "Game complete"
-		if public.EndedEarly {
-			turnText = "Game ended"
-		}
-	}
-	hudDetails := ""
-	if public.DealSize > 0 && (public.DealSize != public.HandSize || public.TricksPerHand != public.DealSize) {
-		hudDetails = fmt.Sprintf("%d cards · %d played tricks", public.DealSize, public.TricksPerHand)
 	}
 	if public.Mode == domain.ModeEndless && public.Phase == domain.PhasePlayingTrick {
-		hudDetails = fmt.Sprintf("Hand countdown: %d trick(s) left · Trick %d/%d", public.TricksPerHand-public.TrickNumber+1, public.TrickNumber, public.TricksPerHand)
-	}
-	if public.Phase == domain.PhasePlayingTrick && view.Carried != "" {
-		for _, id := range view.Hand {
-			if id == view.Carried {
-				if hudDetails != "" {
-					hudDetails += " · "
-				}
-				hudDetails += "Your carried card: " + cardLabel(id)
-				break
-			}
+		countdown := public.RoundLength - public.RoundHand + 1
+		if countdown < 1 {
+			countdown = 1
 		}
+		_, event := domain.EndlessRound(public.Round + 1)
+		action := map[string]string{"draft": "rule draft", "table": "table rule change", "hold": "rules hold"}[event]
+		next += fmt.Sprintf(" · %s in %d hand(s)", action, countdown)
 	}
-	hud := []*h.Node{h.Class("game-hud"),
-		h.Div(h.Class("turn-indicator"), h.Attr("data-turn", string(public.Turn)), h.Attr("data-phase", string(public.Phase)), h.Attr("data-local", fmt.Sprint(localTurn)), h.Attr("data-bot", fmt.Sprint(botTurn)), h.Role("status"), h.T(turnText)),
+	result := eventNotice(message.Events, catalog, name)
+	shortResult, shortResultNumber := "", ""
+	if latest := public.ShortGameResult; latest != nil {
+		winners := make([]string, 0, len(latest.Winners))
+		for _, id := range latest.Winners {
+			winners = append(winners, name(id))
+		}
+		outcome := "Winner: "
+		if len(winners) > 1 {
+			outcome = "Tie: "
+		}
+		shortResult = fmt.Sprintf("Three-round game %d complete · %s%s", latest.Number, outcome, strings.Join(winners, " and "))
+		shortResultNumber = fmt.Sprint(latest.Number)
+	}
+	fallbackSeats := []*h.Node{h.Class("fallback-seats")}
+	for _, player := range public.Seats {
+		score := player.Score
+		label := "score"
+		if public.Mode == domain.ModeEndless && public.ShortGameRound > 0 {
+			score = public.ShortGameScores[player.ID]
+			label = "game score"
+		}
+		turn := ""
+		if public.Phase == domain.PhasePlayingTrick && public.Turn == player.ID {
+			turn = " · turn"
+		}
+		fallbackSeats = append(fallbackSeats, h.Span(h.T(fmt.Sprintf("%s · %s %d%s", name(player.ID), label, score, turn))))
+	}
+	hud := []*h.Node{h.Class("game-hud"), rules,
 		h.Div(h.Class("match-cue"), h.Role("status"), h.Attr("aria-atomic", "true"),
-			h.Span(h.Class("match-event"), h.T(eventNotice(message.Events, catalog, name))),
-			h.NewNode("strong", []*h.Node{h.Class("match-next"), h.T(next)})),
-		h.P(h.Class("hand-plan"), h.T(hudDetails))}
-	if public.Mode == domain.ModeEndless {
-		countdown := public.RoundLength - public.RoundHand
-		if countdown < 0 {
-			countdown = 0
-		}
-		cue := public.TableCue
-		if public.Phase == domain.PhasePlayingTrick {
-			_, event := domain.EndlessRound(public.Round + 1)
-			action := map[string]string{"draft": "Your rule draft", "table": "The table changes a rule", "hold": "The rules hold"}[event]
-			cue += fmt.Sprintf(" %s in %d hand(s).", action, countdown+1)
-		}
-		handInRound := public.RoundHand
-		if handInRound == 0 {
-			handInRound = 1
-		}
-		scores := []*h.Node{h.Class("run-scores"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Endless Mode · Round %d · Hand %d/%d · Run Score", public.Round, handInRound, public.RoundLength))})}
-		ids := []domain.SeatID{public.Seats[0].ID, "bot:1", "bot:2", "bot:3"}
-		for _, id := range ids {
-			if score, ok := public.RunScores[id]; ok {
-				label := name(id)
-				if strings.HasPrefix(string(id), "bot:") && label == string(id) {
-					label = "Bot " + strings.TrimPrefix(string(id), "bot:")
-				}
-				scores = append(scores, h.Span(h.T(fmt.Sprintf("%s: %d", label, score))))
-			}
-		}
-		hud = append(hud, h.Div(scores...))
-		if public.ShortGameRound > 0 {
-			gameScores := []*h.Node{h.Class("run-scores short-game-scores"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Three-round game %d · Round %d/3 · Game Score", public.ShortGameNumber, public.ShortGameRound))})}
-			for _, player := range public.Seats {
-				gameScores = append(gameScores, h.Span(h.T(fmt.Sprintf("%s: %d", name(player.ID), public.ShortGameScores[player.ID]))))
-			}
-			hud = append(hud, h.Div(gameScores...))
-		}
-		if result := public.ShortGameResult; result != nil {
-			winners := make([]string, 0, len(result.Winners))
-			for _, id := range result.Winners {
-				winners = append(winners, name(id))
-			}
-			label := "Winner: "
-			if len(winners) > 1 {
-				label = "Tie: "
-			}
-			resultScores := make([]string, 0, len(result.Scores))
-			for _, id := range []domain.SeatID{public.Seats[0].ID, "bot:1", "bot:2", "bot:3"} {
-				if score, ok := result.Scores[id]; ok {
-					playerName := name(id)
-					if strings.HasPrefix(string(id), "bot:") && playerName == string(id) {
-						playerName = "Bot " + strings.TrimPrefix(string(id), "bot:")
-					}
-					resultScores = append(resultScores, fmt.Sprintf("%s %d", playerName, score))
-				}
-			}
-			hud = append(hud, h.Div(h.Class("short-game-result"), h.Role("status"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Three-round game %d complete · %s%s", result.Number, label, strings.Join(winners, " and ")))}), h.P(h.T(strings.Join(resultScores, " · ")))))
-		}
-		hud = append(hud, h.P(h.Class("round-cue"), h.T(cue)))
-	}
-	hud = append(hud, rules)
+			h.Attr("data-next", next), h.Attr("data-event", result), h.Attr("data-result", shortResult), h.Attr("data-result-number", shortResultNumber), h.T(next)),
+		renderScoresControl(public, name), h.Div(fallbackSeats...)}
 	parts := []*h.Node{h.Class("game-panel"), h.Attr("data-hand", fmt.Sprint(public.HandNumber)), h.Div(hud...)}
 	if public.Phase == domain.PhasePlayingTrick {
 		legal, _ := domain.LegalCards(*view, catalog)
@@ -469,6 +411,57 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		parts = append(parts, h.NewNode("details", items))
 	}
 	return h.Section(parts...)
+}
+
+func renderScoresControl(public domain.PublicView, name func(domain.SeatID) string) *h.Node {
+	content := []*h.Node{h.Class("scores-control"), h.NewNode("summary", []*h.Node{h.T("Scores")})}
+	standings := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T("Standings")})}
+	for _, seat := range public.Seats {
+		standings = append(standings, h.Span(h.T(fmt.Sprintf("%s · %d", name(seat.ID), seat.Score))))
+	}
+	content = append(content, h.Div(standings...))
+	if public.Mode == domain.ModeEndless {
+		displayName := func(id domain.SeatID) string {
+			label := name(id)
+			if strings.HasPrefix(string(id), "bot:") && label == string(id) {
+				return "Bot " + strings.TrimPrefix(string(id), "bot:")
+			}
+			return label
+		}
+		run := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T("Run totals")})}
+		ids := []domain.SeatID{public.Seats[0].ID, "bot:1", "bot:2", "bot:3"}
+		for _, id := range ids {
+			if score, ok := public.RunScores[id]; ok {
+				run = append(run, h.Span(h.T(fmt.Sprintf("%s · %d", displayName(id), score))))
+			}
+		}
+		content = append(content, h.Div(run...))
+		if public.ShortGameRound > 0 {
+			game := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Game %d · round %d/3", public.ShortGameNumber, public.ShortGameRound))})}
+			for _, seat := range public.Seats {
+				game = append(game, h.Span(h.T(fmt.Sprintf("%s · %d", name(seat.ID), public.ShortGameScores[seat.ID]))))
+			}
+			content = append(content, h.Div(game...))
+		}
+		if result := public.ShortGameResult; result != nil {
+			winners := make([]string, 0, len(result.Winners))
+			for _, id := range result.Winners {
+				winners = append(winners, name(id))
+			}
+			outcome := "Winner: "
+			if len(winners) > 1 {
+				outcome = "Tie: "
+			}
+			latest := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Latest game %d · %s%s", result.Number, outcome, strings.Join(winners, " and ")))})}
+			for _, id := range ids {
+				if score, ok := result.Scores[id]; ok {
+					latest = append(latest, h.Span(h.T(fmt.Sprintf("%s · %d", displayName(id), score))))
+				}
+			}
+			content = append(content, h.Div(latest...))
+		}
+	}
+	return h.NewNode("details", content)
 }
 
 func cardLabel(id domain.CardID) string {

@@ -52,7 +52,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 		t.Fatalf("opening: %+v", message)
 	}
 	openingHTML := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
-	for _, text := range []string{"Hand countdown:", "Run Score", "Round Pacing", "End run"} {
+	for _, text := range []string{"rule draft", "Run totals", "Round Pacing", "End run"} {
 		if !strings.Contains(openingHTML, text) {
 			t.Fatalf("opening screen missing %q", text)
 		}
@@ -74,7 +74,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 		case domain.PhaseAwaitingChoice:
 			drafts++
 			draftHTML := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
-			for _, text := range []string{"draft-choices", public.PendingBoundaryID, "Keep current rules", "Run Score"} {
+			for _, text := range []string{"draft-choices", public.PendingBoundaryID, "Keep current rules", "Run totals"} {
 				if !strings.Contains(draftHTML, text) {
 					t.Fatalf("draft screen missing %q", text)
 				}
@@ -139,7 +139,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 			}
 			if resultReconnect && after.ShortGameResult != nil {
 				html := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
-				if !strings.Contains(html, "Three-round game 1 complete") || !strings.Contains(html, "Winner:") && !strings.Contains(html, "Tie:") {
+				if !strings.Contains(html, `data-result-number="1"`) || !strings.Contains(html, "Three-round game 1 complete") || !strings.Contains(html, "Latest game 1") || !strings.Contains(html, "Winner:") && !strings.Contains(html, "Tie:") {
 					t.Fatal("result is not readable alongside open play")
 				}
 			}

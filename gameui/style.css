@@ -81,29 +81,10 @@ h2 { margin: 0 0 .75rem; }
   top: calc(var(--hud-top) + 3.25rem); left: var(--hud-left); right: var(--hud-right);
   display: grid; gap: .2rem; max-width: 70rem; margin-inline: auto;
 }
-.turn-indicator {
-  justify-self: center; max-width: min(100%, 24rem); padding: .25rem .65rem;
-  border: 1px solid #d8c995; border-radius: 2rem; background: #102b21f2;
-  color: #fff2c6; font-size: clamp(.78rem, 2.8vw, .95rem); font-weight: 750;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
-}
-.turn-indicator[data-local="true"] { background: #eec976; color: #1d271b; }
-.turn-indicator[data-bot="true"] { border-color: #9fcbb2; }
-.match-cue { text-align: center; font-size: .85rem; color: #ffdf9b; min-height: 1.25rem; }
-.match-cue > * { display: inline; }
-.match-event:not(:empty) + .match-next { margin-inline-start: .45rem; }
-.match-cue > :empty, .match-cue:not(:has(:not(:empty))) { display: none; }
-.hand-plan { margin: 0; text-align: center; font-size: .73rem; color: #dbe4c9; }
-.hand-plan:empty { display: none; }
-.run-scores { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .25rem .75rem; font-size: .74rem; text-align: center; }
-.run-scores strong { color: #ffe09a; }
-.short-game-scores { color: #f8e6bd; }
-.short-game-result { margin: .4rem auto; padding: .65rem .8rem; max-width: 38rem; border: 1px solid #e8c46a; border-radius: .65rem; background: #3b351f; color: #fff0bd; text-align: center; }
-.short-game-result p { margin: .3rem 0 0; }
-.round-cue { margin: 0; color: #ffe09a; font-size: .78rem; text-align: center; }
+.match-cue { text-align: center; font-size: .85rem; color: #ffdf9b; min-height: 1.6rem; padding: .2rem .6rem; border-radius: .45rem; background: #102b21ed; }
 .rule-field {
   display: flex; flex-wrap: nowrap; align-items: stretch; gap: .25rem;
-  max-height: min(6rem, 18dvh); overflow-x: auto; overflow-y: hidden;
+  max-height: min(9rem, 24dvh); overflow-x: auto; overflow-y: hidden;
   overscroll-behavior-x: contain; touch-action: pan-x; scrollbar-width: thin;
   pointer-events: auto; padding: .1rem;
 }
@@ -116,14 +97,14 @@ h2 { margin: 0 0 .75rem; }
 .rule-zone-empty { margin: 0; color: #b3c8b9; font-size: .67rem; min-width: 4.5rem; }
 .rule-card {
   display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: .1rem;
-  width: 6.25rem; height: clamp(2.75rem, 9dvh, 4.35rem); min-height: 44px;
+  width: clamp(7.25rem, 11vw, 9rem); height: clamp(5rem, 15dvh, 7.75rem); min-height: 70px;
   padding: .22rem .35rem; border: 1px solid #c9b77e; border-radius: .35rem;
   background: #e6d8af; color: #243728; text-align: left; line-height: 1.2;
   overflow: hidden; overflow-wrap: anywhere; box-shadow: 0 1px 3px #020b0766;
 }
-.rule-card-category { font-size: .55rem; text-transform: uppercase; letter-spacing: .04em; }
-.rule-card-title { font-size: .74rem; line-height: 1.05; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.rule-card-effect { font-size: .62rem; font-weight: 500; line-height: 1.05; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.rule-card-category { font-size: .61rem; text-transform: uppercase; letter-spacing: .04em; }
+.rule-card-title { font-size: .87rem; line-height: 1.1; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.rule-card-effect { font-size: .7rem; font-weight: 500; line-height: 1.15; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .rule-card-partial { margin-top: auto; font-size: .65rem; font-weight: 700; }
 .rule-card:hover, .rule-card:focus-visible { border-color: #fff2c6; background: #fff2c6; outline: 2px solid #fff2c6; }
 #rule-details {
@@ -134,9 +115,32 @@ h2 { margin: 0 0 .75rem; }
 #rule-details::backdrop { background: #07140eb8; }
 @media (max-height: 430px) {
   .rule-zone h3 { display: none; }
-  .rule-field { max-height: min(3.5rem, 18dvh); }
-  .rule-card { height: 44px; }
+  .rule-field { max-height: min(5rem, 20dvh); }
+  .rule-card { height: 4.5rem; min-height: 44px; }
   .rule-card-effect { display: none; }
+}
+.scores-control { position: absolute; top: -3.25rem; left: 0; width: min(18rem, 48vw); pointer-events: auto; z-index: 5; font-size: .82rem; }
+.scores-control summary { list-style: none; display: inline-flex; align-items: center; min-height: 44px; padding: .45rem .75rem; border: 1px solid #719484; border-radius: .6rem; background: #102b21; color: #fff2c6; font-weight: 700; cursor: pointer; }
+.scores-control summary::-webkit-details-marker { display: none; }
+.scores-control[open] { padding: 0 .6rem .6rem; border: 1px solid #719484; border-radius: .6rem; background: #102b21; box-shadow: 0 8px 25px #06140dcc; max-height: min(65dvh, 28rem); overflow: auto; }
+.scores-control[open] summary { margin-left: -.6rem; border: 0; }
+.scores-standings { display: grid; gap: .2rem; padding: .4rem 0; border-top: 1px solid #537663; }
+.scores-standings strong { color: #ffe09a; }
+.table-seat.winner { border-color: #ffe09a; box-shadow: 0 0 0 .2rem #eec97677, 0 0 18px #eec976; }
+.fallback-seats { display: none; }
+.presentation-active .next-hand { opacity: .6; }
+.table-fallback .game-panel { display: grid; gap: 1rem; padding: 1rem; }
+.table-fallback .game-hud, .table-fallback .end-game, .table-fallback .next-hand, .table-fallback .game-results, .table-fallback .hand-status { position: static; transform: none; }
+.table-fallback .scores-control { position: relative; top: auto; }
+.table-fallback .fallback-seats { display: flex; flex-wrap: wrap; gap: .4rem; }
+.table-fallback .fallback-seats span { padding: .3rem .5rem; border: 1px solid #719484; border-radius: .4rem; background: #102b21; }
+.table-fallback .play-commands { display: flex; flex-wrap: wrap; gap: .5rem; }
+.table-fallback .play-commands button { min-height: 44px; }
+@media (max-width: 600px) {
+  .rule-field { width: 100%; }
+  .rule-zone { flex: 0 0 auto; }
+  .rule-card { width: 7.5rem; height: clamp(5.75rem, 15dvh, 7rem); }
+  .scores-control { width: min(17rem, 65vw); }
 }
 
 .end-game { top: var(--hud-top); right: calc(var(--hud-right) + 6rem); text-align: right; }
