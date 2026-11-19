@@ -167,6 +167,8 @@ type MatchState struct {
 	Field             []RuleInstance
 	Round             int
 	RoundHand         int
+	SharedRound       int // Joined round with its own multi-hand length.
+	SharedRoundLength int
 	PendingBoundaryID string
 	DraftOptions      []RuleID
 	TableCue          string

@@ -27,6 +27,7 @@ type testSession struct {
 	Name  string        `json:"name"`
 	Token string        `json:"token"`
 	Host  bool          `json:"host"`
+	RunID string        `json:"runId"`
 }
 
 func testServer(t *testing.T) (*Server, *httptest.Server) {

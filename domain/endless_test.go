@@ -122,6 +122,82 @@ func TestEndlessCandidatesKeepLegalFieldAndDependencies(t *testing.T) {
 	}
 }
 
+func TestEndlessCompatibilityChecksEffectsDependenciesAndDeal(t *testing.T) {
+	catalog := DefaultCatalog()
+	cfg := DefaultConfig()
+	cfg.Mode, cfg.HandSize = ModeEndless, 3
+	a, err := NewMatch([]SeatID{"a", "bot:1"}, cfg, catalog, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := NewMatch([]SeatID{"b", "bot:1"}, cfg, catalog, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Round, b.Round = 3, 3
+	a.RoundHand, b.RoundHand = 0, 0
+	a.Phase, b.Phase = PhaseHandComplete, PhaseHandComplete
+	if !EndlessCompatible(a, b, catalog) {
+		t.Fatal("equal runs should fit")
+	}
+	b.Round = 2
+	if !EndlessCompatible(a, b, catalog) {
+		t.Fatal("different open-round positions should fit")
+	}
+	b.Round = 3
+	if !applyEndlessRule(&b, catalog, RuleLastTrickBonus) || EndlessCompatible(a, b, catalog) {
+		t.Fatal("different resolved effects accepted")
+	}
+	b = cloneState(a)
+	b.Seats[0].ID = "b"
+	b.Config.HandSize = 4
+	if EndlessCompatible(a, b, catalog) {
+		t.Fatal("different deal accepted")
+	}
+	b = cloneState(a)
+	b.Seats[0].ID = "b"
+	b.Field = append(b.Field, RuleInstance{InstanceID: "bad-dependency", DefinitionID: RuleBreakSpades, Sequence: len(b.Field)})
+	if EndlessCompatible(a, b, catalog) {
+		t.Fatal("inactive dependency accepted")
+	}
+	b = cloneState(a)
+	b.Seats[0].ID = "b"
+	b.Field = append(b.Field, RuleInstance{InstanceID: "trump", DefinitionID: RuleSpadesTrump, Sequence: len(b.Field)})
+	b.Field = append(b.Field, RuleInstance{InstanceID: "bad-overwrite", DefinitionID: RuleFollowOrTrump, Sequence: len(b.Field)})
+	b.Field = append(b.Field, RuleInstance{InstanceID: "bad-overwrite-2", DefinitionID: RuleNoFollowRequired, Sequence: len(b.Field)})
+	if EndlessCompatible(a, b, catalog) {
+		t.Fatal("illegal overwrite accepted")
+	}
+	if _, err := JoinEndless(a, b, catalog, canonicalOrder()); err == nil {
+		t.Fatal("invalid transfer accepted")
+	}
+}
+
+func TestEndlessForecastSearchesTwoScheduledTableChanges(t *testing.T) {
+	catalog := DefaultCatalog()
+	cfg := DefaultConfig()
+	cfg.Mode, cfg.HandSize = ModeEndless, 3
+	a, err := NewMatch([]SeatID{"a", "bot:1"}, cfg, catalog, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := cloneState(a)
+	b.Seats[0].ID = "b"
+	a.Round, b.Round = 2, 7
+	a.RuleDraw = []RuleID{RuleAvoidHearts, RuleLastTrickBonus}
+	if !applyEndlessRule(&b, catalog, RuleAvoidHearts) || !applyEndlessRule(&b, catalog, RuleLastTrickBonus) {
+		t.Fatal("fixture rules")
+	}
+	before := append([]RuleID(nil), a.RuleDraw...)
+	gap, ok := EndlessForecastGap(a, b, catalog, "")
+	if !ok || gap != 0 {
+		t.Fatalf("two scheduled changes should align: gap=%d ok=%t", gap, ok)
+	}
+	if len(a.RuleDraw) != len(before) || a.RuleDraw[0] != before[0] || a.RuleDraw[1] != before[1] {
+		t.Fatal("forecast mutated live draw")
+	}
+}
+
 func TestEndlessKeepOneResetsAtRosterChange(t *testing.T) {
 	catalog := DefaultCatalog()
 	cfg := DefaultConfig()

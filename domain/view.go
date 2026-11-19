@@ -19,6 +19,7 @@ type PublicView struct {
 	RoundLength       int
 	PendingBoundaryID string
 	DraftOptions      []RuleID
+	DraftCues         map[RuleID]string
 	TableCue          string
 	RunScores         map[SeatID]int
 	ShortGameRound    int
@@ -76,7 +77,7 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 	if err := validateHandFacts(state, rules); err != nil {
 		return PublicView{}, transitionError(ErrInvalidState, err.Error())
 	}
-	length, _ := EndlessRound(state.Round)
+	length := endlessRoundLength(state)
 	view := PublicView{Revision: state.Revision, Phase: state.Phase, Mode: state.Config.Mode, Round: state.Round, RoundHand: state.RoundHand, RoundLength: length, PendingBoundaryID: state.PendingBoundaryID, DraftOptions: append([]RuleID(nil), state.DraftOptions...), TableCue: state.TableCue, HandSize: state.Config.HandSize, DealSize: state.DealSize, TricksPerHand: state.TricksPerHand, MaxHands: state.Config.MaxHands, RevealEvery: state.Config.RevealEvery, InitialRules: append([]RuleID(nil), state.Config.InitialRules...), Dealer: state.Dealer, Leader: state.Leader,
 		Turn: state.Turn, HandNumber: state.HandNumber, TrickNumber: state.TrickNumber, CompletedHands: state.CompletedHands,
 		EndedEarly: state.EndedEarly, EndedBy: state.EndedBy,

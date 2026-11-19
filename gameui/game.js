@@ -215,7 +215,7 @@
       autoReviewPending = fresh && !endless;
       sessionStorage.setItem(key(), session.token);
       sessionStorage.setItem(`${key()}:name`, session.name);
-      if (endless) sessionStorage.setItem(endlessKey, JSON.stringify(session));
+      if (endless || data.runId) sessionStorage.setItem(endlessKey, JSON.stringify(session));
       lastUpdate = 0;
       lastSceneUpdate = 0;
       resetPresentation();
@@ -492,6 +492,14 @@
   });
   document.body.addEventListener('htmx:wsBeforeMessage', event => {
     const documentFragment = new DOMParser().parseFromString(event.detail.message, 'text/html');
+    const moved = documentFragment.querySelector('#room-moved[data-room][data-token]');
+    if (moved && session) {
+      event.preventDefault();
+      session = {...session, room: moved.dataset.room, token: moved.dataset.token};
+      sessionStorage.setItem(endlessKey, JSON.stringify(session));
+      location.reload();
+      return;
+    }
     const closure = documentFragment.querySelector('#room-closed[data-terminal]');
     if (closure) {
       terminal = true;

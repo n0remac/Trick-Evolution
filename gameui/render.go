@@ -218,6 +218,12 @@ func lobbyPanel(message serverMessage, seat domain.SeatID) *h.Node {
 func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog) *h.Node {
 	view := message.View
 	public := view.Public
+	host := false
+	for _, p := range message.Seats {
+		if p.ID == seat {
+			host = p.Host
+		}
+	}
 	names := make(map[domain.SeatID]string, len(message.Seats))
 	for _, p := range message.Seats {
 		names[p.ID] = p.Name
@@ -251,7 +257,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 	case domain.PhaseHandComplete:
 		next = "Waiting for the host to deal"
 		turnText = "Hand complete · waiting for " + name(public.Seats[0].ID) + " to deal"
-		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
+		if host {
 			next = "Deal the next hand"
 			turnText = "Hand complete · deal the next hand"
 		}
@@ -304,7 +310,17 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			handInRound = 1
 		}
 		scores := []*h.Node{h.Class("run-scores"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Endless Mode · Round %d · Hand %d/%d · Run Score", public.Round, handInRound, public.RoundLength))})}
-		ids := []domain.SeatID{public.Seats[0].ID, "bot:1", "bot:2", "bot:3"}
+		ids := make([]domain.SeatID, 0, len(public.Seats)+3)
+		seen := make(map[domain.SeatID]bool)
+		for _, player := range public.Seats {
+			ids = append(ids, player.ID)
+			seen[player.ID] = true
+		}
+		for _, id := range []domain.SeatID{"bot:1", "bot:2", "bot:3"} {
+			if !seen[id] {
+				ids = append(ids, id)
+			}
+		}
 		for _, id := range ids {
 			if score, ok := public.RunScores[id]; ok {
 				label := name(id)
@@ -373,14 +389,19 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			}
 		}
 		parts = append(parts, h.Div(handStatus...))
-		if len(message.Seats) > 0 && message.Seats[0].ID == seat {
+		if host {
 			parts = append(parts, h.Div(h.Class("next-hand"), commandForm("next", "Deal next hand", "", false, "", public.Revision)))
 		}
 	} else if public.Phase == domain.PhaseAwaitingChoice {
 		choices := []*h.Node{h.Class("draft-choices"), h.H2(h.T("Choose a rule for the next round"))}
 		for _, id := range public.DraftOptions {
 			if definition, ok := catalog.Definition(id); ok {
-				choices = append(choices, h.Div(h.Class("draft-card"), h.NewNode("strong", []*h.Node{h.T(definition.Title)}), h.P(h.T(definition.Text)), draftForm(id, "Take "+definition.Title, public.PendingBoundaryID, public.Revision)))
+				card := []*h.Node{h.Class("draft-card"), h.NewNode("strong", []*h.Node{h.T(definition.Title)}), h.P(h.T(definition.Text))}
+				if cue := public.DraftCues[id]; cue != "" {
+					card = append(card, h.P(h.Class("draft-cue"), h.T(cue)))
+				}
+				card = append(card, draftForm(id, "Take "+definition.Title, public.PendingBoundaryID, public.Revision))
+				choices = append(choices, h.Div(card...))
 			}
 		}
 		choices = append(choices, draftForm("", "Keep current rules", public.PendingBoundaryID, public.Revision))
@@ -418,7 +439,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		results = append(results, h.Button(h.Type("button"), h.Attr("data-action", "return-to-join"), h.T("Return to join")))
 		parts = append(parts, h.Div(results...))
 	}
-	if len(message.Seats) > 0 && message.Seats[0].ID == seat && public.Phase != domain.PhaseGameComplete {
+	if host && public.Phase != domain.PhaseGameComplete {
 		confirmText, confirmLabel := "End this game for everyone? Completed-trick scores remain; an unfinished trick and hand bonus will not score.", "Confirm end game"
 		if public.Mode == domain.ModeEndless {
 			confirmText, confirmLabel = "End this run? Completed scores remain; an unfinished trick and hand bonus will not score.", "Confirm end run"

@@ -54,7 +54,7 @@ func (s *Server) startEndless(w http.ResponseWriter, r *http.Request) {
 	}
 	state.Revision = 1
 	roomContext, cancel := context.WithCancel(context.Background())
-	gameRoom := &room{id: roomID, config: config, seats: []participant{{ID: domain.SeatID(seatID), Name: input.Name, Token: token}, {ID: "bot:1", Name: "Bot 1", Bot: true}},
+	gameRoom := &room{id: roomID, config: config, seats: []participant{{ID: domain.SeatID(seatID), Name: input.Name, Token: token, RunID: roomID}, {ID: "bot:1", Name: "Bot 1", Bot: true}},
 		clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand), state: &state,
 		lastEvents:   []domain.Event{{Kind: domain.EventHandStarted, Revision: 1, Hand: 1, Seat: state.Leader}},
 		lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{}), ctx: roomContext, cancel: cancel, workerStarted: true}
@@ -77,5 +77,6 @@ func (s *Server) startEndless(w http.ResponseWriter, r *http.Request) {
 		Name  string        `json:"name"`
 		Token string        `json:"token"`
 		Host  bool          `json:"host"`
-	}{Room: roomID, Seat: domain.SeatID(seatID), Name: input.Name, Token: token, Host: true})
+		RunID string        `json:"runId"`
+	}{Room: roomID, Seat: domain.SeatID(seatID), Name: input.Name, Token: token, Host: true, RunID: roomID})
 }

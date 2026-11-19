@@ -34,7 +34,9 @@ type shuffleFactory func() domain.ShuffleSource
 
 type Server struct {
 	mu         sync.Mutex
+	mergeMu    sync.Mutex
 	rooms      map[string]*room
+	redirects  map[string]string // Closed solo room to current shared room.
 	catalog    domain.Catalog
 	config     domain.Config
 	shuffle    shuffleFactory
@@ -50,6 +52,7 @@ type participant struct {
 	Name  string
 	Token string
 	Bot   bool
+	RunID string // Stable identity of an Endless player's original run.
 }
 
 type room struct {
@@ -67,6 +70,7 @@ type room struct {
 	server         *Server
 	config         domain.Config
 	settingsStatus string
+	draftCues      map[domain.RuleID]string
 	botWake        chan struct{}
 	done           chan struct{}
 	ctx            context.Context
@@ -111,6 +115,7 @@ type serverMessage struct {
 	Message        string             `json:"message,omitempty"`
 	Revision       uint64             `json:"revision"`
 	Room           string             `json:"room,omitempty"`
+	Token          string             `json:"token,omitempty"`
 	Seats          []seatSummary      `json:"seats,omitempty"`
 	View           *domain.PlayerView `json:"view,omitempty"`
 	Config         *domain.Config     `json:"config,omitempty"`
@@ -170,7 +175,7 @@ func NewServerWithBotOptions(config domain.Config, shuffle func() domain.Shuffle
 	if options.SeedFactory == nil {
 		options.SeedFactory = randomSeed
 	}
-	s := &Server{rooms: make(map[string]*room), catalog: catalog, config: config, shuffle: shuffle, botDelay: defaultBotDelay, botOptions: options, now: time.Now, done: make(chan struct{})}
+	s := &Server{rooms: make(map[string]*room), redirects: make(map[string]string), catalog: catalog, config: config, shuffle: shuffle, botDelay: defaultBotDelay, botOptions: options, now: time.Now, done: make(chan struct{})}
 	go s.cleanupLoop()
 	return s, nil
 }
@@ -286,6 +291,9 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.pruneLocked()
+	if target := s.redirects[request.Room]; request.Token != "" && target != "" {
+		request.Room = target
+	}
 	gameRoom := s.rooms[request.Room]
 	if gameRoom == nil {
 		if request.Token != "" {
@@ -360,6 +368,15 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	}
 	gameRoom.lastActivity = s.now()
 	host := gameRoom.seats[0].ID == seat.ID
+	if gameRoom.config.Mode == domain.ModeEndless && gameRoom.seats[0].Bot {
+		host = false
+		for _, p := range gameRoom.seats {
+			if !p.Bot {
+				host = p.ID == seat.ID
+				break
+			}
+		}
+	}
 	gameRoom.mu.Unlock()
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
@@ -370,7 +387,8 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		Name  string        `json:"name"`
 		Token string        `json:"token"`
 		Host  bool          `json:"host"`
-	}{Room: request.Room, Seat: seat.ID, Name: seat.Name, Token: seat.Token, Host: host})
+		RunID string        `json:"runId,omitempty"`
+	}{Room: request.Room, Seat: seat.ID, Name: seat.Name, Token: seat.Token, Host: host, RunID: seat.RunID})
 	gameRoom.publish()
 }
 
@@ -420,7 +438,29 @@ func (s *Server) leave(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	departing := gameRoom.seats[index]
-	if gameRoom.state == nil && index > 0 {
+	humans := 0
+	for _, p := range gameRoom.seats {
+		if !p.Bot {
+			humans++
+		}
+	}
+	if gameRoom.config.Mode == domain.ModeEndless && gameRoom.state != nil && humans > 1 {
+		client := gameRoom.clients[departing.ID]
+		delete(gameRoom.clients, departing.ID)
+		delete(gameRoom.seen, departing.ID)
+		gameRoom.seats[index].Bot = true
+		gameRoom.seats[index].Token = ""
+		gameRoom.seats[index].Name = fmt.Sprintf("Bot %d", index+1)
+		gameRoom.lastActivity = s.now()
+		gameRoom.mu.Unlock()
+		s.mu.Unlock()
+		if client != nil {
+			client.enqueue(serverMessage{Type: "room_closed", Code: "left", Message: "You left the table."})
+		}
+		gameRoom.publishLocked()
+		gameRoom.signalBot()
+		go s.reconcileEndless()
+	} else if gameRoom.state == nil && index > 0 {
 		client := gameRoom.clients[departing.ID]
 		delete(gameRoom.clients, departing.ID)
 		delete(gameRoom.seen, departing.ID)
@@ -461,6 +501,7 @@ func (r *room) finishClosedLocked(final bool, reason string) {
 	r.mu.Lock()
 	if r.server.rooms[r.id] == r {
 		delete(r.server.rooms, r.id)
+		r.server.clearRedirectsLocked(r.id)
 	}
 	clients := make([]*client, 0, len(r.clients))
 	for _, c := range r.clients {
@@ -487,8 +528,17 @@ func (s *Server) pruneLocked() {
 		if stale {
 			gameRoom.closeLocked()
 			delete(s.rooms, id)
+			s.clearRedirectsLocked(id)
 		}
 		gameRoom.mu.Unlock()
+	}
+}
+
+func (s *Server) clearRedirectsLocked(target string) {
+	for source, destination := range s.redirects {
+		if source == target || destination == target {
+			delete(s.redirects, source)
+		}
 	}
 }
 
@@ -583,6 +633,9 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	go c.writePump()
 	gameRoom.publish()
 	gameRoom.signalBot()
+	if gameRoom.config.Mode == domain.ModeEndless {
+		go s.reconcileEndless()
+	}
 	c.readPump()
 }
 
@@ -602,6 +655,8 @@ func (c *client) enqueue(message serverMessage) {
 			data = []byte(noticeNode(message.Message).Render())
 		case "room_closed":
 			data = []byte(renderClosure(message))
+		case "room_moved":
+			data = []byte(fmt.Sprintf(`<div id="room-moved" data-room="%s" data-token="%s" hx-swap-oob="outerHTML"></div>`, message.Room, message.Token))
 		default: // Acknowledgements have no visual update.
 			return
 		}
@@ -613,7 +668,7 @@ func (c *client) enqueue(message serverMessage) {
 			return
 		}
 	}
-	item := outbound{data: data, terminal: message.Type == "room_closed"}
+	item := outbound{data: data, terminal: message.Type == "room_closed" || message.Type == "room_moved"}
 	final := message.Type == "state" && message.View != nil && message.View.Public.Phase == domain.PhaseGameComplete
 	if item.terminal || final {
 		timer := time.NewTimer(5 * time.Second)
@@ -743,6 +798,9 @@ func (r *room) detach(c *client) {
 	r.mu.Unlock()
 	if changed {
 		r.publish()
+		if r.config.Mode == domain.ModeEndless {
+			go r.server.reconcileEndless()
+		}
 	}
 }
 
@@ -772,9 +830,17 @@ func (r *room) publishSnapshotLocked(allowClosed bool) {
 		clients[id] = c
 	}
 	for i, p := range r.seats {
-		seats[i] = seatSummary{ID: p.ID, Name: p.Name, Online: p.Bot || clients[p.ID] != nil, Host: i == 0, Bot: p.Bot}
+		host := i == 0
+		if r.config.Mode == domain.ModeEndless && r.seats[0].Bot {
+			host = !p.Bot && (i == 1 || len(r.seats) == 2)
+		}
+		seats[i] = seatSummary{ID: p.ID, Name: p.Name, Online: p.Bot || clients[p.ID] != nil, Host: host, Bot: p.Bot}
 	}
 	state := r.state
+	draftCues := make(map[domain.RuleID]string, len(r.draftCues))
+	for id, cue := range r.draftCues {
+		draftCues[id] = cue
+	}
 	config := r.config
 	settingsStatus := r.settingsStatus
 	events := append([]domain.Event(nil), r.lastEvents...)
@@ -790,6 +856,9 @@ func (r *room) publishSnapshotLocked(allowClosed bool) {
 				continue
 			}
 			message.Type, message.Revision, message.View, message.Events = "state", state.Revision, &view, events
+			if len(draftCues) > 0 {
+				view.Public.DraftCues = draftCues
+			}
 		}
 		c.enqueue(message)
 	}
@@ -948,13 +1017,17 @@ func (r *room) handleCommand(c *client, cmd command) {
 			err = errors.New("game has not started")
 			break
 		}
-		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionChooseRule, Seat: c.seat, Rule: cmd.Rule, BoundaryID: cmd.BoundaryID}, r.server.catalog)
+		actor := c.seat
+		if r.config.Mode == domain.ModeEndless && r.seats[0].Bot {
+			actor = r.seats[0].ID
+		}
+		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionChooseRule, Seat: actor, Rule: cmd.Rule, BoundaryID: cmd.BoundaryID}, r.server.catalog)
 	case "next":
 		if r.state == nil {
 			err = errors.New("game has not started")
 			break
 		}
-		if r.seats[0].ID != c.seat {
+		if r.seats[0].ID != c.seat && !(r.config.Mode == domain.ModeEndless && r.seats[0].Bot) {
 			err = errors.New("only the host can start a hand")
 			break
 		}
@@ -968,13 +1041,21 @@ func (r *room) handleCommand(c *client, cmd command) {
 		for i, card := range deck {
 			order[i] = card.ID
 		}
-		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionStartHand, Seat: c.seat, DeckOrder: order}, r.server.catalog)
+		actor := c.seat
+		if r.config.Mode == domain.ModeEndless && r.seats[0].Bot {
+			actor = r.seats[0].ID
+		}
+		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionStartHand, Seat: actor, DeckOrder: order}, r.server.catalog)
 	case "end":
 		if r.state == nil {
 			err = errors.New("game has not started")
 			break
 		}
-		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionEndGame, Seat: c.seat}, r.server.catalog)
+		actor := c.seat
+		if r.config.Mode == domain.ModeEndless && r.seats[0].Bot {
+			actor = r.seats[0].ID
+		}
+		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionEndGame, Seat: actor}, r.server.catalog)
 	default:
 		err = errors.New("unknown command")
 	}
@@ -995,9 +1076,16 @@ func (r *room) handleCommand(c *client, cmd command) {
 	r.recordPublicEventsLocked(r.state, events)
 	if r.config.Mode == domain.ModeEndless && cmd.Type == "next" && len(next.Seats) != len(r.seats) {
 		participants := make([]participant, len(next.Seats))
-		participants[0] = r.seats[0]
-		for i := 1; i < len(next.Seats); i++ {
-			participants[i] = participant{ID: next.Seats[i].ID, Name: fmt.Sprintf("Bot %d", i), Bot: true}
+		for i, seat := range next.Seats {
+			for _, existing := range r.seats {
+				if existing.ID == seat.ID {
+					participants[i] = existing
+					break
+				}
+			}
+			if participants[i].ID == "" {
+				participants[i] = participant{ID: seat.ID, Name: fmt.Sprintf("Bot %d", i), Bot: true}
+			}
 		}
 		r.seats = participants
 	}
@@ -1032,4 +1120,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 		go r.runBots()
 	}
 	r.signalBot()
+	if r.config.Mode == domain.ModeEndless {
+		go r.server.reconcileEndless()
+	}
 }
