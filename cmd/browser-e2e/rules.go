@@ -217,17 +217,16 @@ func (r *runner) checkFieldViewport(page *page, width, height int, mobile bool) 
 		const ruleButton=document.getElementById('rules-open').getBoundingClientRect();
 		const endButton=document.querySelector('.end-game > button')?.getBoundingClientRect();
 		const separated=!endButton || endButton.right<=ruleButton.left+2;
-		const compact=cards.every(card=>{const rect=card.getBoundingClientRect();return rect.width<=105 && rect.height>=44 && rect.height<=72;});
-		const strip=getComputedStyle(field).display==='flex' && fieldBox.height<=Math.min(96,innerHeight*.18)+3;
-		const indicator=document.querySelector('.turn-indicator');
-		const activeSeat=payload?.seats?.find(seat=>seat.turn);
-		const turnOK=indicator && indicator.dataset.phase==='playing_trick' && indicator.dataset.turn===activeSeat?.id && indicator.textContent.trim().length>0;
+		const compact=cards.every(card=>{const rect=card.getBoundingClientRect();return rect.width<=150 && rect.height>=70 && rect.height<=132;});
+		const strip=getComputedStyle(field).display==='flex' && fieldBox.height<=Math.min(144,innerHeight*.24)+3;
+		const cue=document.querySelector('.match-cue');
+		const turnOK=cue && cue.dataset.next.length>0 && payload?.seats?.some(seat=>seat.turn);
 		const target=field.querySelector('.rule-zone:last-child .rule-zone-cards');
 		const clones=[];
 		for(let i=0;i<12;i++){const clone=cards[2].cloneNode(true);clone.dataset.ruleInstance='test-extra-'+i;target.append(clone);clones.push(clone);}
 		await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 		const manyBox=field.getBoundingClientRect(),manyTable=table.getBoundingClientRect();
-		const manyOK=manyBox.height<=Math.min(96,innerHeight*.18)+3 && manyTable.top>=manyBox.bottom+4 && manyTable.height>=120 && field.scrollWidth>field.clientWidth;
+		const manyOK=manyBox.height<=Math.min(144,innerHeight*.24)+3 && manyTable.top>=manyBox.bottom+4 && manyTable.height>=120 && field.scrollWidth>field.clientWidth;
 		clones.forEach(clone=>clone.remove());
 		const ok=zones.map(z=>z.dataset.category).join(',')==='hand,play,trick,score_victory' &&
 			cards.length===3 && cards[0].dataset.ruleTitle==='Follow Suit' && cards[1].dataset.ruleTitle==='High Card Wins' && cards[2].dataset.ruleTitle==='Game Point' &&

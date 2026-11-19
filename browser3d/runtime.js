@@ -131,29 +131,39 @@ export function createRuntime(canvas, callbacks) {
     else canvas.style.cursor = 'default';
     render();
   }
-  function animate(description) {
-    if (description.version !== 1 || !description.steps?.length || !objects.has(description.target)) return Promise.resolve(false);
-    cancel(); const token = generation, object = objects.get(description.target), origin = object.position.clone();
-    maxTravel = 0; let index = 0, started = performance.now(), from = snapshot(object);
-    motion = description.target;
+  function animateAll(descriptions) {
+    const tracks = descriptions.filter(item => item.version === 1 && item.steps?.length && objects.has(item.target))
+      .map(item => ({item, object: objects.get(item.target), from: snapshot(objects.get(item.target)), origin: objects.get(item.target).position.clone()}));
+    if (!tracks.length) return Promise.resolve(false);
+    cancel(); const token = generation;
+    maxTravel = 0; let index = 0, started = performance.now();
+    motion = tracks.map(track => track.item.target).join(',');
     return new Promise(resolve => {
       const tick = now => {
-        if (disposed || token !== generation || !objects.has(description.target)) { resolve(false); return; }
-        const step = description.steps[index], t = Math.min(1, (now - started) / step.durationMs), k = ease(step.easing, t);
-        for (const field of ['position', 'rotation', 'scale']) {
-          const values = from[field].map((v, i) => v + (step.to[field][i] - v) * k);
-          if (field === 'rotation') object.rotation.set(...values); else object[field].set(...values);
+        if (disposed || token !== generation || tracks.some(track => !objects.has(track.item.target))) { resolve(false); return; }
+        let complete = true;
+        for (const track of tracks) {
+          const step = track.item.steps[index];
+          if (!step) continue;
+          const t = Math.min(1, (now - started) / step.durationMs), k = ease(step.easing, t);
+          for (const field of ['position', 'rotation', 'scale']) {
+            const values = track.from[field].map((v, i) => v + (step.to[field][i] - v) * k);
+            if (field === 'rotation') track.object.rotation.set(...values); else track.object[field].set(...values);
+          }
+          maxTravel = Math.max(maxTravel, track.object.position.distanceTo(track.origin));
+          if (t < 1) complete = false;
         }
-        maxTravel = Math.max(maxTravel, object.position.distanceTo(origin)); render();
-        if (t >= 1) {
-          index++; if (index >= description.steps.length) { motion = null; resolve(true); return; }
-          from = snapshot(object); started = now;
+        render();
+        if (complete) {
+          index++; if (tracks.every(track => index >= track.item.steps.length)) { motion = null; resolve(true); return; }
+          tracks.forEach(track => { track.from = snapshot(track.object); }); started = now;
         }
         requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);
     });
   }
+  const animate = description => animateAll([description]);
   function ray(event) {
     const box = canvas.getBoundingClientRect(); if (!box.width || !box.height) return false;
     raycaster.setFromCamera(new THREE.Vector2((event.clientX-box.left)/box.width*2-1, -(event.clientY-box.top)/box.height*2+1), camera);
@@ -225,7 +235,7 @@ export function createRuntime(canvas, callbacks) {
     return {x: b.left + (p.x + 1) * b.width / 2, y: b.top + (1 - p.y) * b.height / 2};
   }
   resize();
-  return {apply,animate,cancel,resetDrag,
+  return {apply,animate,animateAll,cancel,resetDrag,
     stats: () => ({objects:objects.size,created:createCount,revision,motion,maxTravel,width:canvas.width,height:canvas.height,dragging:!!active}),
     projectPoint: position => projectPoint(vec(position)),
     project: (id, offset = [0, 0, 0]) => {

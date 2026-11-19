@@ -133,6 +133,70 @@ func TestEndlessConcurrentTransferAndReconnect(t *testing.T) {
 	}
 }
 
+func TestEndlessAutomaticDealAtSharedRoundBoundaryKeepsBothHumans(t *testing.T) {
+	s, web := testServer(t)
+	s.botDelay = time.Hour
+	s.dealDelay = 80 * time.Millisecond
+	a := startSoloForMerge(t, web.URL, "A")
+	b := startSoloForMerge(t, web.URL, "B")
+	ca, cb := dialRoom(t, web.URL, a), dialRoom(t, web.URL, b)
+	_ = readMessage(t, ca, "state")
+	_ = readMessage(t, cb, "state")
+	parkAtOpenBoundary(s, a.Room, 11, 3)
+	parkAtOpenBoundary(s, b.Room, 17, 3)
+	s.reconcileEndless()
+	_ = readMessage(t, ca, "room_moved")
+	_ = readMessage(t, cb, "room_moved")
+	ra := joinRoom(t, web.URL, a.Room, a.Name, a.Token, http.StatusOK)
+	rb := joinRoom(t, web.URL, b.Room, b.Name, b.Token, http.StatusOK)
+	na, nb := dialRoom(t, web.URL, ra), dialRoom(t, web.URL, rb)
+	joined := readMessage(t, na, "state")
+	_ = readMessage(t, nb, "state")
+	if html := renderScreen(joined, a.Seat, s.catalog, *joined.Config); !strings.Contains(html, "Two runs joined") {
+		t.Fatal("shared-round cue disappeared from the notification bar")
+	}
+
+	// Park the shared table at the boundary where the next Endless cycle
+	// shrinks to two seats. The scheduled deal must retain both controllers.
+	s.mu.Lock()
+	shared := s.rooms[ra.Room]
+	s.mu.Unlock()
+	shared.mu.Lock()
+	shared.state.Round, shared.state.RoundHand = 7, 0
+	shared.state.Phase = domain.PhaseHandComplete
+	shared.state.Hands = map[domain.SeatID][]domain.CardID{}
+	shared.state.Retained = nil
+	shared.state.CurrentTrick = nil
+	shared.state.Revision++
+	before := shared.state.Revision
+	shared.markDealBoundaryLocked([]domain.Event{{Kind: domain.EventHandCompleted}})
+	shared.mu.Unlock()
+	shared.scheduleAutomaticDeal()
+	va, vb := readRevision(t, na, before+1), readRevision(t, nb, before+1)
+	if va.View.Public.Phase != domain.PhasePlayingTrick || va.View.Public.RoundHand != 1 || len(va.View.Public.Seats) != 2 {
+		t.Fatalf("shared boundary did not automatically deal two seats: %+v", va.View.Public)
+	}
+	if va.View.Seat != a.Seat || vb.View.Seat != b.Seat || len(va.View.Hand) == 0 || len(vb.View.Hand) == 0 {
+		t.Fatal("a shared player lost their private hand at the boundary")
+	}
+	shared.mu.Lock()
+	first, second := shared.seats[0], shared.seats[1]
+	shared.mu.Unlock()
+	participants := map[domain.SeatID]participant{first.ID: first, second.ID: second}
+	if first.Bot || second.Bot || len(participants) != 2 ||
+		participants[a.Seat].Token != a.Token || participants[b.Seat].Token != b.Token ||
+		participants[a.Seat].RunID != a.Room || participants[b.Seat].RunID != b.Room {
+		t.Fatalf("shared participants were rebuilt as bots: %+v %+v", first, second)
+	}
+	if len(va.Seats) != 2 || !va.Seats[0].Host || va.Seats[0].Bot || va.Seats[1].Bot {
+		t.Fatalf("shared seat identities changed: %+v", va.Seats)
+	}
+	html := renderScreen(va, a.Seat, s.catalog, *va.Config)
+	if !strings.Contains(html, "Run totals") || !strings.Contains(html, "A · 11") || !strings.Contains(html, "B · 17") {
+		t.Fatal("Scores control lost either shared player's run total")
+	}
+}
+
 func TestEndlessIncompatibleDealNeverTransfers(t *testing.T) {
 	s, web := testServer(t)
 	s.botDelay = time.Hour

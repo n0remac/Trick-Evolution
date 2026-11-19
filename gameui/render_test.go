@@ -219,39 +219,52 @@ func TestPersistentTurnIndicatorUsesAuthoritativePhaseAndSeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	participants := []seatSummary{{ID: "alice", Name: "Alice", Host: true}, {ID: "bob", Name: "Bot 1", Bot: true}}
-	render := func(id domain.SeatID) string {
+	render := func(id domain.SeatID) (string, cardtable.Payload) {
 		t.Helper()
 		view, err := domain.ProjectForSeat(state, catalog, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return renderScreen(serverMessage{Type: "state", Room: "turn", View: &view, Seats: participants, Sequence: 1}, id, catalog, cfg)
+		html := renderScreen(serverMessage{Type: "state", Room: "turn", View: &view, Seats: participants, Sequence: 1}, id, catalog, cfg)
+		match := regexp.MustCompile(`data-scene="([A-Za-z0-9+/=]+)"`).FindStringSubmatch(html)
+		if match == nil {
+			t.Fatal("missing table projection")
+		}
+		data, err := base64.StdEncoding.DecodeString(match[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload cardtable.Payload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			t.Fatal(err)
+		}
+		return html, payload
 	}
-	if html := render("alice"); !strings.Contains(html, `data-turn="bob"`) || !strings.Contains(html, `Bot 1 (bot) is playing`) {
-		t.Fatal("opponent bot turn missing")
+	if html, payload := render("alice"); !strings.Contains(html, `data-next="Bot 1 to play"`) || !strings.Contains(html, `Bot 1 · score 0 · turn`) || !payload.Seats[1].Turn || payload.Seats[0].Turn {
+		t.Fatal("opponent turn missing from seat and cue")
 	}
-	if html := render("bob"); !strings.Contains(html, `Your turn · Bot 1`) || !strings.Contains(html, `data-local="true"`) {
-		t.Fatal("local turn missing")
+	if html, payload := render("bob"); !strings.Contains(html, `data-next="Your turn"`) || !payload.Seats[0].Turn {
+		t.Fatal("local turn missing from seat and cue")
 	}
 	state, _, err = domain.Step(state, domain.Action{Kind: domain.ActionPlayCard, Seat: "bob", Card: state.Hands["bob"][0]}, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html := render("alice"); !strings.Contains(html, `Your turn · Alice`) || !strings.Contains(html, `data-turn="alice"`) {
+	if html, payload := render("alice"); !strings.Contains(html, `data-next="Your turn"`) || !payload.Seats[0].Turn {
 		t.Fatal("turn did not advance")
 	}
 	state, _, err = domain.Step(state, domain.Action{Kind: domain.ActionPlayCard, Seat: "alice", Card: state.Hands["alice"][0]}, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html := render("alice"); !strings.Contains(html, `Hand complete · deal the next hand`) || strings.Contains(html, `data-local="true"`) {
+	if html, payload := render("alice"); !strings.Contains(html, `data-next="Dealing next hand soon"`) || payload.Seats[0].Turn || payload.Seats[1].Turn {
 		t.Fatal("hand completion shows stale turn")
 	}
 	state, _, err = domain.Step(state, domain.Action{Kind: domain.ActionEndGame, Seat: "alice"}, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html := render("bob"); !strings.Contains(html, `Game ended`) || strings.Contains(html, `data-local="true"`) {
+	if html, payload := render("bob"); !strings.Contains(html, `data-next="Game complete"`) || payload.Seats[0].Turn || payload.Seats[1].Turn {
 		t.Fatal("terminal turn is stale")
 	}
 }

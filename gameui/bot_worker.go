@@ -125,6 +125,7 @@ func (r *room) runBots() {
 				return
 			}
 			r.recordPublicEventsLocked(r.state, events)
+			r.markDealBoundaryLocked(events)
 			r.state = &next
 			complete := next.Phase == domain.PhaseGameComplete
 			if complete {
@@ -140,6 +141,7 @@ func (r *room) runBots() {
 				r.finishClosedLocked(true, "Game complete. Room closed.")
 			} else {
 				r.publishLocked()
+				r.scheduleAutomaticDeal()
 			}
 			r.dispatchMu.Unlock()
 			if r.config.Mode == domain.ModeEndless && (next.Phase == domain.PhaseHandComplete || next.Phase == domain.PhaseAwaitingChoice) {

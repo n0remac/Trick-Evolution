@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/n0remac/trick-evolution/domain"
 )
@@ -18,6 +19,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.botDelay = 0
+	s.dealDelay = 120 * time.Millisecond
 	web := httptest.NewServer(s.Handler())
 	t.Cleanup(web.Close)
 	t.Cleanup(s.Close)
@@ -52,12 +54,14 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 		t.Fatalf("opening: %+v", message)
 	}
 	openingHTML := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
-	for _, text := range []string{"Hand countdown:", "Run Score", "Round Pacing", "End run"} {
+	for _, text := range []string{"rule draft", "Run totals", "Round Pacing", "End run"} {
 		if !strings.Contains(openingHTML, text) {
 			t.Fatalf("opening screen missing %q", text)
 		}
 	}
 	serial, drafts, tables, holds := 0, 0, 0, 0
+	soloPaused, reviewRestored, keepSkipped := false, false, false
+	expectKeepSkip := false
 	noticeReconnect, gameReconnect, resultReconnect := false, false, false
 	for message.View.Public.CompletedHands < 12 {
 		public := message.View.Public
@@ -73,8 +77,18 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 			}
 		case domain.PhaseAwaitingChoice:
 			drafts++
+			time.Sleep(2 * s.dealDelay)
+			s.mu.Lock()
+			pendingRoom := s.rooms[session.Room]
+			s.mu.Unlock()
+			pendingRoom.mu.Lock()
+			stillDraft := pendingRoom.state.Revision == public.Revision && pendingRoom.state.Phase == domain.PhaseAwaitingChoice
+			pendingRoom.mu.Unlock()
+			if !stillDraft {
+				t.Fatal("automatic deal crossed a pending draft")
+			}
 			draftHTML := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
-			for _, text := range []string{"draft-choices", public.PendingBoundaryID, "Keep current rules", "Run Score"} {
+			for _, text := range []string{"draft-choices", public.PendingBoundaryID, "Keep current rules", "Run totals"} {
 				if !strings.Contains(draftHTML, text) {
 					t.Fatalf("draft screen missing %q", text)
 				}
@@ -96,12 +110,78 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 			choice := domain.RuleID("")
 			if drafts == 1 {
 				choice = domain.RuleLastTrickBonus
+			} else {
+				expectKeepSkip = true
 			}
 			serial++
 			sendCommand(t, conn, command{Type: "choose_rule", ID: fmt.Sprintf("draft-%d", serial), Rule: choice, BoundaryID: public.PendingBoundaryID})
 		case domain.PhaseHandComplete:
-			serial++
-			sendCommand(t, conn, command{Type: "next", ID: fmt.Sprintf("next-%d", serial)})
+			if expectKeepSkip {
+				if message.ReviewRule != "" || strings.Contains(renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig()), "new-rule-overlay") {
+					t.Fatal("Keep current rules opened a rule review")
+				}
+				keepSkipped, expectKeepSkip = true, false
+			}
+			if !soloPaused && public.CompletedHands == 1 {
+				soloPaused = true
+				_ = conn.Close()
+				for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+					s.mu.Lock()
+					pendingRoom := s.rooms[session.Room]
+					s.mu.Unlock()
+					pendingRoom.mu.Lock()
+					offline := pendingRoom.clients[session.Seat] == nil
+					pendingRoom.mu.Unlock()
+					if offline {
+						break
+					}
+				}
+				time.Sleep(2 * s.dealDelay)
+				s.mu.Lock()
+				pendingRoom := s.rooms[session.Room]
+				s.mu.Unlock()
+				pendingRoom.mu.Lock()
+				paused := pendingRoom.state.Revision == public.Revision && pendingRoom.state.Phase == domain.PhaseHandComplete
+				pendingRoom.mu.Unlock()
+				if !paused {
+					t.Fatal("solo run dealt while disconnected")
+				}
+				conn = dialRoom(t, web.URL, session)
+				message = readMessage(t, conn, "state")
+			}
+			if message.ReviewRule != "" {
+				if reviewRestored {
+					t.Fatal("rule review repeated")
+				}
+				reviewRestored = true
+				html := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
+				definition, _ := s.catalog.Definition(message.ReviewRule)
+				for _, text := range []string{"A new rule is being added", definition.Title, definition.Text, "Continue"} {
+					if !strings.Contains(html, text) {
+						t.Fatalf("pending rule review missing %q", text)
+					}
+				}
+				_ = conn.Close()
+				conn = dialRoom(t, web.URL, session)
+				message = readMessage(t, conn, "state")
+				if message.ReviewRule != definition.ID {
+					t.Fatal("reconnect lost pending rule review")
+				}
+				time.Sleep(2 * s.dealDelay)
+				s.mu.Lock()
+				pendingRoom := s.rooms[session.Room]
+				s.mu.Unlock()
+				pendingRoom.mu.Lock()
+				paused := pendingRoom.state.Revision == public.Revision && pendingRoom.state.Phase == domain.PhaseHandComplete
+				pendingRoom.mu.Unlock()
+				if !paused {
+					t.Fatal("automatic deal crossed pending rule review")
+				}
+				serial++
+				continueCommand := command{Type: "continue_rule", ID: fmt.Sprintf("continue-%d", serial)}
+				sendCommand(t, conn, continueCommand)
+				sendCommand(t, conn, continueCommand)
+			}
 		default:
 			t.Fatalf("unexpected phase %s", public.Phase)
 		}
@@ -139,13 +219,13 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 			}
 			if resultReconnect && after.ShortGameResult != nil {
 				html := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
-				if !strings.Contains(html, "Three-round game 1 complete") || !strings.Contains(html, "Winner:") && !strings.Contains(html, "Tie:") {
+				if !strings.Contains(html, `data-result-number="1"`) || !strings.Contains(html, "Three-round game 1 complete") || !strings.Contains(html, "Latest game 1") || !strings.Contains(html, "Winner:") && !strings.Contains(html, "Tie:") {
 					t.Fatal("result is not readable alongside open play")
 				}
 			}
 		}
 	}
-	if message.View.Public.Phase == domain.PhaseGameComplete || drafts < 2 || tables == 0 || holds == 0 || !noticeReconnect || !gameReconnect || !resultReconnect {
+	if message.View.Public.Phase == domain.PhaseGameComplete || drafts < 2 || tables == 0 || holds == 0 || !noticeReconnect || !gameReconnect || !resultReconnect || !soloPaused || !reviewRestored || !keepSkipped {
 		t.Fatalf("progression: hands=%d drafts=%d tables=%d holds=%d", message.View.Public.CompletedHands, drafts, tables, holds)
 	}
 	total := 0

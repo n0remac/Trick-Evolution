@@ -78,9 +78,9 @@ const stateExpression = `(() => {
 	return {
 		ready: Boolean(window.__trickUIReady),
 		status: document.querySelector('.status')?.textContent || (turn ? turn.name + ' to play' : ''),
-		turnIndicator: document.querySelector('.turn-indicator')?.textContent || '',
+		turnIndicator: document.querySelector('.match-cue')?.dataset.next || '',
 		settingsFeedback: document.getElementById('review-settings-feedback')?.textContent || '',
-		notice: document.querySelector('.match-event')?.textContent || document.querySelector('#notice')?.textContent || '',
+		notice: document.querySelector('.match-cue')?.dataset.event || document.querySelector('#notice')?.textContent || '',
 		connection: document.querySelector('#connection')?.textContent || '',
 		revision: Number(screen?.dataset.revision) || 0,
 		hand: Number(document.querySelector('.game-panel')?.dataset.hand) || 0,
@@ -494,9 +494,6 @@ func (r *runner) full() error {
 			break
 		}
 		if err := r.stopAutoplay(); err != nil {
-			return err
-		}
-		if err := r.alice.click(r.ctx, "Deal next hand"); err != nil {
 			return err
 		}
 		if _, _, err := r.waitBoth(fmt.Sprintf("hand %d deal", hand+1), 20*time.Second, func(a, b uiState) bool {
