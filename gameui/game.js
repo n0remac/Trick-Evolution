@@ -379,9 +379,9 @@
     if (!ruleDetails.open) return;
     const rule = [...document.querySelectorAll('#game-rules [data-rule-instance]')]
       .find(card => card.dataset.ruleInstance === ruleDetails.dataset.instance);
-    ruleDetails.querySelector('#rule-title').textContent = rule?.dataset.ruleTitle || `${ruleDetails.dataset.title} · no longer active`;
-    ruleDetails.querySelector('#rule-text').textContent = rule?.dataset.ruleDetail ||
-      'This field card is no longer active. Open Rules, then Changes, to see what replaced it.';
+    if (!rule) { ruleDetails.close(); return; }
+    ruleDetails.querySelector('#rule-title').textContent = rule.dataset.ruleTitle;
+    ruleDetails.querySelector('#rule-text').textContent = rule.dataset.ruleDetail;
   }
   new MutationObserver(syncRuleDetails).observe(live, {childList: true, subtree: true});
 

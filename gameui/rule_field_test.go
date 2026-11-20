@@ -41,13 +41,34 @@ func TestRuleFieldStartingZonesAndDetails(t *testing.T) {
 	if strings.Count(html, "Base rules only") != 2 || strings.Contains(html, "Standard Deck") {
 		t.Fatal("empty zones or hidden baselines rendered incorrectly")
 	}
-	if !strings.Contains(html, "Follow suit when able") || !strings.Contains(html, "Lead suit can win") || !strings.Contains(html, "highest eligible rank") || !strings.Contains(html, "No prerequisite rules") {
+	if !strings.Contains(html, "Follow suit when able") || !strings.Contains(html, "Lead suit can win") || !strings.Contains(html, "highest eligible rank") || strings.Contains(html, "No prerequisite rules") {
 		t.Fatal("field text and detail do not use effective mechanics")
 	}
 	for _, card := range state.Hands["guest"] {
 		if strings.Contains(html, string(card)) {
 			t.Fatalf("opponent card leaked into field: %s", card)
 		}
+	}
+}
+
+func TestRuleCardPopupContainsOnlyGameplay(t *testing.T) {
+	state, catalog := fieldFixture(t)
+	appendFieldRule(&state, domain.RuleLowCardWins, "low")
+	view := fieldView(t, state, catalog)
+	rule := view.Public.ActiveField[len(view.Public.ActiveField)-1]
+	definition, _ := catalog.Definition(rule.Instance.DefinitionID)
+	detail := fieldCardDetail(rule, definition, view.Public, catalog)
+	if !strings.Contains(detail, "lowest") {
+		t.Fatalf("gameplay effect missing: %q", detail)
+	}
+	for _, metadata := range []string{"Category:", "Starting field", "Revealed after", "Requires ", "prerequisite", "Replaces:", "controlled by", "Superseded"} {
+		if strings.Contains(detail, metadata) {
+			t.Fatalf("popup contains %q: %q", metadata, detail)
+		}
+	}
+	changes := reviewHTML(t, reviewMessage(&view), "host", catalog, domain.DefaultConfig())
+	if !strings.Contains(changes, "Changes") || !strings.Contains(changes, "Low Card Wins") {
+		t.Fatal("Rules review or Changes lost history")
 	}
 }
 
@@ -71,7 +92,7 @@ func TestRuleFieldReplacementAdditiveAndReconnect(t *testing.T) {
 		t.Fatalf("unexpected stable rule positions: %v", ids)
 	}
 	html := renderRuleField(view.Public, catalog).Render()
-	if strings.Count(html, `class="rule rule-card"`) != 3 || strings.Contains(html, `data-rule-title="Low Card Wins"`) || !strings.Contains(html, "Tie Fixture") || !strings.Contains(html, "Replaces: Low Card Wins") {
+	if strings.Count(html, `class="rule rule-card"`) != 3 || strings.Contains(html, `data-rule-title="Low Card Wins"`) || !strings.Contains(html, "Tie Fixture") || strings.Contains(html, "Replaces: Low Card Wins") {
 		t.Fatal("field did not retain only active replacements/additions")
 	}
 	reconnected := fieldView(t, state, catalog)
@@ -91,8 +112,8 @@ func TestRuleFieldPartialAndInactiveDependency(t *testing.T) {
 	appendFieldRule(&state, eligibility, "eligibility")
 	view := fieldView(t, state, catalog)
 	html := renderRuleField(view.Public, catalog).Render()
-	if !strings.Contains(html, "Partly replaced") || !strings.Contains(html, "winner eligibility is no longer controlled by this card") || !strings.Contains(html, "Eligibility Fixture controls it now") {
-		t.Fatal("partial replacement detail is stale")
+	if !strings.Contains(html, "Partly replaced") || strings.Contains(html, "winner eligibility is no longer controlled by this card") || strings.Contains(html, "Eligibility Fixture controls it now") {
+		t.Fatal("popup included replacement metadata")
 	}
 	state, catalog = fieldFixture(t)
 	for i := range catalog.Definitions {

@@ -68,6 +68,14 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 		if public.Round == 2 && public.RoundHand == 1 && public.DealSize != 5 {
 			t.Fatalf("round two dealt %d cards, want five", public.DealSize)
 		}
+		if public.Round == 2 && public.RoundHand == 1 && (public.LastScorecard == nil || public.LastScorecard.HandNumber != 3 || len(public.LastScorecard.Players) != 2) {
+			t.Fatalf("round-one scorecard lost across Endless roster change: %+v", public.LastScorecard)
+		}
+		if public.CompletedHands == 3 && public.Phase == domain.PhaseHandComplete {
+			if html := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig()); !strings.Contains(html, "scorecard-visible") {
+				t.Fatal("final hand of multi-hand Endless round hid its scorecard")
+			}
+		}
 		switch public.Phase {
 		case domain.PhasePlayingTrick:
 			if public.Turn == session.Seat {

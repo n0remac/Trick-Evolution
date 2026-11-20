@@ -125,14 +125,24 @@ h2 { margin: 0 0 .75rem; }
 .scores-control { position: absolute; top: -3.25rem; left: 0; width: min(18rem, 48vw); pointer-events: auto; z-index: 5; font-size: .82rem; }
 .scores-control summary { list-style: none; display: inline-flex; align-items: center; min-height: 44px; padding: .45rem .75rem; border: 1px solid #719484; border-radius: .6rem; background: #102b21; color: #fff2c6; font-weight: 700; cursor: pointer; }
 .scores-control summary::-webkit-details-marker { display: none; }
-.scores-control[open] { padding: 0 .6rem .6rem; border: 1px solid #719484; border-radius: .6rem; background: #102b21; box-shadow: 0 8px 25px #06140dcc; max-height: min(65dvh, 28rem); overflow: auto; }
+.scores-control[open] { width: min(28rem, calc(100vw - 1rem)); padding: 0 .6rem .6rem; border: 1px solid #719484; border-radius: .6rem; background: #102b21; box-shadow: 0 8px 25px #06140dcc; max-height: min(65dvh, 28rem); overflow: auto; }
+.scorecard { padding: .7rem; border: 1px solid #d5bb75; border-radius: .7rem; background: #152d23f5; color: #edf3e7; text-align: left; }
+.scorecard h2 { font-size: 1rem; margin: 0 0 .5rem; color: #ffe09a; }
+.scorecard h3 { font-size: .92rem; margin: 0 0 .35rem; }
+.scorecard p { font-size: .8rem; line-height: 1.4; margin: .2rem 0; overflow-wrap: anywhere; }
+.scorecard-player { padding: .5rem 0; border-top: 1px solid #527260; }
+.scorecard-note { color: #ffdf9b; padding-top: .35rem; }
+.scorecard-visible { position: absolute; z-index: 5; left: 50%; bottom: var(--hud-bottom); transform: translateX(-50%); width: min(42rem, calc(100vw - 1rem)); max-height: min(48dvh, 30rem); overflow-y: auto; pointer-events: auto; }
+.scorecard-saved { margin-top: .6rem; }
+.game-panel:has(.scorecard-visible) .hand-status { top: 34%; }
+.game-panel:has(.scorecard-visible) .game-results { top: 34%; }
 .scores-control[open] summary { margin-left: -.6rem; border: 0; }
 .scores-standings { display: grid; gap: .2rem; padding: .4rem 0; border-top: 1px solid #537663; }
 .scores-standings strong { color: #ffe09a; }
 .table-seat.winner { border-color: #ffe09a; box-shadow: 0 0 0 .2rem #eec97677, 0 0 18px #eec976; }
 .fallback-seats { display: none; }
 .table-fallback .game-panel { display: grid; gap: 1rem; padding: 1rem; }
-.table-fallback .game-hud, .table-fallback .end-game, .table-fallback .game-results, .table-fallback .hand-status, .table-fallback .share-game { position: static; transform: none; }
+.table-fallback .game-hud, .table-fallback .end-game, .table-fallback .game-results, .table-fallback .hand-status, .table-fallback .share-game, .table-fallback .scorecard-visible { position: static; transform: none; }
 .table-fallback .scores-control { position: relative; top: auto; }
 .table-fallback .fallback-seats { display: flex; flex-wrap: wrap; gap: .4rem; }
 .table-fallback .fallback-seats span { padding: .3rem .5rem; border: 1px solid #719484; border-radius: .4rem; background: #102b21; }

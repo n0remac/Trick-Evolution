@@ -148,6 +148,7 @@ type MatchState struct {
 	Captured          map[SeatID][]CardID
 	DealOwner         map[CardID]SeatID // Private until hand settlement.
 	HandAwards        []HandAward
+	LastScorecard     *Scorecard // Last settled hand; survives the next deal and roster change.
 	StandardDraw      []CardID
 	RuleDraw          []RuleID
 	CurrentTrick      []Play

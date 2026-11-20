@@ -9,7 +9,8 @@ type HandAward struct {
 	Title      string
 	Seat       SeatID
 	Card       CardID
-	HiddenCard bool // Public projection redacts a card still retained in a hand.
+	CardLabel  string // Public historical scorecards use a label, never a reusable deck ID.
+	HiddenCard bool   // Public projection redacts a card still retained in a hand.
 	Trick      int
 	Tally      int
 	Points     int

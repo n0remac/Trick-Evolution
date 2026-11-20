@@ -62,6 +62,7 @@ type room struct {
 	dispatchMu     sync.Mutex // Serializes accepted actions and snapshot delivery for this room.
 	id             string
 	seats          []participant
+	seatNames      map[domain.SeatID]string // Original labels for settled scorecards.
 	clients        map[domain.SeatID]*client
 	state          *domain.MatchState
 	lastEvents     []domain.Event
@@ -115,20 +116,21 @@ type seatSummary struct {
 }
 
 type serverMessage struct {
-	Type           string             `json:"type"`
-	ID             string             `json:"id,omitempty"`
-	Code           string             `json:"code,omitempty"`
-	Message        string             `json:"message,omitempty"`
-	Revision       uint64             `json:"revision"`
-	Room           string             `json:"room,omitempty"`
-	Token          string             `json:"token,omitempty"`
-	Seats          []seatSummary      `json:"seats,omitempty"`
-	View           *domain.PlayerView `json:"view,omitempty"`
-	Config         *domain.Config     `json:"config,omitempty"`
-	SettingsStatus string             `json:"settingsStatus,omitempty"`
-	ReviewRule     domain.RuleID      `json:"reviewRule,omitempty"`
-	Events         []domain.Event     `json:"events,omitempty"`
-	Sequence       uint64             `json:"-"`
+	Type           string                   `json:"type"`
+	ID             string                   `json:"id,omitempty"`
+	Code           string                   `json:"code,omitempty"`
+	Message        string                   `json:"message,omitempty"`
+	Revision       uint64                   `json:"revision"`
+	Room           string                   `json:"room,omitempty"`
+	Token          string                   `json:"token,omitempty"`
+	Seats          []seatSummary            `json:"seats,omitempty"`
+	SeatNames      map[domain.SeatID]string `json:"-"`
+	View           *domain.PlayerView       `json:"view,omitempty"`
+	Config         *domain.Config           `json:"config,omitempty"`
+	SettingsStatus string                   `json:"settingsStatus,omitempty"`
+	ReviewRule     domain.RuleID            `json:"reviewRule,omitempty"`
+	Events         []domain.Event           `json:"events,omitempty"`
+	Sequence       uint64                   `json:"-"`
 }
 
 type command struct {
@@ -851,7 +853,17 @@ func (r *room) publishSnapshotLocked(allowClosed bool) {
 		clients[id] = c
 	}
 	for i, p := range r.seats {
+		if r.seatNames == nil {
+			r.seatNames = make(map[domain.SeatID]string)
+		}
+		if r.seatNames[p.ID] == "" {
+			r.seatNames[p.ID] = p.Name
+		}
 		seats[i] = seatSummary{ID: p.ID, Name: p.Name, Online: p.Bot || clients[p.ID] != nil, Host: r.isHostSeatLocked(p.ID), Bot: p.Bot}
+	}
+	seatNames := make(map[domain.SeatID]string, len(r.seatNames))
+	for id, label := range r.seatNames {
+		seatNames[id] = label
 	}
 	state := r.state
 	draftCues := make(map[domain.RuleID]string, len(r.draftCues))
@@ -864,7 +876,7 @@ func (r *room) publishSnapshotLocked(allowClosed bool) {
 	events := append([]domain.Event(nil), r.lastEvents...)
 	r.mu.Unlock()
 	for seat, c := range clients {
-		message := serverMessage{Room: r.id, Seats: seats, Sequence: sequence, Config: &config, SettingsStatus: settingsStatus, ReviewRule: reviewRule}
+		message := serverMessage{Room: r.id, Seats: seats, SeatNames: seatNames, Sequence: sequence, Config: &config, SettingsStatus: settingsStatus, ReviewRule: reviewRule}
 		if state == nil {
 			message.Type = "lobby"
 		} else {

@@ -34,6 +34,7 @@ type PublicView struct {
 	RevealEvery       int
 	InitialRules      []RuleID
 	HandAwards        []HandAward
+	LastScorecard     *Scorecard
 	Seats             []PublicSeat
 	CurrentTrick      []Play
 	TrumpSuit         Suit
@@ -83,6 +84,7 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 		EndedEarly: state.EndedEarly, EndedBy: state.EndedBy,
 		Rules: rules.History, ActiveField: rules.ActiveField, Effective: rules.Effective, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...), TrumpSuit: state.TrumpSuit, BrokenSpades: state.BrokenSpades, BrokenHearts: state.BrokenHearts,
 		Seats: make([]PublicSeat, len(state.Seats))}
+	view.LastScorecard = cloneScorecard(state.LastScorecard)
 	if state.Config.Mode == ModeEndless {
 		if seats, ok := endlessNextRoster(state, rules); ok {
 			view.NextRosterSize = len(seats)

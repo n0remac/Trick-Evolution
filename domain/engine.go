@@ -115,6 +115,9 @@ func stepEndGame(state MatchState, action Action, seatIndex int, hostOnly bool) 
 	next.Turn = ""
 	next.EndedEarly = true
 	next.EndedBy = action.Seat
+	if state.Phase == PhasePlayingTrick {
+		next.LastScorecard = makeScorecard(next, RuleResolution{}, true)
+	}
 	return next, []Event{
 		{Kind: EventGameEnded, Revision: next.Revision, Hand: next.HandNumber, Seat: action.Seat},
 		{Kind: EventGameCompleted, Revision: next.Revision, Hand: next.HandNumber, Winners: gameWinners(next.Seats)},
@@ -358,6 +361,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	if err := settleHandScores(&next, resolvedRules); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
+	next.LastScorecard = makeScorecard(next, resolvedRules, false)
 	if next.Config.Mode == ModeEndless {
 		recordEndlessPoints(state, &next)
 		next.CompletedHands++
@@ -512,6 +516,7 @@ func cloneState(state MatchState) MatchState {
 		}
 	}
 	next.HandAwards = slices.Clone(state.HandAwards)
+	next.LastScorecard = cloneScorecard(state.LastScorecard)
 	next.Config.InitialRules = slices.Clone(state.Config.InitialRules)
 	next.Field = slices.Clone(state.Field)
 	next.DraftOptions = slices.Clone(state.DraftOptions)

@@ -1,7 +1,6 @@
 package gameui
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
@@ -192,18 +191,16 @@ func suitName(suit domain.Suit) string {
 }
 
 func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition, public domain.PublicView, catalog domain.Catalog) string {
-	lines := []string{"Category: " + categoryLabel(definition.FieldCategory) + "."}
-	if rule.Instance.IntroducedAfterHand == 0 {
-		lines = append(lines, "Starting field card.")
-	} else {
-		lines = append(lines, fmt.Sprintf("Revealed after hand %d; applies from hand %d.", rule.Instance.IntroducedAfterHand, rule.Instance.IntroducedAfterHand+1))
+	lines := []string{}
+	for _, sentence := range strings.Split(definition.Text, ". ") {
+		if strings.HasPrefix(sentence, "Replaces ") || strings.HasPrefix(sentence, "Requires ") || strings.HasPrefix(sentence, "A reveal first ") {
+			continue
+		}
+		lines = append(lines, sentence)
 	}
 	for _, effect := range public.Effective {
 		if effect.InstanceID == rule.Instance.InstanceID {
 			lines = append(lines, modeEffectDescription(effect, public.Mode))
-			if effect.Mechanic == domain.MechanicTrump || effect.Mechanic == domain.MechanicBreakSpades || effect.Mechanic == domain.MechanicBreakHearts {
-				lines = append(lines, shortEffect(effect, rule, public)+".")
-			}
 		}
 	}
 	if definition.ID == domain.RuleLowTrump {
@@ -214,71 +211,5 @@ func fieldCardDetail(rule domain.ResolvedRule, definition domain.RuleDefinition,
 			}
 		}
 	}
-	for _, declared := range definition.Effects {
-		active := false
-		for _, mechanic := range rule.ActiveEffects {
-			if mechanic == declared.Mechanic {
-				active = true
-			}
-		}
-		if active {
-			continue
-		}
-		controller := "another rule"
-		for _, effect := range public.Effective {
-			if effect.Mechanic == declared.Mechanic {
-				if current, ok := catalog.Definition(effect.Source); ok {
-					controller = current.Title
-				}
-				break
-			}
-		}
-		lines = append(lines, fmt.Sprintf("%s is no longer controlled by this card; %s controls it now.", mechanicNames([]domain.Mechanic{declared.Mechanic}), controller))
-	}
-	if len(definition.Prerequisites) > 0 || len(definition.PrerequisiteAny) > 0 {
-		for _, id := range definition.Prerequisites {
-			prerequisite, _ := catalog.Definition(id)
-			status := "inactive"
-			for _, candidate := range public.Rules {
-				if candidate.Instance.DefinitionID == id && candidate.Active {
-					status = "active"
-					break
-				}
-			}
-			lines = append(lines, "Requires "+prerequisite.Title+" ("+status+").")
-		}
-		if len(definition.PrerequisiteAny) > 0 {
-			names := []string{}
-			for _, id := range definition.PrerequisiteAny {
-				prerequisite, _ := catalog.Definition(id)
-				names = append(names, prerequisite.Title)
-			}
-			lines = append(lines, "Requires one active rule: "+strings.Join(names, " or ")+".")
-		}
-	} else {
-		lines = append(lines, "No prerequisite rules.")
-	}
-	replaced := []string{}
-	for _, candidate := range public.Rules {
-		for _, id := range candidate.OverriddenBy {
-			if id == rule.Instance.InstanceID {
-				if prior, ok := catalog.Definition(candidate.Instance.DefinitionID); ok {
-					replaced = append(replaced, prior.Title)
-				}
-			}
-		}
-	}
-	if len(replaced) > 0 {
-		lines = append(lines, "Replaces: "+strings.Join(replaced, ", ")+".")
-	}
 	return strings.Join(lines, "\n")
-}
-
-func categoryLabel(category domain.FieldCategory) string {
-	for _, group := range reviewCategories {
-		if group.category == category {
-			return group.label
-		}
-	}
-	return string(category)
 }

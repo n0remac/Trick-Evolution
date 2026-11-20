@@ -413,6 +413,9 @@ func eligibleEndlessRule(state MatchState, catalog Catalog, id RuleID) ([]RuleIn
 	if !ok || !d.InDeck || d.Status != StatusSupported {
 		return nil, false
 	}
+	if !restorationEligible(state.Field, catalog, state.Config, id) {
+		return nil, false
+	}
 	for _, r := range state.Field {
 		if r.DefinitionID == id && !r.Removed {
 			return nil, false

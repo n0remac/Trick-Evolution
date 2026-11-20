@@ -241,6 +241,7 @@ func TestHandRuleDetailsAndHiddenPitchAwardRendering(t *testing.T) {
 	view.Public.Phase = domain.PhaseHandComplete
 	view.Public.DealSize, view.Public.TricksPerHand = 7, 6
 	view.Public.HandAwards = []domain.HandAward{{Rule: domain.RuleHighTrump, Title: "High Trump Scores", Seat: "guest", HiddenCard: true, Points: 1}}
+	view.Public.LastScorecard = &domain.Scorecard{HandNumber: view.Public.HandNumber, Players: []domain.ScorecardPlayer{{Seat: "host"}, {Seat: "guest", Total: 1, Awards: view.Public.HandAwards}}}
 	view.Retained = "std:C:02"
 	message := reviewMessage(&view)
 	html := gamePanel(message, "host", catalog).Render()

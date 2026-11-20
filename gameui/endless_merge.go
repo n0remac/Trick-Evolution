@@ -140,6 +140,13 @@ func (s *Server) tryJoinEndless(a, b *room) bool {
 		clients:     make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand),
 		lastEvents:   []domain.Event{{Kind: domain.EventHandStarted, Revision: next.Revision, Hand: next.HandNumber, Seat: next.Leader}},
 		lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{}), ctx: ctx, cancel: cancel, workerStarted: true}
+	joined.seatNames = make(map[domain.SeatID]string)
+	for id, name := range a.seatNames {
+		joined.seatNames[id] = name
+	}
+	for id, name := range b.seatNames {
+		joined.seatNames[id] = name
+	}
 	s.rooms[roomID] = joined
 	s.redirects[a.id], s.redirects[b.id] = roomID, roomID
 	delete(s.rooms, a.id)

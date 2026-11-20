@@ -24,10 +24,27 @@ func StartingFieldWithConfig(catalog Catalog, config Config) []RuleInstance {
 	return field
 }
 
+// restorationEligible checks the field before insertion. A prerequisite on
+// Points per Trick would turn false as soon as that card replaced No Points.
+func restorationEligible(field []RuleInstance, catalog Catalog, config Config, id RuleID) bool {
+	if id != RulePointsPerTrick {
+		return true
+	}
+	current, err := ResolveRules(field, catalog, config)
+	if err != nil {
+		return false
+	}
+	effect, err := current.Effect(MechanicTrickPoints)
+	return err == nil && effect.Value == ValueNoPoints
+}
+
 func ValidateInitialRules(config Config, catalog Catalog) error {
 	seen := map[RuleID]bool{}
 	field := StartingField(catalog)
 	for _, id := range config.InitialRules {
+		if id == RulePointsPerTrick {
+			return fmt.Errorf("Points per Trick is only available after No Points for Tricks")
+		}
 		d, ok := catalog.Definition(id)
 		if !ok || d.Status != StatusSupported || d.StartActive || seen[id] {
 			return fmt.Errorf("invalid initial rule %s", id)
@@ -322,6 +339,9 @@ func RecordCompletedHand(state MatchState, catalog Catalog) (MatchState, *RuleIn
 			}
 		}
 		if duplicate {
+			continue
+		}
+		if !restorationEligible(next.Field, catalog, next.Config, id) {
 			continue
 		}
 		instance := RuleInstance{InstanceID: fmt.Sprintf("rule:reveal:%d", len(next.Field)), DefinitionID: id, Sequence: len(next.Field), IntroducedAfterHand: next.CompletedHands}

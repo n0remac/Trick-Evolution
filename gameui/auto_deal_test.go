@@ -3,6 +3,7 @@ package gameui
 import (
 	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +48,13 @@ func TestAutomaticDealRegularAndIdempotentBoundary(t *testing.T) {
 		}
 	}
 	playHand()
+	settled := aState.View.Public.LastScorecard
+	if settled == nil || settled.HandNumber != 1 || settled.Partial || len(settled.Players) != 2 || settled.Players[0].Total+settled.Players[1].Total != 1 {
+		t.Fatalf("settled scorecard: %+v", settled)
+	}
+	if html := renderScreen(aState, host.Seat, s.catalog, config); !strings.Contains(html, "scorecard-visible") || !strings.Contains(html, "hand total") {
+		t.Fatal("scorecard was not visible after settlement")
+	}
 	time.Sleep(s.dealDelay / 3)
 	s.mu.Lock()
 	room := s.rooms[host.Room]
@@ -60,6 +68,19 @@ func TestAutomaticDealRegularAndIdempotentBoundary(t *testing.T) {
 	aState, bState = readRevision(t, a, 4), readRevision(t, b, 4)
 	if aState.View.Public.HandNumber != 2 || bState.View.Public.HandNumber != 2 {
 		t.Fatal("automatic next hand missing")
+	}
+	if aState.View.Public.LastScorecard == nil || aState.View.Public.LastScorecard.HandNumber != 1 || bState.View.Public.LastScorecard == nil {
+		t.Fatal("latest completed scorecard vanished after automatic deal")
+	}
+	if html := renderScreen(aState, host.Seat, s.catalog, config); !strings.Contains(html, "scorecard-saved") {
+		t.Fatal("previous scorecard missing under Scores")
+	}
+	_ = b.Close()
+	rejoined := joinRoom(t, web.URL, guest.Room, guest.Name, guest.Token, 200)
+	b = dialRoom(t, web.URL, rejoined)
+	bState = readMessage(t, b, "state")
+	if bState.View.Public.LastScorecard == nil || bState.View.Public.LastScorecard.HandNumber != 1 {
+		t.Fatal("guest reconnect lost previous scorecard")
 	}
 	playHand()
 	// A legacy manual command racing the timer consumes the boundary once.

@@ -184,7 +184,7 @@ func renderSettings(config domain.Config, catalog domain.Catalog, settingsStatus
 	for _, group := range reviewCategories {
 		choices := []*h.Node{}
 		for _, d := range catalog.Definitions {
-			if d.Status != domain.StatusSupported || d.StartActive || d.FieldCategory != group.category {
+			if d.Status != domain.StatusSupported || d.StartActive || d.ID == domain.RulePointsPerTrick || d.FieldCategory != group.category {
 				continue
 			}
 			input := []*h.Node{h.Type("checkbox"), h.Attr("data-initial-rule", string(d.ID)), h.Value(string(d.ID))}

@@ -162,7 +162,7 @@ type Catalog struct {
 	Definitions []RuleDefinition
 }
 
-const CatalogVersion = 6
+const CatalogVersion = 7
 
 func (c Catalog) Definition(id RuleID) (RuleDefinition, bool) {
 	for _, d := range c.Definitions {

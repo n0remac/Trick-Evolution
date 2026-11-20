@@ -235,6 +235,15 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		}
 		return string(id)
 	}
+	scoreName := func(id domain.SeatID) string {
+		if label := message.SeatNames[id]; label != "" {
+			return label
+		}
+		if strings.HasPrefix(string(id), "bot:") {
+			return "Bot " + strings.TrimPrefix(string(id), "bot:")
+		}
+		return name(id)
+	}
 	rules := renderRuleField(public, catalog)
 	next := ""
 	switch public.Phase {
@@ -312,7 +321,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 	hud := []*h.Node{h.Class("game-hud"), rules,
 		h.Div(h.Class("match-cue"), h.Role("status"), h.Attr("aria-atomic", "true"),
 			h.Attr("data-next", next), h.Attr("data-event", result), h.Attr("data-result", shortResult), h.Attr("data-result-number", shortResultNumber), h.T(next)),
-		renderScoresControl(public, name), h.Div(fallbackSeats...)}
+		renderScoresControl(public, name, scoreName), h.Div(fallbackSeats...)}
 	parts := []*h.Node{h.Class("game-panel"), h.Attr("data-hand", fmt.Sprint(public.HandNumber)), h.Div(hud...)}
 	if public.Mode == domain.ModeEndless && public.Phase != domain.PhaseGameComplete {
 		parts = append(parts, h.Div(h.Class("share-game"),
@@ -359,6 +368,9 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		}
 	} else if public.Phase == domain.PhaseAwaitingChoice {
 		choices := []*h.Node{h.Class("draft-choices"), h.H2(h.T("Choose a rule for the next round"))}
+		if public.LastScorecard != nil && public.LastScorecard.HandNumber == public.HandNumber {
+			choices = append(choices, renderScorecard(public.LastScorecard, scoreName, "scorecard-draft"))
+		}
 		for _, id := range public.DraftOptions {
 			if definition, ok := catalog.Definition(id); ok {
 				card := []*h.Node{h.Class("draft-card"), h.NewNode("strong", []*h.Node{h.T(definition.Title)}), h.P(h.T(definition.Text))}
@@ -426,38 +438,13 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 				h.Button(h.Type("button"), h.Attr("data-action", "leave-room"), h.T("End match and leave")),
 				h.Button(h.Type("button"), h.Attr("data-action", "leave-cancel"), h.T("Cancel")))))
 	}
-	if public.Phase == domain.PhaseHandComplete || public.Phase == domain.PhaseAwaitingChoice || public.Phase == domain.PhaseGameComplete {
-		title := "Hand score breakdown"
-		if public.EndedEarly && public.CompletedHands < public.HandNumber {
-			title = "Completed trick score breakdown"
-		}
-		items := []*h.Node{h.Class("hand-awards"), h.NewNode("summary", []*h.Node{h.T(title)})}
-		totals := map[domain.SeatID]int{}
-		for _, award := range public.HandAwards {
-			totals[award.Seat] += award.Points
-			detail := fmt.Sprintf("%s · %s %+d", award.Title, name(award.Seat), award.Points)
-			if award.Card != "" {
-				detail += " · " + cardLabel(award.Card)
-			} else if award.HiddenCard {
-				detail += " · retained card hidden"
-			}
-			if award.Trick > 0 {
-				detail += fmt.Sprintf(" · trick %d", award.Trick)
-			}
-			if award.Rule == domain.RuleGamePoint {
-				detail += fmt.Sprintf(" · tally %d", award.Tally)
-			}
-			items = append(items, h.P(h.T(detail)))
-		}
-		for _, player := range public.Seats {
-			items = append(items, h.P(h.T(fmt.Sprintf("%s · hand total %+d", name(player.ID), totals[player.ID]))))
-		}
-		parts = append(parts, h.NewNode("details", items))
+	if card := public.LastScorecard; card != nil && card.HandNumber == public.HandNumber && public.Phase != domain.PhaseAwaitingChoice {
+		parts = append(parts, renderScorecard(card, scoreName, "scorecard-visible"))
 	}
 	return h.Section(parts...)
 }
 
-func renderScoresControl(public domain.PublicView, name func(domain.SeatID) string) *h.Node {
+func renderScoresControl(public domain.PublicView, name, scoreName func(domain.SeatID) string) *h.Node {
 	content := []*h.Node{h.Class("scores-control"), h.NewNode("summary", []*h.Node{h.T("Scores")})}
 	standings := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T("Standings")})}
 	for _, seat := range public.Seats {
@@ -519,6 +506,9 @@ func renderScoresControl(public domain.PublicView, name func(domain.SeatID) stri
 			}
 			content = append(content, h.Div(latest...))
 		}
+	}
+	if public.LastScorecard != nil {
+		content = append(content, renderScorecard(public.LastScorecard, scoreName, "scorecard-saved"))
 	}
 	return h.NewNode("details", content)
 }
