@@ -54,7 +54,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 		t.Fatalf("opening: %+v", message)
 	}
 	openingHTML := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
-	for _, text := range []string{"rule draft", "Run totals", "Round Pacing", "End run"} {
+	for _, text := range []string{"Run totals", "Round Pacing", "End run", "Share live game"} {
 		if !strings.Contains(openingHTML, text) {
 			t.Fatalf("opening screen missing %q", text)
 		}
@@ -65,6 +65,9 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 	noticeReconnect, gameReconnect, resultReconnect := false, false, false
 	for message.View.Public.CompletedHands < 12 {
 		public := message.View.Public
+		if public.Round == 2 && public.RoundHand == 1 && public.DealSize != 5 {
+			t.Fatalf("round two dealt %d cards, want five", public.DealSize)
+		}
 		switch public.Phase {
 		case domain.PhasePlayingTrick:
 			if public.Turn == session.Seat {
@@ -103,13 +106,13 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 				s.mu.Lock()
 				count := len(s.rooms[session.Room].seats)
 				s.mu.Unlock()
-				if count != 2 {
+				if count != len(public.Seats) {
 					t.Fatalf("reconnect created seats: %d", count)
 				}
 			}
 			choice := domain.RuleID("")
 			if drafts == 1 {
-				choice = domain.RuleLastTrickBonus
+				choice = public.DraftOptions[0]
 			} else {
 				expectKeepSkip = true
 			}
@@ -242,4 +245,99 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 	}
 	_ = readMessage(t, conn, "room_closed")
 	joinRoom(t, web.URL, session.Room, session.Name, session.Token, http.StatusGone)
+}
+
+func TestEndlessShareLinkJoinsExactLiveHand(t *testing.T) {
+	s, web := testServer(t)
+	s.botDelay = time.Hour
+	response, err := http.Post(web.URL+"/game/endless", "application/json", strings.NewReader(`{"name":"Runner"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("start: %d", response.StatusCode)
+	}
+	var host testSession
+	if err := json.NewDecoder(response.Body).Decode(&host); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if host.Invite == "" || host.Invite == host.Token {
+		t.Fatal("missing separate invitation token")
+	}
+	hostConn := dialRoom(t, web.URL, host)
+	opening := readMessage(t, hostConn, "state")
+	if opening.View.Public.DealSize != 3 {
+		t.Fatal("opening hand was not three cards")
+	}
+	if !strings.Contains(renderScreen(opening, host.Seat, s.catalog, s.config), "Share live game") {
+		t.Fatal("share control missing")
+	}
+	postInvite := func(room, invite, name string) (*http.Response, error) {
+		body, _ := json.Marshal(map[string]string{"room": room, "invite": invite, "name": name})
+		return http.Post(web.URL+"/game/endless/join", "application/json", bytes.NewReader(body))
+	}
+	for _, tc := range []struct {
+		room, invite string
+		status       int
+	}{
+		{host.Room, "bad", http.StatusBadRequest},
+		{host.Room, strings.Repeat("0", 64), http.StatusForbidden},
+		{"endless-expired", host.Invite, http.StatusGone},
+	} {
+		res, err := postInvite(tc.room, tc.invite, "Friend")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != tc.status {
+			t.Fatalf("invite status: got %d want %d", res.StatusCode, tc.status)
+		}
+	}
+	joinRoom(t, web.URL, host.Room, "Uninvited", "", http.StatusConflict)
+	res, err := postInvite(host.Room, host.Invite, "Friend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("invited join: %d", res.StatusCode)
+	}
+	var guest testSession
+	if err := json.NewDecoder(res.Body).Decode(&guest); err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if guest.Room != host.Room || guest.Seat == host.Seat || guest.Token == host.Token || guest.Invite != host.Invite {
+		t.Fatalf("guest session: %+v", guest)
+	}
+	guestConn := dialRoom(t, web.URL, guest)
+	view := readMessage(t, guestConn, "state")
+	if len(view.View.Hand) != 3 || view.View.Public.Turn != guest.Seat || view.Seats[1].Bot || view.Seats[1].Name != "Friend" {
+		t.Fatalf("guest did not take bot's live seat: %+v", view)
+	}
+	legal, err := domain.LegalCards(*view.View, s.catalog)
+	if err != nil || len(legal) == 0 {
+		t.Fatalf("guest legal cards: %v %v", legal, err)
+	}
+	sendCommand(t, guestConn, command{Type: "play", ID: "friend-play", Card: legal[0]})
+	if next := readRevision(t, guestConn, view.Revision+1); next.View.Public.Revision != view.Revision+1 {
+		t.Fatal("guest could not play")
+	}
+	res, err = postInvite(host.Room, host.Invite, "Another")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("full table: %d", res.StatusCode)
+	}
+	reconnected := joinRoom(t, web.URL, guest.Room, guest.Name, guest.Token, http.StatusOK)
+	if reconnected.Seat != guest.Seat || reconnected.Invite != guest.Invite {
+		t.Fatal("guest reconnect changed seat or invitation")
+	}
+	first := joinRoom(t, web.URL, "ordinary-room", "Alice", "", http.StatusOK)
+	second := joinRoom(t, web.URL, "ordinary-room", "Bob", "", http.StatusOK)
+	if first.Room != second.Room || first.Invite != "" || second.Invite != "" {
+		t.Fatal("ordinary room links changed")
+	}
 }

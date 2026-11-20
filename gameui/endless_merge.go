@@ -102,7 +102,7 @@ func (s *Server) tryJoinEndless(a, b *room) bool {
 	defer b.mu.Unlock()
 	if s.rooms[a.id] != a || s.rooms[b.id] != b || a.closed || b.closed ||
 		a.state == nil || b.state == nil || len(a.seats) != 2 || len(b.seats) != 2 ||
-		a.seats[0].Bot || b.seats[0].Bot || a.clients[a.seats[0].ID] == nil || b.clients[b.seats[0].ID] == nil ||
+		a.seats[0].Bot || b.seats[0].Bot || !a.seats[1].Bot || !b.seats[1].Bot || a.clients[a.seats[0].ID] == nil || b.clients[b.seats[0].ID] == nil ||
 		!domain.EndlessCompatible(*a.state, *b.state, s.catalog) {
 		return false
 	}
@@ -121,6 +121,10 @@ func (s *Server) tryJoinEndless(a, b *room) bool {
 	if err != nil {
 		return false
 	}
+	invite, err := randomToken(32)
+	if err != nil {
+		return false
+	}
 	roomID := "endless-" + id
 	if s.rooms[roomID] != nil {
 		return false
@@ -132,7 +136,8 @@ func (s *Server) tryJoinEndless(a, b *room) bool {
 	}
 	next.Revision = max(revisionA, revisionB) + 1
 	joined := &room{id: roomID, config: next.Config, seats: seats, state: &next,
-		clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand),
+		inviteToken: invite,
+		clients:     make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand),
 		lastEvents:   []domain.Event{{Kind: domain.EventHandStarted, Revision: next.Revision, Hand: next.HandNumber, Seat: next.Leader}},
 		lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{}), ctx: ctx, cancel: cancel, workerStarted: true}
 	s.rooms[roomID] = joined

@@ -4,6 +4,7 @@
   const connection = document.getElementById('connection');
   const route = new URLSearchParams(location.search);
   let room = route.get('room') || 'default';
+  const invite = route.get('invite');
   let session = null;
   let terminal = false;
   let leavePending = false;
@@ -317,10 +318,22 @@
       return;
     }
     room = chosenRoom;
-    history.replaceState(null, '', `/game?room=${encodeURIComponent(room)}`);
+    if (!invite) history.replaceState(null, '', `/game?room=${encodeURIComponent(room)}`);
     const submit = form.querySelector('button[type=submit]');
     submit.disabled = true;
-    try { await join(form.elements.name.value.trim(), '', Number(form.elements.bots.value)); }
+    try {
+      if (invite) {
+        const response = await fetch('/game/endless/join', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({room, invite, name: form.elements.name.value.trim()})
+        });
+        if (!response.ok) throw new Error((await response.text()).trim() || `Could not join live game (${response.status})`);
+        history.replaceState(null, '', `/game?room=${encodeURIComponent(room)}`);
+        activateSession(await response.json(), true, true);
+      } else {
+        await join(form.elements.name.value.trim(), '', Number(form.elements.bots.value));
+      }
+    } catch (error) { notice(error.message); }
     finally { submit.disabled = false; }
   });
 
@@ -481,6 +494,15 @@
     } else if (action === 'end-confirm' || action === 'end-cancel') {
       const confirm = document.getElementById('end-confirm');
       if (confirm) confirm.hidden = action !== 'end-confirm';
+    } else if (action === 'share-endless' && session?.invite) {
+      const link = `${location.origin}/game?room=${encodeURIComponent(session.room)}&invite=${encodeURIComponent(session.invite)}`;
+      const field = document.getElementById('endless-share-link');
+      if (field) { field.value = link; field.hidden = false; field.select(); }
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(link).then(() => notice('Invitation link copied.')).catch(() => notice('Copy the invitation link shown on screen.'));
+      } else {
+        notice('Copy the invitation link shown on screen.');
+      }
     }
   });
   rulesButton.addEventListener('click', () => {
@@ -577,6 +599,14 @@
   const form = document.getElementById('join-form');
   const endlessForm = document.getElementById('endless-form');
   form.elements.name.value = sessionStorage.getItem(`${key()}:name`) || '';
+  if (invite) {
+    form.closest('.panel').querySelector('h2').textContent = 'Join live Endless game';
+    form.closest('.panel').querySelector('p').textContent = 'Enter your name to take a seat at this table.';
+    form.elements.room.closest('label').hidden = true;
+    form.elements.bots.closest('label').hidden = true;
+    form.querySelector('button[type=submit]').textContent = 'Join live game';
+    document.getElementById('endless-form').closest('.panel').hidden = true;
+  }
   endlessForm.elements.name.value = form.elements.name.value;
   for (const [source, target] of [[form.elements.name, endlessForm.elements.name], [endlessForm.elements.name, form.elements.name]]) {
     source.addEventListener('input', () => { target.value = source.value; });

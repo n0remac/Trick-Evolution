@@ -69,6 +69,73 @@ func endlessNextRoster(state MatchState, rules RuleResolution) ([]Seat, bool) {
 	return seats, true
 }
 
+// ReplaceEndlessBotSeat transfers a live bot's cards and score to a guest.
+// Keeping the seat position lets a guest join during a trick without redealing.
+func ReplaceEndlessBotSeat(state MatchState, oldID, newID SeatID) (MatchState, error) {
+	if state.Config.Mode != ModeEndless || state.Phase == PhaseGameComplete || oldID == "" || newID == "" {
+		return state, fmt.Errorf("bot seat cannot be replaced")
+	}
+	found := false
+	for _, seat := range state.Seats {
+		if seat.ID == newID {
+			return state, fmt.Errorf("guest seat already exists")
+		}
+		found = found || seat.ID == oldID
+	}
+	if !found {
+		return state, fmt.Errorf("bot seat does not exist")
+	}
+	next := cloneState(state)
+	for i := range next.Seats {
+		if next.Seats[i].ID == oldID {
+			next.Seats[i].ID = newID
+		}
+	}
+	moveSeatKey(next.Hands, oldID, newID)
+	moveSeatKey(next.Carried, oldID, newID)
+	moveSeatKey(next.Retained, oldID, newID)
+	moveSeatKey(next.Captured, oldID, newID)
+	moveSeatKey(next.RunScores, oldID, newID)
+	moveSeatKey(next.ShortGameScores, oldID, newID)
+	if next.ShortGameResult != nil {
+		moveSeatKey(next.ShortGameResult.Scores, oldID, newID)
+		for i, id := range next.ShortGameResult.Winners {
+			if id == oldID {
+				next.ShortGameResult.Winners[i] = newID
+			}
+		}
+	}
+	for card, owner := range next.DealOwner {
+		if owner == oldID {
+			next.DealOwner[card] = newID
+		}
+	}
+	for i := range next.HandAwards {
+		if next.HandAwards[i].Seat == oldID {
+			next.HandAwards[i].Seat = newID
+		}
+	}
+	for i := range next.CurrentTrick {
+		if next.CurrentTrick[i].Seat == oldID {
+			next.CurrentTrick[i].Seat = newID
+		}
+	}
+	for _, id := range []*SeatID{&next.Dealer, &next.Leader, &next.Turn, &next.EndedBy} {
+		if *id == oldID {
+			*id = newID
+		}
+	}
+	next.Revision++
+	return next, nil
+}
+
+func moveSeatKey[V any](m map[SeatID]V, oldID, newID SeatID) {
+	if value, ok := m[oldID]; ok {
+		m[newID] = value
+		delete(m, oldID)
+	}
+}
+
 // EndlessCompatible compares the actual controllers and the next deal. Both
 // runs must be at open-round boundaries; no mid-hand rule is changed.
 func EndlessCompatible(a, b MatchState, catalog Catalog) bool {
@@ -218,6 +285,12 @@ func forecastEndlessTo(state MatchState, round int, catalog Catalog) (MatchState
 		if changes > 2 {
 			return state, false
 		}
+		if r == 2 {
+			if !applyEndlessRule(&state, catalog, RuleExpandedHand) {
+				return state, false
+			}
+			continue
+		}
 		added := false
 		for _, id := range state.RuleDraw {
 			if applyEndlessRule(&state, catalog, id) {
@@ -303,7 +376,9 @@ func EndlessRound(round int) (int, string) {
 	switch round {
 	case 1:
 		return 3, "base"
-	case 2, 4:
+	case 2:
+		return 1, "table"
+	case 4:
 		return 1, "draft"
 	case 3:
 		return 1, "table"
@@ -494,6 +569,14 @@ func settleEndlessBoundary(state *MatchState, catalog Catalog) error {
 		}
 		state.TableCue = fmt.Sprintf("Round %d: no eligible change; rules stay the same.", state.Round)
 	case "table":
+		if state.Round == 2 {
+			if !applyEndlessRule(state, catalog, RuleExpandedHand) {
+				return fmt.Errorf("opening Expanded Hand rule is unavailable")
+			}
+			definition, _ := catalog.Definition(RuleExpandedHand)
+			state.TableCue = endlessCue(*state, "The table added "+definition.Title+".")
+			return nil
+		}
 		for _, id := range state.RuleDraw {
 			if applyEndlessRule(state, catalog, id) {
 				definition, _ := catalog.Definition(id)

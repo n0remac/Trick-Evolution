@@ -22,12 +22,13 @@ type identityShuffle struct{}
 func (identityShuffle) Shuffle(_ int, _ func(i, j int)) {}
 
 type testSession struct {
-	Room  string        `json:"room"`
-	Seat  domain.SeatID `json:"seat"`
-	Name  string        `json:"name"`
-	Token string        `json:"token"`
-	Host  bool          `json:"host"`
-	RunID string        `json:"runId"`
+	Room   string        `json:"room"`
+	Seat   domain.SeatID `json:"seat"`
+	Name   string        `json:"name"`
+	Token  string        `json:"token"`
+	Host   bool          `json:"host"`
+	RunID  string        `json:"runId"`
+	Invite string        `json:"invite"`
 }
 
 func testServer(t *testing.T) (*Server, *httptest.Server) {

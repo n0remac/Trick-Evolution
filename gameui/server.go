@@ -83,6 +83,7 @@ type room struct {
 	dealReadyAt    time.Time
 	dealScheduled  uint64
 	pendingReview  domain.RuleID
+	inviteToken    string
 }
 
 type acceptedCommand struct {
@@ -251,6 +252,7 @@ func (s *Server) Handler() http.Handler {
 	browser3d.Register(mux)
 	mux.HandleFunc("POST /game/join", s.join)
 	mux.HandleFunc("POST /game/endless", s.startEndless)
+	mux.HandleFunc("POST /game/endless/join", s.joinEndlessInvite)
 	mux.HandleFunc("POST /game/leave", s.leave)
 	mux.HandleFunc("GET /ws/game", s.websocket)
 	return mux
@@ -374,6 +376,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	}
 	gameRoom.lastActivity = s.now()
 	host := gameRoom.seats[0].ID == seat.ID
+	invite := gameRoom.inviteToken
 	if gameRoom.config.Mode == domain.ModeEndless && gameRoom.seats[0].Bot {
 		host = false
 		for _, p := range gameRoom.seats {
@@ -388,13 +391,14 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(struct {
-		Room  string        `json:"room"`
-		Seat  domain.SeatID `json:"seat"`
-		Name  string        `json:"name"`
-		Token string        `json:"token"`
-		Host  bool          `json:"host"`
-		RunID string        `json:"runId,omitempty"`
-	}{Room: request.Room, Seat: seat.ID, Name: seat.Name, Token: seat.Token, Host: host, RunID: seat.RunID})
+		Room   string        `json:"room"`
+		Seat   domain.SeatID `json:"seat"`
+		Name   string        `json:"name"`
+		Token  string        `json:"token"`
+		Host   bool          `json:"host"`
+		RunID  string        `json:"runId,omitempty"`
+		Invite string        `json:"invite,omitempty"`
+	}{Room: request.Room, Seat: seat.ID, Name: seat.Name, Token: seat.Token, Host: host, RunID: seat.RunID, Invite: invite})
 	gameRoom.publish()
 }
 

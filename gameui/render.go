@@ -314,6 +314,11 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			h.Attr("data-next", next), h.Attr("data-event", result), h.Attr("data-result", shortResult), h.Attr("data-result-number", shortResultNumber), h.T(next)),
 		renderScoresControl(public, name), h.Div(fallbackSeats...)}
 	parts := []*h.Node{h.Class("game-panel"), h.Attr("data-hand", fmt.Sprint(public.HandNumber)), h.Div(hud...)}
+	if public.Mode == domain.ModeEndless && public.Phase != domain.PhaseGameComplete {
+		parts = append(parts, h.Div(h.Class("share-game"),
+			h.Button(h.Type("button"), h.Attr("data-action", "share-endless"), h.T("Share live game")),
+			h.Input(h.Id("endless-share-link"), h.Attr("aria-label", "Live game invitation link"), h.Attr("readonly", ""), h.Attr("hidden", ""))))
+	}
 	if public.Phase == domain.PhasePlayingTrick {
 		legal, _ := domain.LegalCards(*view, catalog)
 		allowed := make(map[domain.CardID]bool, len(legal))

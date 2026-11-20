@@ -5,6 +5,49 @@ import (
 	"testing"
 )
 
+func TestEndlessOpeningAddsExpandedHandOnce(t *testing.T) {
+	catalog := DefaultCatalog()
+	cfg := DefaultConfig()
+	cfg.Mode, cfg.HandSize = ModeEndless, 3
+	state, err := NewMatch([]SeatID{"human", "bot:1"}, cfg, catalog, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.DealSize != 3 || len(state.Hands["human"]) != 3 {
+		t.Fatal("round one did not deal three cards")
+	}
+	for i := 0; i < 3; i++ {
+		state = finishHand(t, state)
+		if i < 2 {
+			state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
+			if state.DealSize != 3 {
+				t.Fatal("round one deal changed early")
+			}
+		}
+	}
+	if state.Round != 2 || state.Phase != PhaseHandComplete || !strings.Contains(state.TableCue, "Expanded Hand") {
+		t.Fatalf("opening boundary: %+v", state)
+	}
+	count := 0
+	for _, rule := range state.Field {
+		if rule.DefinitionID == RuleExpandedHand && !rule.Removed {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("Expanded Hand applied %d times", count)
+	}
+	state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
+	if state.DealSize != 5 || len(state.Seats) != 3 {
+		t.Fatalf("round two deal: %d cards, %d players", state.DealSize, len(state.Seats))
+	}
+	state = finishHand(t, state)
+	state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
+	if state.DealSize != 5 {
+		t.Fatalf("expanded hand accumulated: %d", state.DealSize)
+	}
+}
+
 func TestEndlessCadenceScoreAndOnceOnlyDraft(t *testing.T) {
 	catalog := DefaultCatalog()
 	cfg := DefaultConfig()
@@ -26,10 +69,7 @@ func TestEndlessCadenceScoreAndOnceOnlyDraft(t *testing.T) {
 			}
 			choice := RuleID("")
 			if drafts == 1 {
-				choice = RuleLastTrickBonus
-				if len(state.DraftOptions) != 3 || state.DraftOptions[0] != choice || state.DraftOptions[1] != RuleAvoidHearts || state.DraftOptions[2] != RuleExpandedHand {
-					t.Fatalf("first options: %v", state.DraftOptions)
-				}
+				choice = state.DraftOptions[0]
 			}
 			boundary := state.PendingBoundaryID
 			state, _, err = Step(state, Action{Kind: ActionChooseRule, Seat: "human", Rule: choice, BoundaryID: boundary}, catalog)
@@ -228,19 +268,15 @@ func TestEndlessKeepOneResetsAtRosterChange(t *testing.T) {
 			}
 		}
 	}
-	if state.Phase != PhaseAwaitingChoice {
-		t.Fatal("third hand did not wait for draft")
-	}
-	state, _, err = Step(state, Action{Kind: ActionChooseRule, Seat: "human", Rule: RuleLastTrickBonus, BoundaryID: state.PendingBoundaryID}, catalog)
-	if err != nil {
-		t.Fatal(err)
+	if state.Phase != PhaseHandComplete || state.Round != 2 {
+		t.Fatal("third hand did not add the opening rule")
 	}
 	state, _, err = Step(state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()}, catalog)
-	if err != nil || len(state.Seats) != 3 || len(state.Carried) != 0 || len(state.Retained) != 0 || state.DealSize != 3 || state.TricksPerHand != 2 {
+	if err != nil || len(state.Seats) != 3 || len(state.Carried) != 0 || len(state.Retained) != 0 || state.DealSize != 5 || state.TricksPerHand != 4 {
 		t.Fatalf("fresh roster deal: seats=%d carry=%+v, %v", len(state.Seats), state.Carried, err)
 	}
 	for _, seat := range state.Seats {
-		if len(state.Hands[seat.ID]) != 3 {
+		if len(state.Hands[seat.ID]) != 5 {
 			t.Fatalf("%s did not get a full fresh deal", seat.ID)
 		}
 	}
@@ -347,11 +383,8 @@ func TestEndlessIllegalRosterChangeKeepsCurrentSeats(t *testing.T) {
 			t.Fatalf("phase %s", state.Phase)
 		}
 	}
-	if state.Phase == PhaseAwaitingChoice {
-		state = handAction(t, state, Action{Kind: ActionChooseRule, Seat: "human", BoundaryID: state.PendingBoundaryID})
-	}
 	state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
-	if len(state.Seats) != 2 || state.DealSize != 18 {
+	if len(state.Seats) != 2 || state.DealSize != 20 {
 		t.Fatal("illegal three-seat deal changed roster")
 	}
 }

@@ -75,7 +75,10 @@ h2 { margin: 0 0 .75rem; }
 }
 .table3d-drop-hint.active { display: block; }
 .shell:has(.table3d:not([hidden])) #live { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
-.game-hud, .end-game, .game-results, .hand-status { position: absolute; }
+.game-hud, .end-game, .game-results, .hand-status, .share-game { position: absolute; }
+.share-game { top: var(--hud-top); left: var(--hud-left); pointer-events: auto; display: grid; gap: .25rem; max-width: min(80vw, 25rem); }
+.share-game button { min-height: 44px; padding: .45rem .75rem; border: 1px solid #719484; border-radius: .6rem; background: #102b21ed; color: #edf3e7; cursor: pointer; }
+.share-game input { width: 100%; }
 .end-game, .game-results { pointer-events: auto; }
 .game-hud {
   top: calc(var(--hud-top) + 3.25rem); left: var(--hud-left); right: var(--hud-right);
@@ -129,7 +132,7 @@ h2 { margin: 0 0 .75rem; }
 .table-seat.winner { border-color: #ffe09a; box-shadow: 0 0 0 .2rem #eec97677, 0 0 18px #eec976; }
 .fallback-seats { display: none; }
 .table-fallback .game-panel { display: grid; gap: 1rem; padding: 1rem; }
-.table-fallback .game-hud, .table-fallback .end-game, .table-fallback .game-results, .table-fallback .hand-status { position: static; transform: none; }
+.table-fallback .game-hud, .table-fallback .end-game, .table-fallback .game-results, .table-fallback .hand-status, .table-fallback .share-game { position: static; transform: none; }
 .table-fallback .scores-control { position: relative; top: auto; }
 .table-fallback .fallback-seats { display: flex; flex-wrap: wrap; gap: .4rem; }
 .table-fallback .fallback-seats span { padding: .3rem .5rem; border: 1px solid #719484; border-radius: .4rem; background: #102b21; }
