@@ -17,7 +17,7 @@ func (r *runner) rulesSmoke() error {
 	if err := page.cdp.call(r.ctx, "Page.reload", map[string]any{}, nil); err != nil {
 		return err
 	}
-	if err := r.join(page, "Alice"); err != nil {
+	if err := r.join(page, "Alice", 1); err != nil {
 		return err
 	}
 	if err := r.waitPage(page, "automatic starting rules", 15*time.Second, func(s uiState) bool {
@@ -55,7 +55,7 @@ func (r *runner) rulesSmoke() error {
 	if err := page.cdp.call(r.ctx, "Page.reload", map[string]any{}, nil); err != nil {
 		return err
 	}
-	if err := r.waitPage(page, "saved lobby reconnect", 15*time.Second, func(s uiState) bool { return s.Connection == "Connected" && s.SeatTiles == 1 }); err != nil {
+	if err := r.waitPage(page, "saved lobby reconnect", 15*time.Second, func(s uiState) bool { return s.Connection == "Connected" && s.SeatTiles == 2 }); err != nil {
 		return err
 	}
 	if err := page.clickSelector(r.ctx, "#rules-open"); err != nil {
@@ -68,9 +68,6 @@ func (r *runner) rulesSmoke() error {
 		return fmt.Errorf("saved room settings were lost on reload")
 	}
 	if err := r.closeReview(page); err != nil {
-		return err
-	}
-	if err := page.click(r.ctx, "Add bot"); err != nil {
 		return err
 	}
 	if err := r.waitPage(page, "two-seat lobby", 15*time.Second, func(s uiState) bool { return s.SeatTiles == 2 }); err != nil {
@@ -97,7 +94,7 @@ func (r *runner) rulesSmoke() error {
 	for _, viewport := range []struct {
 		width, height int
 		mobile        bool
-	}{{390, 844, true}, {844, 390, true}, {1280, 800, false}, {390, 844, true}} {
+	}{{320, 700, true}, {390, 844, true}, {844, 390, true}, {1280, 800, false}, {390, 844, true}} {
 		if err := r.checkFieldViewport(page, viewport.width, viewport.height, viewport.mobile); err != nil {
 			return err
 		}
@@ -106,7 +103,7 @@ func (r *runner) rulesSmoke() error {
 		return err
 	}
 	var detailsOK bool
-	if err := page.eval(r.ctx, `document.getElementById('rule-details').open && document.getElementById('rule-text').textContent.includes('No prerequisite rules')`, &detailsOK); err != nil {
+	if err := page.eval(r.ctx, `document.getElementById('rule-details').open && document.getElementById('rule-text').textContent.length>20 && document.getElementById('rule-title').textContent==='Follow Suit'`, &detailsOK); err != nil {
 		return err
 	}
 	if !detailsOK {
@@ -122,7 +119,7 @@ func (r *runner) rulesSmoke() error {
 	if err != nil {
 		return err
 	}
-	if err := page.clickSelector(r.ctx, "#rules-open"); err != nil {
+	if err := page.clickSelector(r.ctx, `[data-action="review-rules"]`); err != nil {
 		return err
 	}
 	if err := r.waitPage(page, "current rules reopened", 10*time.Second, func(s uiState) bool { return s.ReviewOpen && s.ReviewTab == "current" && s.Revision == before.Revision }); err != nil {
@@ -140,7 +137,7 @@ func (r *runner) rulesSmoke() error {
 		return err
 	}
 	var restored bool
-	if err := page.eval(r.ctx, `document.activeElement?.id==='rules-open' && window.__rulesSmokeTable===window.__trick3d`, &restored); err != nil {
+	if err := page.eval(r.ctx, `(async()=>{await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));return document.activeElement?.dataset.action==='review-rules' && window.__rulesSmokeTable===window.__trick3d})()`, &restored); err != nil {
 		return err
 	}
 	if !restored {
@@ -173,7 +170,7 @@ func (r *runner) rulesSmoke() error {
 	}); err != nil {
 		return err
 	}
-	if err := page.clickSelector(r.ctx, "#rules-open"); err != nil {
+	if err := page.clickSelector(r.ctx, `[data-action="review-rules"]`); err != nil {
 		return err
 	}
 	var finalReviewOK bool
@@ -214,9 +211,8 @@ func (r *runner) checkFieldViewport(page *page, width, height int, mobile bool) 
 		const handPoint=window.__trick3d?.project(payload?.selections?.[0]?.pickId);
 		const center=window.__trick3d?.project('dropzone');
 		const within=p=>p && p.x>=box.left && p.x<=box.right && p.y>=box.top && p.y<=box.bottom;
-		const ruleButton=document.getElementById('rules-open').getBoundingClientRect();
-		const endButton=document.querySelector('.end-game > button')?.getBoundingClientRect();
-		const separated=!endButton || endButton.right<=ruleButton.left+2;
+		const bar=document.querySelector('.game-top-bar'),controls=[...bar.children].map(x=>x.getBoundingClientRect());
+		const separated=controls.every((x,i)=>x.height>=44 && x.left>=-1 && x.right<=innerWidth+1 && (i===0 || x.left>=controls[i-1].right-1)) && bar.getBoundingClientRect().bottom<=hudBox.top+1;
 		const compact=cards.every(card=>{const rect=card.getBoundingClientRect();return rect.width<=150 && rect.height>=70 && rect.height<=132;});
 		const strip=getComputedStyle(field).display==='flex' && fieldBox.height<=Math.min(144,innerHeight*.24)+3;
 		const cue=document.querySelector('.match-cue');

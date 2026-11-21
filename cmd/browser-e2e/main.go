@@ -101,19 +101,19 @@ const stateExpression = `(() => {
 func main() { os.Exit(runMain()) }
 
 func runMain() int {
-	mode := flag.String("mode", "smoke", "smoke, lifecycle-smoke, rules-smoke, bot-smoke, 3d-smoke, or full")
+	mode := flag.String("mode", "smoke", "smoke, lifecycle-smoke, rules-smoke, invite-smoke, bot-smoke, 3d-smoke, or full")
 	browserPath := flag.String("browser", "", "Chromium/Chrome executable (auto-detected if empty)")
 	artifactRoot := flag.String("artifacts", "artifacts/browser-e2e", "directory for run reports and failure artifacts")
 	timeLimit := flag.Duration("timeout", 0, "overall time bound (default: 45s smoke, 150s full)")
 	flag.Parse()
-	if *mode != "smoke" && *mode != "lifecycle-smoke" && *mode != "rules-smoke" && *mode != "bot-smoke" && *mode != "3d-smoke" && *mode != "full" {
-		fmt.Fprintln(os.Stderr, "-mode must be smoke, lifecycle-smoke, rules-smoke, bot-smoke, 3d-smoke, or full")
+	if *mode != "smoke" && *mode != "lifecycle-smoke" && *mode != "rules-smoke" && *mode != "invite-smoke" && *mode != "bot-smoke" && *mode != "3d-smoke" && *mode != "full" {
+		fmt.Fprintln(os.Stderr, "-mode must be smoke, lifecycle-smoke, rules-smoke, invite-smoke, bot-smoke, 3d-smoke, or full")
 		return 2
 	}
 	if *timeLimit == 0 {
 		if *mode == "full" {
 			*timeLimit = 180 * time.Second
-		} else if *mode == "rules-smoke" || *mode == "lifecycle-smoke" {
+		} else if *mode == "rules-smoke" || *mode == "lifecycle-smoke" || *mode == "invite-smoke" {
 			*timeLimit = 75 * time.Second
 		} else {
 			*timeLimit = 45 * time.Second
@@ -177,12 +177,18 @@ func (r *runner) run(explicitBrowser string) error {
 		return err
 	}
 	address := r.httpServer.URL + "/game?room=d1-browser"
+	if r.mode == "invite-smoke" {
+		address = r.httpServer.URL + "/game"
+	}
 	r.alice, err = r.browser.newPage(r.ctx, "alice", address)
 	if err != nil {
 		return err
 	}
 	if r.mode == "rules-smoke" {
 		return r.rulesSmoke()
+	}
+	if r.mode == "invite-smoke" {
+		return r.inviteSmoke()
 	}
 	if r.mode == "3d-smoke" {
 		return r.threeDSmoke()

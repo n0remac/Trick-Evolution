@@ -29,15 +29,23 @@
   const tableShell = document.getElementById('table3d');
   const shell = document.querySelector('.shell');
   let measuredHud = null;
+  let measuredBar = null;
   const hudObserver = new ResizeObserver(() => measureTableSpace());
   function measureTableSpace() {
     const hud = document.querySelector('#screen .game-hud');
+    const bar = document.querySelector('#screen .game-top-bar');
     if (measuredHud !== hud) {
       if (measuredHud) hudObserver.unobserve(measuredHud);
       measuredHud = hud;
       if (hud) hudObserver.observe(hud);
     }
+    if (measuredBar !== bar) {
+      if (measuredBar) hudObserver.unobserve(measuredBar);
+      measuredBar = bar;
+      if (bar) hudObserver.observe(bar);
+    }
     if (!hud || tableShell.hidden) return;
+    if (bar) shell.style.setProperty('--game-bar-bottom', `${Math.ceil(bar.getBoundingClientRect().bottom - shell.getBoundingClientRect().top + 8)}px`);
     const top = Math.ceil(hud.getBoundingClientRect().bottom - shell.getBoundingClientRect().top + 8);
     shell.style.setProperty('--table-top', `${top}px`);
   }
@@ -267,13 +275,44 @@
   }
   new MutationObserver(syncCue).observe(live, {childList: true, subtree: true});
   let scoresOpen = false;
+  let moreOpen = false;
+  let inviteOpen = false;
+  let endConfirmOpen = false;
+  let leaveConfirmOpen = false;
+  let barFocus = '';
+  let barUpdate = 0;
   live.addEventListener('toggle', event => {
     if (event.target.matches?.('.scores-control')) scoresOpen = event.target.open;
+    if (event.target.matches?.('.more-control')) moreOpen = event.target.open;
   }, true);
-  new MutationObserver(() => {
-    const scores = document.querySelector('#screen .scores-control');
-    if (scores && scoresOpen) scores.open = true;
-  }).observe(live, {childList: true, subtree: true});
+  function syncBar() {
+    const screen = document.querySelector('#screen[data-update]');
+    const update = Number(screen?.dataset.update);
+    if (!Number.isSafeInteger(update) || update <= barUpdate) return;
+    barUpdate = update;
+    const bar = screen.querySelector('.game-top-bar');
+    if (!bar) { scoresOpen = moreOpen = inviteOpen = false; barFocus = ''; return; }
+    const scores = bar.querySelector('.scores-control');
+    const more = bar.querySelector('.more-control');
+    if (scores) scores.open = scoresOpen;
+    if (more) more.open = moreOpen;
+    const endConfirm = bar.querySelector('#end-confirm');
+    const leaveConfirm = bar.querySelector('#leave-confirm');
+    if (endConfirm) endConfirm.hidden = !endConfirmOpen;
+    if (leaveConfirm) leaveConfirm.hidden = !leaveConfirmOpen;
+    const inviteButton = bar.querySelector('[data-action="share-endless"]');
+    if (inviteButton) inviteButton.hidden = !session?.invite;
+    const panel = bar.querySelector('.invite-panel');
+    if (panel && session?.invite && inviteOpen) {
+      panel.hidden = false;
+      panel.querySelector('input').value = `${location.origin}/game?room=${encodeURIComponent(session.room)}&invite=${encodeURIComponent(session.invite)}`;
+    }
+    if (barFocus) {
+      bar.querySelector(barFocus)?.focus({preventScroll: true});
+      barFocus = '';
+    }
+  }
+  new MutationObserver(syncBar).observe(live, {childList: true, subtree: true});
   window.addEventListener('pagehide', () => table?.dispose());
 
   const key = () => `trick-evolution:${room}`;
@@ -445,7 +484,7 @@
       if (content.dataset.kind === 'lobby') openReview('auto', 'starting', 'rules-open');
     }
     if (reviewDialog.open) {
-      if (closeAfterStart && content.dataset.kind === 'state') {
+      if ((closeAfterStart || reviewMode === 'start') && content.dataset.kind === 'state') {
         closeAfterStart = false;
         reviewDialog.close();
         return;
@@ -480,7 +519,8 @@
   reviewDialog.addEventListener('close', () => {
     reviewMode = 'closed';
     closeAfterStart = false;
-    const focusTarget = reviewOpener === 'review-start' ? document.querySelector('[data-action="review-start"]:not(:disabled)') : rulesButton;
+    const focusTarget = reviewOpener === 'review-start' ? document.querySelector('[data-action="review-start"]:not(:disabled)') :
+      reviewOpener === 'review-rules' ? document.querySelector('[data-action="review-rules"]') : rulesButton;
     (focusTarget || rulesButton).focus();
   });
   reviewDialog.addEventListener('click', event => { if (event.target === reviewDialog) reviewDialog.close(); });
@@ -511,6 +551,8 @@
     const action = event.target.closest('[data-action]')?.dataset.action;
     if (action === 'review-start') {
       openReview('start', 'starting', 'review-start');
+    } else if (action === 'review-rules') {
+      openReview('manual', 'current', 'review-rules');
     } else if (action === 'review-close') {
       reviewDialog.close();
     } else if (action === 'return-to-join') {
@@ -532,10 +574,13 @@
     } else if (action === 'share-endless' && session?.invite) {
       const link = `${location.origin}/game?room=${encodeURIComponent(session.room)}&invite=${encodeURIComponent(session.invite)}`;
       const field = document.getElementById('endless-share-link');
-      if (field) { field.value = link; field.hidden = false; field.select(); }
+      if (field) { field.value = link; field.closest('.invite-panel').hidden = false; field.select(); inviteOpen = true; }
+      const feedback = document.querySelector('.invite-feedback');
       if (navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(link).then(() => notice('Invitation link copied.')).catch(() => notice('Copy the invitation link shown on screen.'));
+        navigator.clipboard.writeText(link).then(() => { if (feedback?.isConnected) feedback.textContent = 'Invitation link copied.'; notice('Invitation link copied.'); })
+          .catch(() => { if (feedback?.isConnected) feedback.textContent = 'Select and copy this link.'; notice('Copy the invitation link shown on screen.'); });
       } else {
+        if (feedback) feedback.textContent = 'Select and copy this link.';
         notice('Copy the invitation link shown on screen.');
       }
     }
@@ -633,6 +678,14 @@
       return;
     }
     rulesScrollLeft = document.getElementById('game-rules')?.scrollLeft || 0;
+    const bar = document.querySelector('#screen .game-top-bar');
+    const focused = bar?.contains(document.activeElement) ? document.activeElement : null;
+    barFocus = focused?.dataset.action ? `[data-action="${focused.dataset.action}"]` :
+      focused?.matches('summary') ? `.${focused.parentElement.className} > summary` :
+      focused?.id === 'endless-share-link' ? '#endless-share-link' : '';
+    inviteOpen = !!bar?.querySelector('.invite-panel:not([hidden])');
+    endConfirmOpen = !!bar?.querySelector('#end-confirm:not([hidden])');
+    leaveConfirmOpen = !!bar?.querySelector('#leave-confirm:not([hidden])');
     if (reviewDialog.open) {
       reviewScroll = document.getElementById('rules-review-content')?.scrollTop || 0;
       reviewFocus = document.activeElement?.dataset.reviewFocus || reviewFocus;

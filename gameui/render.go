@@ -318,16 +318,42 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		}
 		fallbackSeats = append(fallbackSeats, h.Span(h.T(fmt.Sprintf("%s · %s %d%s", name(player.ID), label, score, turn))))
 	}
+	bar := []*h.Node{h.Class("game-top-bar"), h.Attr("aria-label", "Game controls"),
+		renderScoresControl(public, name, scoreName),
+		h.Button(h.Type("button"), h.Attr("data-action", "review-rules"), h.Attr("aria-haspopup", "dialog"), h.Attr("aria-controls", "rules-review"), h.T("Rules")),
+	}
+	if public.Mode == domain.ModeEndless && public.Phase != domain.PhaseGameComplete {
+		bar = append(bar, h.Div(h.Class("invite-control"), h.Button(h.Type("button"), h.Attr("data-action", "share-endless"), h.T("Invite")),
+			h.Div(h.Class("invite-panel"), h.Attr("hidden", ""), h.Input(h.Id("endless-share-link"), h.Attr("aria-label", "Live game invitation link"), h.Attr("readonly", "")),
+				h.Span(h.Class("invite-feedback"), h.Role("status")))))
+	}
+	more := []*h.Node{}
+	if host && public.Phase != domain.PhaseGameComplete {
+		confirmText, confirmLabel := "End this game for everyone? Completed-trick scores remain; an unfinished trick and hand bonus will not score.", "Confirm end game"
+		if public.Mode == domain.ModeEndless {
+			confirmText, confirmLabel = "End this run? Completed scores remain; an unfinished trick and hand bonus will not score.", "Confirm end run"
+		}
+		more = append(more, h.Button(h.Type("button"), h.Attr("data-action", "end-confirm"), h.T(map[bool]string{true: "End run", false: "End game"}[public.Mode == domain.ModeEndless])),
+			h.Div(h.Id("end-confirm"), h.Attr("hidden", ""), h.Class("end-confirm"),
+				h.Span(h.Class("muted"), h.T(confirmText)), commandForm("end", confirmLabel, "", false, "", public.Revision),
+				h.Button(h.Type("button"), h.Attr("data-action", "end-cancel"), h.T("Cancel"))))
+	}
+	if public.Phase != domain.PhaseGameComplete {
+		leaveText := "Leaving ends this match for everyone. Completed scores will be final."
+		if public.Mode == domain.ModeEndless {
+			leaveText = "Leave this table? If you are the last human player, the run ends."
+		}
+		more = append(more, h.Button(h.Type("button"), h.Attr("data-action", "leave-prompt"), h.T("Leave room")),
+			h.Div(h.Id("leave-confirm"), h.Attr("hidden", ""), h.P(h.T(leaveText)),
+				h.Button(h.Type("button"), h.Attr("data-action", "leave-room"), h.T("Confirm leave")),
+				h.Button(h.Type("button"), h.Attr("data-action", "leave-cancel"), h.T("Cancel"))))
+	}
+	bar = append(bar, h.NewNode("details", []*h.Node{h.Class("more-control"), h.NewNode("summary", []*h.Node{h.T("More")}), h.Div(append([]*h.Node{h.Class("more-panel")}, more...)...)}))
 	hud := []*h.Node{h.Class("game-hud"), rules,
 		h.Div(h.Class("match-cue"), h.Role("status"), h.Attr("aria-atomic", "true"),
 			h.Attr("data-next", next), h.Attr("data-event", result), h.Attr("data-result", shortResult), h.Attr("data-result-number", shortResultNumber), h.T(next)),
-		renderScoresControl(public, name, scoreName), h.Div(fallbackSeats...)}
-	parts := []*h.Node{h.Class("game-panel"), h.Attr("data-hand", fmt.Sprint(public.HandNumber)), h.Div(hud...)}
-	if public.Mode == domain.ModeEndless && public.Phase != domain.PhaseGameComplete {
-		parts = append(parts, h.Div(h.Class("share-game"),
-			h.Button(h.Type("button"), h.Attr("data-action", "share-endless"), h.T("Share live game")),
-			h.Input(h.Id("endless-share-link"), h.Attr("aria-label", "Live game invitation link"), h.Attr("readonly", ""), h.Attr("hidden", ""))))
-	}
+		h.Div(fallbackSeats...)}
+	parts := []*h.Node{h.Class("game-panel"), h.Attr("data-hand", fmt.Sprint(public.HandNumber)), h.Div(bar...), h.Div(hud...)}
 	if public.Phase == domain.PhasePlayingTrick {
 		legal, _ := domain.LegalCards(*view, catalog)
 		allowed := make(map[domain.CardID]bool, len(legal))
@@ -416,28 +442,6 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		results = append(results, h.Button(h.Type("button"), h.Attr("data-action", "return-to-join"), h.T("Return to join")))
 		parts = append(parts, h.Div(results...))
 	}
-	if host && public.Phase != domain.PhaseGameComplete {
-		confirmText, confirmLabel := "End this game for everyone? Completed-trick scores remain; an unfinished trick and hand bonus will not score.", "Confirm end game"
-		if public.Mode == domain.ModeEndless {
-			confirmText, confirmLabel = "End this run? Completed scores remain; an unfinished trick and hand bonus will not score.", "Confirm end run"
-		}
-		parts = append(parts, h.Div(h.Class("end-game"),
-			h.Button(h.Type("button"), h.Attr("data-action", "end-confirm"), h.T(map[bool]string{true: "End run", false: "End game"}[public.Mode == domain.ModeEndless])),
-			h.Div(h.Id("end-confirm"), h.Attr("hidden", ""), h.Class("end-confirm"),
-				h.Span(h.Class("muted"), h.T(confirmText)),
-				commandForm("end", confirmLabel, "", false, "", public.Revision),
-				h.Button(h.Type("button"), h.Attr("data-action", "end-cancel"), h.T("Cancel")),
-			),
-		))
-	}
-	if public.Phase != domain.PhaseGameComplete && public.Mode != domain.ModeEndless {
-		parts = append(parts, h.Div(h.Class("leave-room"),
-			h.Button(h.Type("button"), h.Attr("data-action", "leave-prompt"), h.T("Leave room")),
-			h.Div(h.Id("leave-confirm"), h.Attr("hidden", ""),
-				h.P(h.T("Leaving ends this match for everyone. Completed scores will be final.")),
-				h.Button(h.Type("button"), h.Attr("data-action", "leave-room"), h.T("End match and leave")),
-				h.Button(h.Type("button"), h.Attr("data-action", "leave-cancel"), h.T("Cancel")))))
-	}
 	if card := public.LastScorecard; card != nil && card.HandNumber == public.HandNumber && public.Phase != domain.PhaseAwaitingChoice {
 		parts = append(parts, renderScorecard(card, scoreName, "scorecard-visible"))
 	}
@@ -445,7 +449,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 }
 
 func renderScoresControl(public domain.PublicView, name, scoreName func(domain.SeatID) string) *h.Node {
-	content := []*h.Node{h.Class("scores-control"), h.NewNode("summary", []*h.Node{h.T("Scores")})}
+	content := []*h.Node{}
 	standings := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T("Standings")})}
 	for _, seat := range public.Seats {
 		standings = append(standings, h.Span(h.T(fmt.Sprintf("%s · %d", name(seat.ID), seat.Score))))
@@ -510,7 +514,7 @@ func renderScoresControl(public domain.PublicView, name, scoreName func(domain.S
 	if public.LastScorecard != nil {
 		content = append(content, renderScorecard(public.LastScorecard, scoreName, "scorecard-saved"))
 	}
-	return h.NewNode("details", content)
+	return h.NewNode("details", []*h.Node{h.Class("scores-control"), h.NewNode("summary", []*h.Node{h.T("Scores")}), h.Div(append([]*h.Node{h.Class("scores-panel")}, content...)...)})
 }
 
 func cardLabel(id domain.CardID) string {

@@ -54,7 +54,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 		t.Fatalf("opening: %+v", message)
 	}
 	openingHTML := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
-	for _, text := range []string{"Run totals", "Round Pacing", "End run", "Share live game"} {
+	for _, text := range []string{"Run totals", "Round Pacing", "End run", "Invite"} {
 		if !strings.Contains(openingHTML, text) {
 			t.Fatalf("opening screen missing %q", text)
 		}
@@ -278,7 +278,7 @@ func TestEndlessShareLinkJoinsExactLiveHand(t *testing.T) {
 	if opening.View.Public.DealSize != 3 {
 		t.Fatal("opening hand was not three cards")
 	}
-	if !strings.Contains(renderScreen(opening, host.Seat, s.catalog, s.config), "Share live game") {
+	if !strings.Contains(renderScreen(opening, host.Seat, s.catalog, s.config), "Invite") {
 		t.Fatal("share control missing")
 	}
 	postInvite := func(room, invite, name string) (*http.Response, error) {
