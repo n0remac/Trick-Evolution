@@ -170,5 +170,31 @@ func TestHandSortAndStack(t *testing.T) {
 		if depth-frontDepth <= nodes[card.PickID].Size[1] {
 			t.Fatalf("lifted card %s intersects the top of the stack", card.Card)
 		}
+		if card.PlayTarget.Position != playPosition(0, len(payload.Seats)) {
+			t.Fatalf("tap target for %s misses the local table slot", card.Card)
+		}
+		remaining := make([]domain.CardID, 0, len(view.Hand)-1)
+		for _, id := range view.Hand {
+			if id != card.Card {
+				remaining = append(remaining, id)
+			}
+		}
+		later, err := Build(domain.PlayerView{Hand: remaining}, domain.DefaultCatalog())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(card.AfterPlay) != len(later.Selections) {
+			t.Fatalf("tap on %s closes %d cards, want %d", card.Card, len(card.AfterPlay), len(later.Selections))
+		}
+		laterNodes := make(map[string]scene.Transform)
+		for _, node := range later.Scene.Nodes {
+			laterNodes[node.ID] = node.Transform
+		}
+		for _, target := range card.AfterPlay {
+			want, ok := laterNodes[target.Target]
+			if !ok || target.To != want {
+				t.Fatalf("tap on %s leaves %s outside its authoritative hand pose", card.Card, target.Target)
+			}
+		}
 	}
 }

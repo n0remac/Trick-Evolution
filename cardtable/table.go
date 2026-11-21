@@ -12,11 +12,17 @@ import (
 )
 
 type Selection struct {
-	PickID    string                `json:"pickId"`
-	Card      domain.CardID         `json:"card"`
-	Legal     bool                  `json:"legal"`
-	Reason    string                `json:"reason,omitempty"`
-	Animation animation.Description `json:"animation"`
+	PickID     string                `json:"pickId"`
+	Card       domain.CardID         `json:"card"`
+	Legal      bool                  `json:"legal"`
+	Reason     string                `json:"reason,omitempty"`
+	Animation  animation.Description `json:"animation"`
+	PlayTarget scene.Transform       `json:"playTarget"`
+	AfterPlay  []HandTarget          `json:"afterPlay"`
+}
+type HandTarget struct {
+	Target string          `json:"target"`
+	To     scene.Transform `json:"to"`
 }
 type Seat struct {
 	ID            domain.SeatID `json:"id"`
@@ -79,6 +85,20 @@ func cardNode(id string, card domain.StandardCard, position scene.Vec3, rotation
 	t.Position = position
 	t.Rotation = rotation
 	return scene.Node{ID: id, Parent: "table", Kind: "box", Radius: .055, Size: scene.Vec3{.86, .035, 1.22}, Material: scene.Material{Color: "#fffdf4", Text: cardLabel(card), Ink: ink}, Transform: t, PickID: pick}
+}
+func handTransform(index, count int) scene.Transform {
+	const pitch = .61
+	const layerGap = .041
+	spread := .43
+	if count > 5 {
+		spread = 1.72 / float64(count-1)
+	}
+	offset := float64(index) - float64(count-1)/2
+	layer := float64(index) * layerGap
+	t := scene.Identity()
+	t.Position = scene.Vec3{offset * spread, .49 + layer*math.Cos(pitch) - offset*.025*math.Sin(pitch), 3.42 + layer*math.Sin(pitch) + offset*.025*math.Cos(pitch)}
+	t.Rotation = scene.Vec3{pitch, 0, 0}
+	return t
 }
 func landingMotion(id string, target scene.Transform) animation.Description {
 	above := target
@@ -170,22 +190,13 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 	const pitch = .61
 	const layerGap = .041 // Greater than card thickness so neighboring cards cannot intersect.
 	normalY, normalZ := math.Cos(pitch), math.Sin(pitch)
-	spread := .43
-	if len(hand) > 5 {
-		spread = 1.72 / float64(len(hand)-1)
-	}
 	selections := make([]Selection, 0, len(hand))
 	for i, card := range hand {
 		id := "hand_" + cardIDString(card)
-		offset := float64(i) - float64(len(hand)-1)/2
-		layer := float64(i) * layerGap
 		// Parallel faces overlap from left to right. The slight downward step exposes
 		// the upper-left corner even when the hand is tightly packed.
-		node := cardNode(id, card, scene.Vec3{
-			offset * spread,
-			.49 + layer*normalY - offset*.025*normalZ,
-			3.42 + layer*normalZ + offset*.025*normalY,
-		}, scene.Vec3{pitch, 0, 0}, id)
+		pose := handTransform(i, len(hand))
+		node := cardNode(id, card, pose.Position, pose.Rotation, id)
 		nodes = append(nodes, node)
 		lift := node.Transform
 		liftDistance := float64(len(hand)-i)*layerGap + .14
@@ -199,7 +210,20 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 		if view.Public.Phase == domain.PhasePlayingTrick && view.Seat == view.Public.Turn && !allowed[card.ID] {
 			reason, _ = domain.LegalCardReason(view, card.ID, catalog)
 		}
-		selections = append(selections, Selection{PickID: id, Card: card.ID, Legal: allowed[card.ID], Reason: reason, Animation: motion})
+		playTarget := scene.Identity()
+		playTarget.Position = playPosition(0, len(seats))
+		closing := make([]HandTarget, 0, len(hand)-1)
+		for j, other := range hand {
+			if j == i {
+				continue
+			}
+			index := j
+			if j > i {
+				index--
+			}
+			closing = append(closing, HandTarget{Target: "hand_" + cardIDString(other), To: handTransform(index, len(hand)-1)})
+		}
+		selections = append(selections, Selection{PickID: id, Card: card.ID, Legal: allowed[card.ID], Reason: reason, Animation: motion, PlayTarget: playTarget, AfterPlay: closing})
 	}
 	for _, play := range view.Public.CurrentTrick {
 		card, ok := domain.CardDetails(play.Card)

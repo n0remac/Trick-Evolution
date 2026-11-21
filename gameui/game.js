@@ -17,6 +17,8 @@
   let displayedSeats = [];
   let rulesScrollLeft = 0;
   let submittedUpdate = 0;
+  let pendingPlay = null;
+  let returningPlay = false;
   let sceneQueue = [];
   let presenting = false;
   let presentationEpoch = 0;
@@ -90,23 +92,30 @@
   }
 
   function inputBlocked() {
-    return reviewDialog.open || !connected || presenting || submittedUpdate === lastSceneUpdate;
+    return reviewDialog.open || !connected || presenting || !!pendingPlay || returningPlay || submittedUpdate === lastSceneUpdate;
   }
 
-  function submit(id) {
+  function submit(id, mode = 'tap', samples = []) {
     const entry = selections.get(id);
-    if (!entry || inputBlocked()) return;
+    if (!entry || inputBlocked()) return false;
     if (!entry.legal) {
       if (displayedSeats.some(seat => seat.self && seat.turn)) notice(entry.reason || 'Choose a legal card for this trick.');
-      return;
+      return false;
     }
     const screen = document.getElementById('screen');
-    if (Number(screen.dataset.update) !== lastSceneUpdate) return;
+    if (Number(screen.dataset.update) !== lastSceneUpdate) return false;
     const form = [...screen.querySelectorAll('.play-commands form')].find(f => f.elements.card.value === entry.card);
     const button = form?.querySelector('button');
-    if (!button || button.disabled) return;
+    if (!button || button.disabled) return false;
     submittedUpdate = lastSceneUpdate;
+    if (table && entry.playTarget) {
+      pendingPlay = {id, card: entry.card, afterPlay: entry.afterPlay || [], revision: table.stats().revision};
+      pendingPlay.done = mode === 'drop'
+        ? table.drop(id, entry.playTarget, pendingPlay.afterPlay, samples, reducedMotion.matches)
+        : table.tap(id, entry.playTarget, pendingPlay.afterPlay, reducedMotion.matches);
+    }
     form.requestSubmit(button);
+    return true;
   }
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   async function drainScenes() {
@@ -115,6 +124,22 @@
     const epoch = presentationEpoch;
     try {
       while (sceneQueue.length && epoch === presentationEpoch) {
+        let landedLocal = null;
+        if (pendingPlay) {
+          const self = payload => payload.seats?.find(seat => seat.self)?.id;
+          const confirms = payload => (payload.presentations || []).some(event =>
+            event.kind === 'card_played' && event.seat === self(payload) &&
+            event.card === pendingPlay.card && event.revision > pendingPlay.revision);
+          const index = sceneQueue.findIndex(confirms);
+          if (index < 0) break;
+          sceneQueue.splice(0, index);
+          const pending = pendingPlay;
+          await pending.done;
+          if (epoch !== presentationEpoch || pendingPlay !== pending) break;
+          table.promotePlay(pending.id);
+          landedLocal = pending.card;
+          pendingPlay = null;
+        }
         const payload = sceneQueue.shift();
         const events = (payload.presentations || []).filter(item => !seenEvents.has(item.id));
         events.forEach(item => seenEvents.add(item.id));
@@ -127,6 +152,11 @@
         const completesTrick = events.some(event => event.kind === 'trick_won');
         for (const event of events) {
           if (epoch !== presentationEpoch) break;
+          if (event.kind === 'card_played' && event.card === landedLocal &&
+              event.seat === payload.seats?.find(s => s.self)?.id) {
+            // The locally played card has already completed its flight.
+            continue;
+          }
           if (event.kind === 'card_played') {
             markPresentation('landing', event.id);
             const landed = await Promise.race([table.animate(event.motion), wait(1800).then(() => false)]);
@@ -156,10 +186,11 @@
       }
     } catch (error) {
       fallbackTable(error);
-    } finally { if (epoch === presentationEpoch) { presenting = false; if (sceneQueue.length && table) drainScenes(); } }
+    } finally { if (epoch === presentationEpoch) { presenting = false; if (sceneQueue.length && table && !pendingPlay) drainScenes(); } }
   }
   function fallbackTable(error) {
     table?.dispose(); table = null; runtimePromise = null;
+    pendingPlay = null; returningPlay = false;
     tableShell.hidden = true;
     shell.classList.add('table-fallback');
     document.querySelectorAll('.play-commands').forEach(node => { node.hidden = false; });
@@ -172,6 +203,8 @@
     restoring = true;
     seenEvents.clear();
     submittedUpdate = 0;
+    pendingPlay = null;
+    returningPlay = false;
     table?.cancel();
   }
   async function applyScene() {
@@ -201,7 +234,9 @@
         const {createRuntime} = await runtimePromise;
         if (document.querySelector('#screen[data-update]') !== screen) { applyScene(); return; }
         if (!table) {
-          table = createRuntime(canvas, {onSelect: submit, onDrop: submit, inputBlocked, onResize: positionSeatLabels, onDragState: valid => dropHint.classList.toggle('active', valid)});
+          table = createRuntime(canvas, {onSelect: id => submit(id, 'tap'), onDrop: (id, samples) => submit(id, 'drop', samples),
+            inputBlocked, reducedMotion: () => reducedMotion.matches, onResize: positionSeatLabels,
+            onDragState: valid => dropHint.classList.toggle('active', valid)});
           window.__trick3d = table; // Read-only browser smoke diagnostics.
         }
       }
@@ -580,7 +615,16 @@
     }
     const screen = documentFragment.querySelector('#screen[data-update]');
     if (!screen) {
-      if (documentFragment.querySelector('#notice')) { submittedUpdate = 0; closeAfterStart = false; }
+      if (documentFragment.querySelector('#notice')) {
+        submittedUpdate = 0; closeAfterStart = false;
+        if (pendingPlay && table) {
+          const rejected = pendingPlay;
+          pendingPlay = null;
+          returningPlay = true;
+          table.restorePlay(rejected.id, rejected.afterPlay, reducedMotion.matches)
+            .finally(() => { returningPlay = false; if (sceneQueue.length) drainScenes(); });
+        }
+      }
       return;
     }
     const update = Number(screen.dataset.update);
