@@ -2,3 +2,6 @@ artifacts/
 __pycache__/
 .local-go-cache/
 .local-go-tmp/
+
+# Benchmark generated fixtures, model traces and dependency caches
+/agent-benchmark/packs/trick-evolution/_generated/
