@@ -18,7 +18,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 	"github.com/n0remac/trick-evolution/browser3d"
@@ -252,156 +251,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /game/vendor/htmx-2.0.11.min.js", serveHTMX)
 	mux.HandleFunc("GET /game/vendor/htmx-ext-ws-2.0.4.min.js", serveHTMXWS)
 	browser3d.Register(mux)
-	mux.HandleFunc("POST /game/join", s.join)
-	mux.HandleFunc("POST /game/endless", s.startEndless)
-	mux.HandleFunc("POST /game/endless/join", s.joinEndlessInvite)
+	s.registerEndlessRoutes(mux)
 	mux.HandleFunc("POST /game/leave", s.leave)
 	mux.HandleFunc("GET /ws/game", s.websocket)
 	return mux
-}
-
-func (s *Server) join(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1024)
-	var request struct {
-		Room, Name, Token string
-		Bots              int
-	}
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		http.Error(w, "invalid join request", http.StatusBadRequest)
-		return
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		http.Error(w, "invalid join request", http.StatusBadRequest)
-		return
-	}
-	if !roomPattern.MatchString(request.Room) {
-		http.Error(w, "invalid room ID", http.StatusBadRequest)
-		return
-	}
-	request.Name = strings.TrimSpace(request.Name)
-	if request.Name == "" || utf8.RuneCountInString(request.Name) > 32 {
-		http.Error(w, "name must be 1–32 characters", http.StatusBadRequest)
-		return
-	}
-	if request.Bots < 0 || request.Bots > 3 {
-		http.Error(w, "bots must be 0–3", http.StatusBadRequest)
-		return
-	}
-	newID, err := randomToken(8)
-	if err != nil {
-		http.Error(w, "could not create seat", http.StatusInternalServerError)
-		return
-	}
-	newToken, err := randomToken(32)
-	if err != nil {
-		http.Error(w, "could not create session", http.StatusInternalServerError)
-		return
-	}
-	s.mu.Lock()
-	s.pruneLocked()
-	if target := s.redirects[request.Room]; request.Token != "" && target != "" {
-		request.Room = target
-	}
-	gameRoom := s.rooms[request.Room]
-	if gameRoom == nil {
-		if request.Token != "" {
-			s.mu.Unlock()
-			http.Error(w, "room is closed", http.StatusGone)
-			return
-		}
-		roomContext, cancel := context.WithCancel(context.Background())
-		gameRoom = &room{id: request.Room, config: s.config, clients: make(map[domain.SeatID]*client), seen: make(map[domain.SeatID]map[string]acceptedCommand), lastActivity: s.now(), server: s, botWake: make(chan struct{}, 1), done: make(chan struct{}), ctx: roomContext, cancel: cancel}
-		s.rooms[request.Room] = gameRoom
-	}
-	gameRoom.mu.Lock()
-	if gameRoom.closed {
-		gameRoom.mu.Unlock()
-		s.mu.Unlock()
-		http.Error(w, "room is closed", http.StatusGone)
-		return
-	}
-	var seat participant
-	if request.Token != "" {
-		for _, existing := range gameRoom.seats {
-			if !existing.Bot && existing.Token == request.Token {
-				seat = existing
-				break
-			}
-		}
-		if seat.ID == "" {
-			gameRoom.mu.Unlock()
-			s.mu.Unlock()
-			http.Error(w, "invalid session", http.StatusUnauthorized)
-			return
-		}
-		if request.Bots > 0 && gameRoom.seats[0].ID != seat.ID {
-			gameRoom.mu.Unlock()
-			s.mu.Unlock()
-			http.Error(w, "only the host can add bots", http.StatusForbidden)
-			return
-		}
-	} else {
-		if request.Bots > 0 && len(gameRoom.seats) != 0 {
-			gameRoom.mu.Unlock()
-			s.mu.Unlock()
-			http.Error(w, "only the host can add bots", http.StatusForbidden)
-			return
-		}
-		if gameRoom.state != nil || len(gameRoom.seats)+1+request.Bots > 4 {
-			gameRoom.mu.Unlock()
-			s.mu.Unlock()
-			http.Error(w, "room is full or already started", http.StatusConflict)
-			return
-		}
-		seat = participant{ID: domain.SeatID(newID), Name: request.Name, Token: newToken}
-		gameRoom.seats = append(gameRoom.seats, seat)
-	}
-	if request.Bots > 0 {
-		if gameRoom.state != nil || len(gameRoom.seats)+request.Bots > 4 {
-			gameRoom.mu.Unlock()
-			s.mu.Unlock()
-			http.Error(w, "room is full or already started", http.StatusConflict)
-			return
-		}
-		count := 0
-		for _, existing := range gameRoom.seats {
-			if existing.Bot {
-				count++
-			}
-		}
-		for i := 0; i < request.Bots; i++ {
-			count++
-			gameRoom.seats = append(gameRoom.seats, participant{ID: domain.SeatID(fmt.Sprintf("bot:%d", count)), Name: fmt.Sprintf("Bot %d", count), Bot: true})
-		}
-	}
-	gameRoom.lastActivity = s.now()
-	host := gameRoom.seats[0].ID == seat.ID
-	invite := gameRoom.inviteToken
-	if gameRoom.config.Mode == domain.ModeEndless && gameRoom.seats[0].Bot {
-		host = false
-		for _, p := range gameRoom.seats {
-			if !p.Bot {
-				host = p.ID == seat.ID
-				break
-			}
-		}
-	}
-	gameRoom.mu.Unlock()
-	s.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(struct {
-		Room   string        `json:"room"`
-		Seat   domain.SeatID `json:"seat"`
-		Name   string        `json:"name"`
-		Token  string        `json:"token"`
-		Host   bool          `json:"host"`
-		RunID  string        `json:"runId,omitempty"`
-		Invite string        `json:"invite,omitempty"`
-	}{Room: request.Room, Seat: seat.ID, Name: seat.Name, Token: seat.Token, Host: host, RunID: seat.RunID, Invite: invite})
-	gameRoom.publish()
 }
 
 // Leave is authenticated by the same room, seat and token returned by join.
@@ -1065,15 +918,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 		}
 		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionPlayCard, Seat: c.seat, Card: cmd.Card}, r.server.catalog)
 	case "choose_rule":
-		if r.state == nil {
-			err = errors.New("game has not started")
-			break
-		}
-		actor := c.seat
-		if r.config.Mode == domain.ModeEndless && r.seats[0].Bot {
-			actor = r.seats[0].ID
-		}
-		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionChooseRule, Seat: actor, Rule: cmd.Rule, BoundaryID: cmd.BoundaryID}, r.server.catalog)
+		next, events, err = r.dispatchDraftCommand(c, cmd)
 	case "next":
 		if r.state == nil {
 			err = errors.New("game has not started")

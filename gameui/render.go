@@ -61,31 +61,6 @@ func pageNode(room string) *h.Node {
 	)
 }
 
-func joinScreen(room string) *h.Node {
-	options := make([]*h.Node, 4)
-	for i := range options {
-		options[i] = h.Option(h.Value(fmt.Sprint(i)), h.T(fmt.Sprint(i)))
-	}
-	return h.Section(h.Id("screen"), h.Attr("aria-live", "polite"),
-		h.Section(h.Class("panel join"),
-			h.H2(h.T("Endless Mode")),
-			h.P(h.Class("muted"), h.T("Start a private run with one bot, three cards per player, and rules that change between rounds.")),
-			h.Form(h.Id("endless-form"), h.Class("form-grid"),
-				h.Label(h.T("Your name"), h.Input(h.Name("name"), h.Attr("required", ""), h.Attr("maxlength", "32"))),
-				h.Button(h.Type("submit"), h.T("Start Endless Mode")))),
-		h.Section(h.Class("panel join"),
-			h.H2(h.T("Join a room")),
-			h.P(h.Class("muted"), h.T("Share the room code with friends, or add computer opponents when creating a room. The first player hosts.")),
-			h.Form(h.Id("join-form"), h.Class("form-grid"),
-				h.Label(h.T("Room code"), h.Input(h.Name("room"), h.Attr("required", ""), h.Attr("maxlength", "40"), h.Attr("pattern", "[A-Za-z0-9_-]+"), h.Value(room))),
-				h.Label(h.T("Your name"), h.Input(h.Name("name"), h.Attr("required", ""), h.Attr("maxlength", "32"))),
-				h.Label(h.T("Computer opponents (new room)"), h.Select(append([]*h.Node{h.Name("bots")}, options...)...)),
-				h.Button(h.Type("submit"), h.T("Join room")),
-			),
-		),
-	)
-}
-
 func commandForm(kind, label string, card domain.CardID, disabled bool, class string, revision uint64) *h.Node {
 	children := []*h.Node{
 		h.Attr("ws-send", ""),
@@ -104,14 +79,6 @@ func commandForm(kind, label string, card domain.CardID, disabled bool, class st
 	}
 	children = append(children, h.Button(button...))
 	return h.Form(children...)
-}
-
-func draftForm(rule domain.RuleID, label, boundary string, revision uint64) *h.Node {
-	return h.Form(h.Attr("ws-send", ""), h.Input(h.Type("hidden"), h.Name("type"), h.Value("choose_rule")),
-		h.Input(h.Type("hidden"), h.Name("revision"), h.Value(fmt.Sprint(revision))),
-		h.Input(h.Type("hidden"), h.Name("boundaryId"), h.Value(boundary)),
-		h.Input(h.Type("hidden"), h.Name("rule"), h.Value(string(rule))),
-		h.Button(h.Type("submit"), h.T(label)))
 }
 
 func renderScreen(message serverMessage, seat domain.SeatID, catalog domain.Catalog, config domain.Config) string {
@@ -324,9 +291,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		renderScoresControl(public, name, scoreName), h.Div(fallbackSeats...)}
 	parts := []*h.Node{h.Class("game-panel"), h.Attr("data-hand", fmt.Sprint(public.HandNumber)), h.Div(hud...)}
 	if public.Mode == domain.ModeEndless && public.Phase != domain.PhaseGameComplete {
-		parts = append(parts, h.Div(h.Class("share-game"),
-			h.Button(h.Type("button"), h.Attr("data-action", "share-endless"), h.T("Share live game")),
-			h.Input(h.Id("endless-share-link"), h.Attr("aria-label", "Live game invitation link"), h.Attr("readonly", ""), h.Attr("hidden", ""))))
+		parts = append(parts, endlessShareControls())
 	}
 	if public.Phase == domain.PhasePlayingTrick {
 		legal, _ := domain.LegalCards(*view, catalog)
@@ -367,22 +332,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			}
 		}
 	} else if public.Phase == domain.PhaseAwaitingChoice {
-		choices := []*h.Node{h.Class("draft-choices"), h.H2(h.T("Choose a rule for the next round"))}
-		if public.LastScorecard != nil && public.LastScorecard.HandNumber == public.HandNumber {
-			choices = append(choices, renderScorecard(public.LastScorecard, scoreName, "scorecard-draft"))
-		}
-		for _, id := range public.DraftOptions {
-			if definition, ok := catalog.Definition(id); ok {
-				card := []*h.Node{h.Class("draft-card"), h.NewNode("strong", []*h.Node{h.T(definition.Title)}), h.P(h.T(definition.Text))}
-				if cue := public.DraftCues[id]; cue != "" {
-					card = append(card, h.P(h.Class("draft-cue"), h.T(cue)))
-				}
-				card = append(card, draftForm(id, "Take "+definition.Title, public.PendingBoundaryID, public.Revision))
-				choices = append(choices, h.Div(card...))
-			}
-		}
-		choices = append(choices, draftForm("", "Keep current rules", public.PendingBoundaryID, public.Revision))
-		parts = append(parts, h.Div(choices...))
+		parts = append(parts, renderDraftChoices(public, catalog, scoreName))
 	} else if public.Phase == domain.PhaseGameComplete {
 		status := "Game complete"
 		if public.EndedEarly {
