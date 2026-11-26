@@ -156,8 +156,7 @@ func TestEndlessAutomaticDealAtSharedRoundBoundaryKeepsBothHumans(t *testing.T) 
 		t.Fatal("shared-round cue disappeared from the notification bar")
 	}
 
-	// Park the shared table at the boundary where the next Endless cycle
-	// shrinks to two seats. The scheduled deal must retain both controllers.
+	// A score milestone keeps the shared table and both human controllers.
 	s.mu.Lock()
 	shared := s.rooms[ra.Room]
 	s.mu.Unlock()
@@ -173,8 +172,8 @@ func TestEndlessAutomaticDealAtSharedRoundBoundaryKeepsBothHumans(t *testing.T) 
 	shared.mu.Unlock()
 	shared.scheduleAutomaticDeal()
 	va, vb := readRevision(t, na, before+1), readRevision(t, nb, before+1)
-	if va.View.Public.Phase != domain.PhasePlayingTrick || va.View.Public.RoundHand != 1 || len(va.View.Public.Seats) != 2 {
-		t.Fatalf("shared boundary did not automatically deal two seats: %+v", va.View.Public)
+	if va.View.Public.Phase != domain.PhasePlayingTrick || va.View.Public.RoundHand != 1 || len(va.View.Public.Seats) != 4 {
+		t.Fatalf("shared boundary did not keep its roster: %+v", va.View.Public)
 	}
 	if va.View.Seat != a.Seat || vb.View.Seat != b.Seat || len(va.View.Hand) == 0 || len(vb.View.Hand) == 0 {
 		t.Fatal("a shared player lost their private hand at the boundary")
@@ -188,7 +187,7 @@ func TestEndlessAutomaticDealAtSharedRoundBoundaryKeepsBothHumans(t *testing.T) 
 		participants[a.Seat].RunID != a.Room || participants[b.Seat].RunID != b.Room {
 		t.Fatalf("shared participants were rebuilt as bots: %+v %+v", first, second)
 	}
-	if len(va.Seats) != 2 || !va.Seats[0].Host || va.Seats[0].Bot || va.Seats[1].Bot {
+	if len(va.Seats) != 4 || !va.Seats[0].Host || va.Seats[0].Bot || va.Seats[1].Bot {
 		t.Fatalf("shared seat identities changed: %+v", va.Seats)
 	}
 	html := renderScreen(va, a.Seat, s.catalog, *va.Config)

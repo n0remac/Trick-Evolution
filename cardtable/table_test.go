@@ -124,18 +124,19 @@ func TestCollectionTargetsEveryWinnerSeat(t *testing.T) {
 	}
 }
 
-func TestSeatScoreUsesActiveShortGame(t *testing.T) {
+func TestSeatScoreUsesEndlessRun(t *testing.T) {
 	view := domain.PlayerView{Seat: "a"}
 	view.Public.Mode = domain.ModeEndless
 	view.Public.Seats = []domain.PublicSeat{{ID: "a", Score: 24}, {ID: "b", Score: 19}}
 	view.Public.ShortGameRound = 2
 	view.Public.ShortGameScores = map[domain.SeatID]int{"a": 4, "b": 6}
+	view.Public.RunScores = map[domain.SeatID]int{"a": 24, "b": 19}
 	payload, err := Build(view, domain.DefaultCatalog())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if payload.Seats[0].Score != 4 || payload.Seats[0].ScoreLabel != "Game score" || payload.Seats[1].Score != 6 {
-		t.Fatalf("short-game seat scores: %+v", payload.Seats)
+	if payload.Seats[0].Score != 24 || payload.Seats[0].ScoreLabel != "Run score" || payload.Seats[1].Score != 19 {
+		t.Fatalf("run seat scores: %+v", payload.Seats)
 	}
 }
 

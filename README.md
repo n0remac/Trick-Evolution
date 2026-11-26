@@ -12,6 +12,8 @@ GOCACHE=/tmp/trick-evolution-go-cache GOMODCACHE=/tmp/trick-evolution-mod-cache 
 
 Open `http://localhost:8080/game?room=demo` in two separate browser contexts. The first player hosts; once both have joined, the host starts the game. The printable card catalog is at `http://localhost:8080/cards`. Set `TRICK_EVOLUTION_ADDR` to use a different listen address.
 
+**Play Endless** starts the main continuous run with one bot. It opens with three-card hands and adds Expanded Hand Size for round two. Rule drafts and automatic follow-ups use the active rule field, while every three rounds produce a score milestone without resetting the personal run score. Compatible solo runs can join at between-hand boundaries; the live table also supports invitations. The separate room-code flow remains available for finite games.
+
 To play alone, choose one to three computer opponents when creating a room, or use **Add bot** in the lobby. In Game Rules, the host can choose hand size, reveal interval, and starting rules for this room, then reset to defaults. The host can use **End game** after starting; completed tricks and already settled hands determine the final scores. Bots use bounded [A2 Monte Carlo rollouts](docs/A2_MONTE_CARLO_DESIGN.md), with the [A1 heuristic](docs/A1_HEURISTIC_OPPONENTS.md) as fallback. See [lobby and end-game controls](docs/LOBBY_AND_END_GAME.md) for details.
 
 See [the F3 multiplayer guide](docs/F3_MULTIPLAYER.md) for reconnect policy, game controls, and focused tests.

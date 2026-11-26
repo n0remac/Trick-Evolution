@@ -118,8 +118,8 @@ func TestEndlessCadenceScoreAndOnceOnlyDraft(t *testing.T) {
 			t.Fatalf("run score for %s lost at roster change", seat.ID)
 		}
 	}
-	if state.ShortGameResult == nil || state.ShortGameResult.Number != 1 || state.ShortGameRound != 0 {
-		t.Fatalf("missing short-game result: %+v", state.ShortGameResult)
+	if state.ShortGameResult == nil || state.ShortGameResult.Number != 2 || state.ShortGameRound == 0 {
+		t.Fatalf("missing recurring score milestone: %+v", state.ShortGameResult)
 	}
 }
 
@@ -182,7 +182,12 @@ func TestEndlessCompatibilityChecksEffectsDependenciesAndDeal(t *testing.T) {
 	}
 	b.Round = 2
 	if !EndlessCompatible(a, b, catalog) {
-		t.Fatal("different open-round positions should fit")
+		t.Fatal("different round positions should fit")
+	}
+	a.Round, b.Round = 5, 5
+	a.ShortGameRound, b.ShortGameRound = 2, 2
+	if !EndlessCompatible(a, b, catalog) {
+		t.Fatal("matching should remain available between milestone hands")
 	}
 	b.Round = 3
 	if !applyEndlessRule(&b, catalog, RuleLastTrickBonus) || EndlessCompatible(a, b, catalog) {
@@ -224,8 +229,13 @@ func TestEndlessForecastSearchesTwoScheduledTableChanges(t *testing.T) {
 	b := cloneState(a)
 	b.Seats[0].ID = "b"
 	a.Round, b.Round = 2, 7
-	a.RuleDraw = []RuleID{RuleAvoidHearts, RuleLastTrickBonus}
-	if !applyEndlessRule(&b, catalog, RuleAvoidHearts) || !applyEndlessRule(&b, catalog, RuleLastTrickBonus) {
+	if !applyEndlessRule(&a, catalog, RuleExpandedHand) {
+		t.Fatal("opening rule")
+	}
+	b = cloneState(a)
+	b.Seats[0].ID = "b"
+	b.Round = 7
+	if !applyEndlessRule(&b, catalog, RuleKeepOne) || !applyEndlessRule(&b, catalog, RuleLastTrickBonus) {
 		t.Fatal("fixture rules")
 	}
 	before := append([]RuleID(nil), a.RuleDraw...)
@@ -282,7 +292,7 @@ func TestEndlessKeepOneResetsAtRosterChange(t *testing.T) {
 	}
 }
 
-func TestEndlessShortGameTimelineAndScores(t *testing.T) {
+func TestEndlessMilestonesContinueWithoutPhaseSwitch(t *testing.T) {
 	catalog := DefaultCatalog()
 	cfg := DefaultConfig()
 	cfg.Mode, cfg.HandSize = ModeEndless, 3
@@ -290,28 +300,10 @@ func TestEndlessShortGameTimelineAndScores(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var gameStart map[SeatID]int
-	seenNotice, seenResult := false, false
-	for state.Round < 7 || state.Round == 7 && state.RoundHand == 0 {
-		if state.Round == 3 {
-			if !strings.Contains(state.TableCue, "A three-round game starts after this round") {
-				t.Fatal("last open round lost announcement")
-			}
-			seenNotice = true
-		}
-		if state.Round >= 4 && state.Round <= 6 {
-			if len(state.Seats) != 4 && state.RoundHand > 0 {
-				t.Fatalf("short game roster changed: round %d seats %d", state.Round, len(state.Seats))
-			}
-			if state.ShortGameRound != state.Round-3 {
-				t.Fatalf("short game progress %d in round %d", state.ShortGameRound, state.Round)
-			}
-			if gameStart == nil {
-				gameStart = make(map[SeatID]int)
-				for id, score := range state.RunScores {
-					gameStart[id] = score
-				}
-			}
+	start := map[SeatID]int{"human": 0, "bot:1": 0}
+	for state.Round < 7 {
+		if strings.Contains(state.TableCue, "three-round game starts") {
+			t.Fatal("phase-switch cue returned")
 		}
 		switch state.Phase {
 		case PhasePlayingTrick:
@@ -320,49 +312,26 @@ func TestEndlessShortGameTimelineAndScores(t *testing.T) {
 			state = handAction(t, state, Action{Kind: ActionChooseRule, Seat: "human", BoundaryID: state.PendingBoundaryID})
 		case PhaseHandComplete:
 			state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
-			switch state.Round {
-			case 2:
-				if len(state.Seats) != 3 {
-					t.Fatal("round 2 must have three seats")
-				}
-			case 3:
-				if len(state.Seats) != 4 {
-					t.Fatal("round 3 must have four seats")
-				}
-			}
 		default:
 			t.Fatalf("unexpected phase %s", state.Phase)
 		}
-		if state.Round == 7 && state.ShortGameResult != nil {
-			seenResult = true
+		if state.Round == 4 && state.RoundHand == 0 {
+			if state.ShortGameResult == nil || state.ShortGameResult.Number != 1 || state.ShortGameRound != 1 {
+				t.Fatalf("first milestone: %+v", state.ShortGameResult)
+			}
+			for id, score := range state.ShortGameResult.Scores {
+				if score != state.RunScores[id]-start[id] {
+					t.Fatalf("milestone score for %s: %d", id, score)
+				}
+			}
 		}
 	}
-	if !seenNotice || !seenResult || state.ShortGameResult == nil || state.ShortGameResult.Number != 1 {
-		t.Fatal("timeline did not reach short-game result")
-	}
-	result := state.ShortGameResult
-	for id, points := range result.Scores {
-		if points != state.RunScores[id]-gameStart[id] {
-			t.Fatalf("game points for %s = %d, run delta %d", id, points, state.RunScores[id]-gameStart[id])
-		}
-	}
-	best := -1
-	for _, points := range result.Scores {
-		if points > best {
-			best = points
-		}
-	}
-	for _, id := range result.Winners {
-		if result.Scores[id] != best {
-			t.Fatalf("nonwinner %s reported as winner", id)
-		}
-	}
-	if len(state.Seats) != 2 || state.ShortGameResult == nil || state.ShortGameRound != 0 || !strings.Contains(state.TableCue, "fresh deal") {
-		t.Fatalf("result or open play lost: %+v", state)
+	if state.ShortGameResult == nil || state.ShortGameResult.Number != 2 || state.ShortGameRound != 1 || len(state.Seats) != 4 {
+		t.Fatalf("second milestone or roster lost: %+v", state)
 	}
 	for _, seat := range state.Seats {
 		if seat.Score != state.RunScores[seat.ID] {
-			t.Fatal("run score lost after roster reduction")
+			t.Fatalf("run score for %s lost", seat.ID)
 		}
 	}
 }

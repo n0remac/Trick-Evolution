@@ -138,6 +138,14 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	if seats, ok := endlessNextRoster(state, resolved); ok {
 		state = cloneState(state)
 		state.Seats = seats
+		for _, seat := range seats {
+			if _, exists := state.RunScores[seat.ID]; !exists {
+				state.RunScores[seat.ID] = seat.Score
+			}
+			if _, exists := state.ShortGameScores[seat.ID]; !exists {
+				state.ShortGameScores[seat.ID] = 0
+			}
+		}
 		state.Hands = make(map[SeatID][]CardID, len(seats))
 		state.Retained, state.Carried = nil, nil
 		rosterChanged = true
@@ -234,7 +242,7 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	next.StandardDraw = append([]CardID(nil), filtered[newCards*len(next.Seats):]...)
 	next.Shuffles = append(next.Shuffles, ShuffleRecord{Kind: StandardDeckKind, Order: order})
 	if rosterChanged {
-		next.TableCue = endlessCue(next, fmt.Sprintf("The table now has %d players. Everyone received a fresh deal.", len(next.Seats)))
+		next.TableCue = fmt.Sprintf("The table now has %d players. Everyone received a fresh deal.", len(next.Seats))
 	}
 	return next, []Event{{Kind: EventHandStarted, Revision: next.Revision, Hand: next.HandNumber, Seat: next.Leader}}, nil
 }

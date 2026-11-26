@@ -82,7 +82,7 @@ type Play struct {
 
 type Config struct {
 	Mode         MatchMode
-	OpenRounds   int // Open rounds between Endless short games; zero uses the playtest default.
+	OpenRounds   int // Legacy replay setting; Endless score milestones now use a fixed three-round cadence.
 	HandSize     int
 	RevealEvery  int      // Completed hands between rule reveals.
 	MaxHands     int      // The match ends after this many completed hands.
@@ -385,9 +385,12 @@ func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, r
 	if cfg.Mode == ModeEndless {
 		s.Round, s.RoundHand = 1, 1
 		s.TableCue = "The first round lasts three hands."
+		s.ShortGameNumber, s.ShortGameRound = 1, 1
+		s.ShortGameScores = make(map[SeatID]int, len(ids))
 		s.RunScores = make(map[SeatID]int, len(ids))
 		for _, id := range ids {
 			s.RunScores[id] = 0
+			s.ShortGameScores[id] = 0
 		}
 	}
 	return s

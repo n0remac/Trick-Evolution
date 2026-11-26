@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 	var body bytes.Buffer
 	_, _ = body.ReadFrom(page.Body)
 	_ = page.Body.Close()
-	if !strings.Contains(body.String(), "Start Endless Mode") {
+	if !strings.Contains(body.String(), "Play Endless") {
 		t.Fatal("home screen has no Endless Mode option")
 	}
 	response, err := http.Post(web.URL+"/game/endless", "application/json", strings.NewReader(`{"name":"Runner"}`))
@@ -108,7 +109,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 				_ = conn.Close()
 				conn = dialRoom(t, web.URL, session)
 				message = readMessage(t, conn, "state")
-				if message.View.Public.PendingBoundaryID != public.PendingBoundaryID || message.View.Public.CompletedHands != public.CompletedHands {
+				if message.View.Public.PendingBoundaryID != public.PendingBoundaryID || message.View.Public.CompletedHands != public.CompletedHands || !reflect.DeepEqual(message.View.Public.DraftOptions, public.DraftOptions) {
 					t.Fatal("reconnect lost pending draft")
 				}
 				s.mu.Lock()
@@ -210,9 +211,12 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 			holds++
 		}
 		public = message.View.Public
+		if strings.Contains(public.TableCue, "three-round game starts") {
+			t.Fatal("phase-switch cue returned")
+		}
 		var reconnect bool
 		switch {
-		case public.Round == 3 && !noticeReconnect && strings.Contains(public.TableCue, "A three-round game starts after this round"):
+		case public.Round == 3 && !noticeReconnect:
 			noticeReconnect, reconnect = true, true
 		case public.ShortGameRound > 0 && !gameReconnect:
 			gameReconnect, reconnect = true, true
@@ -230,7 +234,7 @@ func TestEndlessHomeToRunReconnectAndClosure(t *testing.T) {
 			}
 			if resultReconnect && after.ShortGameResult != nil {
 				html := renderScreen(message, session.Seat, s.catalog, domain.DefaultConfig())
-				if !strings.Contains(html, `data-result-number="1"`) || !strings.Contains(html, "Three-round game 1 complete") || !strings.Contains(html, "Latest game 1") || !strings.Contains(html, "Winner:") && !strings.Contains(html, "Tie:") {
+				if !strings.Contains(html, `data-result-number="1"`) || !strings.Contains(html, "Score milestone 1 complete") || !strings.Contains(html, "Latest milestone 1") || !strings.Contains(html, "Winner:") && !strings.Contains(html, "Tie:") {
 					t.Fatal("result is not readable alongside open play")
 				}
 			}

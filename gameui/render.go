@@ -68,11 +68,11 @@ func joinScreen(room string) *h.Node {
 	}
 	return h.Section(h.Id("screen"), h.Attr("aria-live", "polite"),
 		h.Section(h.Class("panel join"),
-			h.H2(h.T("Endless Mode")),
+			h.H2(h.T("Endless")),
 			h.P(h.Class("muted"), h.T("Start a private run with one bot, three cards per player, and rules that change between rounds.")),
 			h.Form(h.Id("endless-form"), h.Class("form-grid"),
 				h.Label(h.T("Your name"), h.Input(h.Name("name"), h.Attr("required", ""), h.Attr("maxlength", "32"))),
-				h.Button(h.Type("submit"), h.T("Start Endless Mode")))),
+				h.Button(h.Type("submit"), h.T("Play Endless")))),
 		h.Section(h.Class("panel join"),
 			h.H2(h.T("Join a room")),
 			h.P(h.Class("muted"), h.T("Share the room code with friends, or add computer opponents when creating a room. The first player hosts.")),
@@ -301,16 +301,16 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		if len(winners) > 1 {
 			outcome = "Tie: "
 		}
-		shortResult = fmt.Sprintf("Three-round game %d complete · %s%s", latest.Number, outcome, strings.Join(winners, " and "))
+		shortResult = fmt.Sprintf("Score milestone %d complete · %s%s", latest.Number, outcome, strings.Join(winners, " and "))
 		shortResultNumber = fmt.Sprint(latest.Number)
 	}
 	fallbackSeats := []*h.Node{h.Class("fallback-seats")}
 	for _, player := range public.Seats {
 		score := player.Score
 		label := "score"
-		if public.Mode == domain.ModeEndless && public.ShortGameRound > 0 {
-			score = public.ShortGameScores[player.ID]
-			label = "game score"
+		if public.Mode == domain.ModeEndless {
+			score = public.RunScores[player.ID]
+			label = "run score"
 		}
 		turn := ""
 		if public.Phase == domain.PhasePlayingTrick && public.Turn == player.ID {
@@ -487,7 +487,7 @@ func renderScoresControl(public domain.PublicView, name, scoreName func(domain.S
 		}
 		content = append(content, h.Div(run...))
 		if public.ShortGameRound > 0 {
-			game := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Game %d · round %d/3", public.ShortGameNumber, public.ShortGameRound))})}
+			game := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Milestone %d · round %d/3", public.ShortGameNumber, public.ShortGameRound))})}
 			for _, seat := range public.Seats {
 				game = append(game, h.Span(h.T(fmt.Sprintf("%s · %d", name(seat.ID), public.ShortGameScores[seat.ID]))))
 			}
@@ -502,7 +502,7 @@ func renderScoresControl(public domain.PublicView, name, scoreName func(domain.S
 			if len(winners) > 1 {
 				outcome = "Tie: "
 			}
-			latest := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Latest game %d · %s%s", result.Number, outcome, strings.Join(winners, " and ")))})}
+			latest := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Latest milestone %d · %s%s", result.Number, outcome, strings.Join(winners, " and ")))})}
 			for _, id := range ids {
 				if score, ok := result.Scores[id]; ok {
 					latest = append(latest, h.Span(h.T(fmt.Sprintf("%s · %d", displayName(id), score))))

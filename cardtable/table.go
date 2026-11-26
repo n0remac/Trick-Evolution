@@ -150,8 +150,8 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 			label[2] = 4.95
 		}
 		score, scoreLabel := s.Score, "Score"
-		if view.Public.Mode == domain.ModeEndless && view.Public.ShortGameRound > 0 {
-			score, scoreLabel = view.Public.ShortGameScores[s.ID], "Game score"
+		if view.Public.Mode == domain.ModeEndless {
+			score, scoreLabel = view.Public.RunScores[s.ID], "Run score"
 		}
 		seats = append(seats, Seat{ID: s.ID, Count: s.HandCount, Score: score, ScoreLabel: scoreLabel, Tricks: s.TricksWon,
 			LabelPosition: label, Turn: view.Public.Phase == domain.PhasePlayingTrick && s.ID == view.Public.Turn, Self: s.ID == view.Seat})

@@ -51,13 +51,19 @@ func TestPointsPerTrickEndlessDraftAndChoiceValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.RuleDraw = []RuleID{RulePointsPerTrick, RuleNoPoints}
-	state.Round, state.Phase, state.PendingBoundaryID = 4, PhaseAwaitingChoice, "test-boundary"
+	state.Round, state.Phase, state.PendingBoundaryID = 7, PhaseAwaitingChoice, "test-boundary"
 	state.DraftOptions = []RuleID{RulePointsPerTrick}
 	if _, ok := eligibleEndlessRule(state, catalog, RulePointsPerTrick); ok {
 		t.Fatal("redundant restoration offered in draft")
 	}
-	if options := endlessOptions(state, catalog); len(options) != 1 || options[0] != RuleNoPoints {
-		t.Fatalf("draft options before No Points: %v", options)
+	if options := endlessOptions(state, catalog); len(options) != 0 {
+		t.Fatalf("No Points appeared without positive scoring: %v", options)
+	}
+	if !applyEndlessRule(&state, catalog, RuleGamePoint) {
+		t.Fatal("Game Point did not apply")
+	}
+	if options := endlessOptions(state, catalog); len(options) == 0 || options[0] != RuleNoPoints {
+		t.Fatalf("draft options with Game Point: %v", options)
 	}
 	if _, _, err := Step(state, Action{Kind: ActionChooseRule, Seat: "a", Rule: RulePointsPerTrick, BoundaryID: state.PendingBoundaryID}, catalog); err == nil {
 		t.Fatal("server-side choice accepted redundant restoration")
@@ -68,7 +74,7 @@ func TestPointsPerTrickEndlessDraftAndChoiceValidation(t *testing.T) {
 	if _, ok := eligibleEndlessRule(state, catalog, RulePointsPerTrick); !ok {
 		t.Fatal("restoration missing after No Points")
 	}
-	if options := endlessOptions(state, catalog); len(options) != 1 || options[0] != RulePointsPerTrick {
+	if options := endlessOptions(state, catalog); len(options) == 0 || options[0] != RulePointsPerTrick {
 		t.Fatalf("draft options after No Points: %v", options)
 	}
 	state.DraftOptions = []RuleID{RulePointsPerTrick}
