@@ -115,10 +115,10 @@ func TestCatalogValidation(t *testing.T) {
 	if err := catalog.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Definitions) != 97 {
+	if len(catalog.Definitions) != 100 {
 		t.Fatalf("catalog entries %d", len(catalog.Definitions))
 	}
-	wantDeck := []RuleID{RuleExpandedHand, RuleKeepOne, RulePartnership, RuleRestoreIndividual, RuleAuction, RuleBidPoints, RuleBidTricks, RuleSetBidder, RuleWhistDeal, RuleSixCardHand, RuleSpadesTrump, RulePitchTrump, RuleWhistTrump, RuleFollowOrTrump, RuleBreakSpades, RuleBreakHearts, RuleHighTrump, RuleLowTrump, RuleCaptureLow, RuleKeepLow, RuleJackTrump, RuleGamePoint, RuleNoPoints, RulePointsPerTrick, RuleWhistMajority, RuleAvoidQueenHearts, RuleAvoidHearts, RuleLastTrickBonus}
+	wantDeck := []RuleID{RuleExpandedHand, RuleKeepOne, RuleFirstTo5, RuleFirstTo21, RuleWinOnBid, RulePartnership, RuleRestoreIndividual, RuleAuction, RuleBidPoints, RuleBidTricks, RuleSetBidder, RuleWhistDeal, RuleSixCardHand, RuleSpadesTrump, RulePitchTrump, RuleWhistTrump, RuleFollowOrTrump, RuleBreakSpades, RuleBreakHearts, RuleHighTrump, RuleLowTrump, RuleCaptureLow, RuleKeepLow, RuleJackTrump, RuleGamePoint, RuleNoPoints, RulePointsPerTrick, RuleWhistMajority, RuleAvoidQueenHearts, RuleAvoidHearts, RuleLastTrickBonus}
 	if !reflect.DeepEqual(catalog.RuleDeck(), wantDeck) {
 		t.Fatalf("default evolution deck: %v", catalog.RuleDeck())
 	}

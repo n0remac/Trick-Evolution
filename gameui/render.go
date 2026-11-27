@@ -282,6 +282,11 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		next += fmt.Sprintf(" · %s in %d hand(s)", action, countdown)
 	}
 	result := eventNotice(message.Events, catalog, name)
+	for _, event := range message.Events {
+		if event.Kind == domain.EventHandStarted && public.RecognitionNotice != "" {
+			result = public.RecognitionNotice
+		}
+	}
 	if public.Mode == domain.ModeEndless && public.TableCue != "" {
 		showTableCue := public.Phase == domain.PhaseAwaitingChoice ||
 			(public.Phase == domain.PhaseHandComplete && public.RoundHand == 0)
@@ -310,6 +315,14 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 		shortResult = fmt.Sprintf("Score milestone %d complete · %s%s", latest.Number, outcome, strings.Join(winners, " and "))
 		shortResultNumber = fmt.Sprint(latest.Number)
 	}
+	if latest := public.GameResult; latest != nil {
+		winners := make([]string, 0, len(latest.Winners))
+		for _, id := range latest.Winners {
+			winners = append(winners, name(id))
+		}
+		shortResult = fmt.Sprintf("Target game %d complete · %s", latest.Number, strings.Join(winners, " and "))
+		shortResultNumber = fmt.Sprintf("target:%d:%d", latest.Number, latest.Hand)
+	}
 	fallbackSeats := []*h.Node{h.Class("fallback-seats")}
 	for _, player := range public.Seats {
 		score := player.Score
@@ -330,6 +343,16 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 	bar := []*h.Node{h.Class("game-top-bar"), h.Attr("aria-label", "Game controls"),
 		renderScoresControl(public, name, scoreName),
 		h.Button(h.Type("button"), h.Attr("data-action", "review-rules"), h.Attr("aria-haspopup", "dialog"), h.Attr("aria-controls", "rules-review"), h.T("Rules")),
+	}
+	if public.GameTarget > 0 {
+		label := fmt.Sprintf("Game %d · first to %d", public.GameNumber, public.GameTarget)
+		if public.WinOnBid {
+			label += " · win on your bid"
+		}
+		bar = append(bar, h.Span(h.Class("target-indicator"), h.T(label)))
+	}
+	if public.KnownGame != "" {
+		bar = append(bar, h.Span(h.Class("known-game"), h.T(public.KnownGame)))
 	}
 	if public.TurnedTrumpCard != "" {
 		bar = append(bar, h.Span(h.Class("trump-indicator"), h.T("Turned trump: "+cardLabel(public.TurnedTrumpCard))))
@@ -553,6 +576,26 @@ func renderScoresControl(public domain.PublicView, name, scoreName func(domain.S
 		}
 	}
 	content = append(content, h.Div(standings...))
+	if public.GameTarget > 0 {
+		game := []*h.Node{h.Class("scores-standings target-progress"), h.NewNode("strong", []*h.Node{h.T(fmt.Sprintf("Game %d · first to %d", public.GameNumber, public.GameTarget))})}
+		if len(public.HandTeams) == 4 {
+			for team := 0; team < 2; team++ {
+				game = append(game, h.Span(h.T(fmt.Sprintf("Team %d · %d/%d", team+1, public.GameTeamScores[team], public.GameTarget))))
+			}
+		} else {
+			for _, seat := range public.Seats {
+				game = append(game, h.Span(h.T(fmt.Sprintf("%s · %d/%d", name(seat.ID), public.GameScores[seat.ID], public.GameTarget))))
+			}
+		}
+		content = append(content, h.Div(game...))
+	}
+	if public.GameResult != nil {
+		winners := make([]string, 0, len(public.GameResult.Winners))
+		for _, id := range public.GameResult.Winners {
+			winners = append(winners, name(id))
+		}
+		content = append(content, h.P(h.Class("target-result"), h.T(fmt.Sprintf("Game %d won at hand %d by %s", public.GameResult.Number, public.GameResult.Hand, strings.Join(winners, " and ")))))
+	}
 	if public.Mode == domain.ModeEndless {
 		displayName := func(id domain.SeatID) string {
 			label := name(id)

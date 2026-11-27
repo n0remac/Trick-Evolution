@@ -188,6 +188,13 @@ type MatchState struct {
 	ShortGameNumber   int
 	ShortGameScores   map[SeatID]int
 	ShortGameResult   *ShortGameResult
+	GameNumber        int
+	GameScores        map[SeatID]int // Current target game, distinct from personal/run totals.
+	GameTeamScores    map[int]int
+	GameRuleKey       string
+	GameResult        *TargetGameResult
+	KnownGame         string
+	RecognitionNotice string
 	Shuffles          []ShuffleRecord
 }
 
@@ -221,6 +228,15 @@ type ShortGameResult struct {
 	Number  int
 	Scores  map[SeatID]int
 	Winners []SeatID
+}
+
+type TargetGameResult struct {
+	Number     int
+	Target     int
+	Scores     map[SeatID]int
+	TeamScores map[int]int
+	Winners    []SeatID
+	Hand       int
 }
 
 // ShuffleSource is injected only at setup. Callers can supply a seeded source
@@ -302,6 +318,7 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 	if err := startAuction(&state, resolved); err != nil {
 		return MatchState{}, err
 	}
+	syncGameContext(&state, resolved)
 	return state, nil
 }
 
@@ -374,6 +391,7 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 	if err := startAuction(&state, resolved); err != nil {
 		return MatchState{}, err
 	}
+	syncGameContext(&state, resolved)
 	return state, nil
 }
 
@@ -441,5 +459,6 @@ func matchFromOrders(ids []SeatID, cfg Config, catalog Catalog, standardOrder, r
 			s.ShortGameScores[id] = 0
 		}
 	}
+	s.GameNumber = 1
 	return s
 }

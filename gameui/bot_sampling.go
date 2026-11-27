@@ -289,7 +289,14 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 		CurrentTrick: append([]domain.Play(nil), public.CurrentTrick...), TrumpSuit: public.TrumpSuit, TurnedTrumpCard: public.TurnedTrumpCard, BrokenSpades: public.BrokenSpades, BrokenHearts: public.BrokenHearts, Dealer: public.Dealer, Leader: public.Leader, Turn: public.Turn,
 		HandNumber: public.HandNumber, TrickNumber: public.TrickNumber, DealSize: prepared.dealSize, TricksPerHand: public.TricksPerHand, CompletedHands: public.CompletedHands,
 		Round: public.Round, RoundHand: public.RoundHand, TableCue: public.TableCue,
+		GameNumber: public.GameNumber, GameRuleKey: public.GameRuleKey, GameScores: make(map[domain.SeatID]int, len(public.GameScores)), GameTeamScores: make(map[int]int, len(public.GameTeamScores)), GameResult: public.GameResult,
 		Field: append([]domain.RuleInstance(nil), prepared.field...), RuleDraw: append([]domain.RuleID(nil), prepared.rules...)}
+	for id, score := range public.GameScores {
+		state.GameScores[id] = score
+	}
+	for team, score := range public.GameTeamScores {
+		state.GameTeamScores[team] = score
+	}
 	if public.Auction != nil {
 		a := *public.Auction
 		a.Calls = append([]domain.AuctionCall(nil), public.Auction.Calls...)

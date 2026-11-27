@@ -26,6 +26,15 @@ type PublicView struct {
 	ShortGameNumber   int
 	ShortGameScores   map[SeatID]int
 	ShortGameResult   *ShortGameResult
+	GameNumber        int
+	GameRuleKey       string
+	GameScores        map[SeatID]int
+	GameTeamScores    map[int]int
+	GameTarget        int
+	WinOnBid          bool
+	GameResult        *TargetGameResult
+	KnownGame         string
+	RecognitionNotice string
 	NextRosterSize    int
 	HandSize          int
 	DealSize          int
@@ -89,6 +98,15 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 		Rules: rules.History, ActiveField: rules.ActiveField, Effective: rules.Effective, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...), TrumpSuit: state.TrumpSuit, BrokenSpades: state.BrokenSpades, BrokenHearts: state.BrokenHearts,
 		Seats: make([]PublicSeat, len(state.Seats))}
 	view.LastScorecard = cloneScorecard(state.LastScorecard)
+	view.GameNumber, view.GameRuleKey, view.GameScores, view.GameResult = state.GameNumber, state.GameRuleKey, cloneSeatScores(state.GameScores), cloneTargetResult(state.GameResult)
+	view.GameTeamScores = make(map[int]int, len(state.GameTeamScores))
+	for team, score := range state.GameTeamScores {
+		view.GameTeamScores[team] = score
+	}
+	view.GameTarget = targetForRules(rules)
+	_, bidErr := rules.Effect(MechanicWinOnBid)
+	view.WinOnBid = bidErr == nil
+	view.KnownGame, view.RecognitionNotice = state.KnownGame, state.RecognitionNotice
 	view.TurnedTrumpCard = state.TurnedTrumpCard
 	if state.Auction != nil {
 		a := *state.Auction

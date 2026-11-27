@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 const (
@@ -71,6 +72,17 @@ func ReplaceEndlessBotSeat(state MatchState, oldID, newID SeatID) (MatchState, e
 	moveSeatKey(next.Captured, oldID, newID)
 	moveSeatKey(next.RunScores, oldID, newID)
 	moveSeatKey(next.ShortGameScores, oldID, newID)
+	moveSeatKey(next.GameScores, oldID, newID)
+	if parts := strings.Split(next.GameRuleKey, "/"); len(parts) == 4 {
+		ids := strings.Split(parts[3], ",")
+		for i, id := range ids {
+			if id == string(oldID) {
+				ids[i] = string(newID)
+			}
+		}
+		parts[3] = strings.Join(ids, ",")
+		next.GameRuleKey = strings.Join(parts, "/")
+	}
 	moveSeatKey(next.HandTeams, oldID, newID)
 	moveSeatKey(next.TeamAwardBalances, oldID, newID)
 	if next.Auction != nil {
@@ -92,6 +104,14 @@ func ReplaceEndlessBotSeat(state MatchState, oldID, newID SeatID) (MatchState, e
 		for i, id := range next.ShortGameResult.Winners {
 			if id == oldID {
 				next.ShortGameResult.Winners[i] = newID
+			}
+		}
+	}
+	if next.GameResult != nil {
+		moveSeatKey(next.GameResult.Scores, oldID, newID)
+		for i, id := range next.GameResult.Winners {
+			if id == oldID {
+				next.GameResult.Winners[i] = newID
 			}
 		}
 	}
@@ -405,6 +425,15 @@ func endlessRoundLength(state MatchState) int {
 }
 
 func eligibleEndlessRule(state MatchState, catalog Catalog, id RuleID) ([]RuleInstance, bool) {
+	if id == RuleFirstTo5 || id == RuleFirstTo21 || id == RuleWinOnBid {
+		if state.Round < 9 {
+			return nil, false
+		}
+		current, err := ResolveRules(state.Field, catalog, state.Config)
+		if err != nil || !endlessEstablishedScoring(current) {
+			return nil, false
+		}
+	}
 	if id == RulePartnership || id == RuleAuction {
 		if state.Round < 6 || len(state.Seats) != 4 {
 			if id == RulePartnership || state.Round < 6 {
@@ -546,6 +575,14 @@ func endlessOptions(state MatchState, catalog Catalog) []RuleID {
 	if state.Round >= 6 && endlessCandidate(state, catalog, draw, RuleAuction) {
 		options = append(options, RuleAuction)
 	}
+	if state.Round >= 9 && len(options) < 3 {
+		for _, id := range []RuleID{RuleFirstTo5, RuleFirstTo21, RuleWinOnBid} {
+			if endlessCandidate(state, catalog, draw, id) {
+				options = append(options, id)
+				break
+			}
+		}
+	}
 	if state.Round >= 7 && len(options) < 3 {
 		hand := RuleSixCardHand
 		if (state.Round-7)/2%2 == 1 {
@@ -682,11 +719,19 @@ func settleEndlessBoundary(state *MatchState, catalog Catalog) error {
 		return nil
 	}
 	if state.ShortGameRound == shortGameRounds {
-		finishShortGame(state)
+		if rules, err := ResolveRules(state.Field, catalog, state.Config); err == nil && targetForRules(rules) == 0 {
+			finishShortGame(state)
+		}
 	}
 	state.Round++
 	state.RoundHand = 0
-	if state.ShortGameRound == 0 {
+	rules, err := ResolveRules(state.Field, catalog, state.Config)
+	if err != nil {
+		return err
+	}
+	if targetForRules(rules) != 0 {
+		state.ShortGameRound, state.ShortGameScores, state.ShortGameResult = 0, nil, nil
+	} else if state.ShortGameRound == 0 {
 		state.ShortGameNumber++
 		state.ShortGameRound = 1
 		state.ShortGameScores = make(map[SeatID]int, len(state.Seats))

@@ -15,6 +15,7 @@ func TestPartnershipBotSeatTakeoverAndStateRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.TeamScores[0] = 4
+	state.GameScores["bot:2"] = 3
 	state.RunScores["bot:2"] = 9
 	state.LastScorecard = &Scorecard{HandNumber: 1, Teams: []ScorecardTeam{{Team: 0, Seats: []SeatID{"human", "bot:2"}, Total: 4}}}
 	replaced, err := ReplaceEndlessBotSeat(state, "bot:2", "guest")
@@ -23,6 +24,14 @@ func TestPartnershipBotSeatTakeoverAndStateRoundTrip(t *testing.T) {
 	}
 	if replaced.LastScorecard.Teams[0].Seats[1] != "bot:2" {
 		t.Fatal("historical scorecard roster changed")
+	}
+	if replaced.GameScores["guest"] != 3 || replaced.GameRuleKey == state.GameRuleKey {
+		t.Fatal("bot takeover lost the same target-game seat")
+	}
+	rules, _ := ResolveRules(replaced.Field, DefaultCatalog(), replaced.Config)
+	syncGameContext(&replaced, rules)
+	if replaced.GameScores["guest"] != 3 {
+		t.Fatal("same-position takeover reset the game interval")
 	}
 	encoded, err := json.Marshal(replaced)
 	if err != nil {

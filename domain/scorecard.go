@@ -12,6 +12,7 @@ type Scorecard struct {
 	Teams      []ScorecardTeam
 	Notes      []ScorecardNote
 	Contract   *Contract
+	GameResult *TargetGameResult
 }
 
 type ScorecardTeam struct {
@@ -215,6 +216,7 @@ func cloneScorecard(card *Scorecard) *Scorecard {
 		return nil
 	}
 	next := *card
+	next.GameResult = cloneTargetResult(card.GameResult)
 	if card.Contract != nil {
 		c := *card.Contract
 		next.Contract = &c

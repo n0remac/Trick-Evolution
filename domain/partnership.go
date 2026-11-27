@@ -13,7 +13,13 @@ func startHandRules(state *MatchState, rules RuleResolution) error {
 		if len(state.Seats) != 4 {
 			return fmt.Errorf("partnerships require four seats")
 		}
-		if len(state.HandTeams) == 0 {
+		changed := len(state.HandTeams) != 4
+		for i, seat := range state.Seats {
+			if team, ok := state.HandTeams[seat.ID]; !ok || team != i%2 {
+				changed = true
+			}
+		}
+		if changed {
 			state.TeamScores = map[int]int{0: 0, 1: 0}
 			state.TeamAwardBalances = make(map[SeatID]int, 4)
 		}
@@ -87,6 +93,9 @@ func teamAwardSeat(state *MatchState, team int) SeatID {
 }
 
 func matchWinners(state MatchState) []SeatID {
+	if state.Phase == PhaseGameComplete && !state.EndedEarly && state.GameResult != nil && state.GameResult.Hand == state.HandNumber {
+		return append([]SeatID(nil), state.GameResult.Winners...)
+	}
 	if len(state.HandTeams) == 0 {
 		return gameWinners(state.Seats)
 	}

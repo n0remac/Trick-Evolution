@@ -35,17 +35,18 @@ func transitionError(code ErrorCode, detail string) error {
 type EventKind string
 
 const (
-	EventHandStarted      EventKind = "hand_started"
-	EventCardPlayed       EventKind = "card_played"
-	EventTrickWon         EventKind = "trick_won"
-	EventHandCompleted    EventKind = "hand_completed"
-	EventRuleRevealed     EventKind = "rule_revealed"
-	EventRuleRemoved      EventKind = "rule_removed"
-	EventGameEnded        EventKind = "game_ended"
-	EventGameCompleted    EventKind = "game_completed"
-	EventRoundDecision    EventKind = "round_decision"
-	EventAuctionCall      EventKind = "auction_call"
-	EventAuctionCompleted EventKind = "auction_completed"
+	EventHandStarted         EventKind = "hand_started"
+	EventCardPlayed          EventKind = "card_played"
+	EventTrickWon            EventKind = "trick_won"
+	EventHandCompleted       EventKind = "hand_completed"
+	EventRuleRevealed        EventKind = "rule_revealed"
+	EventRuleRemoved         EventKind = "rule_removed"
+	EventGameEnded           EventKind = "game_ended"
+	EventGameCompleted       EventKind = "game_completed"
+	EventTargetGameCompleted EventKind = "target_game_completed"
+	EventRoundDecision       EventKind = "round_decision"
+	EventAuctionCall         EventKind = "auction_call"
+	EventAuctionCompleted    EventKind = "auction_completed"
 )
 
 // Event has public facts only. A transport can broadcast it without exposing
@@ -135,7 +136,7 @@ func stepEndGame(state MatchState, action Action, seatIndex int, hostOnly bool) 
 }
 
 func stepStartHand(state MatchState, action Action, seatIndex int, resolved RuleResolution) (MatchState, []Event, error) {
-	if state.Phase != PhaseHandComplete || state.Config.Mode == ModeFinite && state.CompletedHands >= state.Config.MaxHands {
+	if state.Phase != PhaseHandComplete || state.Config.Mode == ModeFinite && targetForRules(resolved) == 0 && state.CompletedHands >= state.Config.MaxHands {
 		return state, nil, transitionError(ErrWrongPhase, "a new hand cannot start now")
 	}
 	if seatIndex != 0 {
@@ -152,8 +153,10 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 			if _, exists := state.RunScores[seat.ID]; !exists {
 				state.RunScores[seat.ID] = seat.Score
 			}
-			if _, exists := state.ShortGameScores[seat.ID]; !exists {
-				state.ShortGameScores[seat.ID] = 0
+			if state.ShortGameScores != nil && state.ShortGameRound > 0 {
+				if _, exists := state.ShortGameScores[seat.ID]; !exists {
+					state.ShortGameScores[seat.ID] = 0
+				}
 			}
 		}
 		state.Hands = make(map[SeatID][]CardID, len(seats))
@@ -257,6 +260,7 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	if err := startAuction(&next, resolved); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
+	syncGameContext(&next, resolved)
 	next.Shuffles = append(next.Shuffles, ShuffleRecord{Kind: StandardDeckKind, Order: order})
 	if rosterChanged {
 		next.TableCue = fmt.Sprintf("The table now has %d players. Everyone received a fresh deal.", len(next.Seats))
@@ -391,6 +395,11 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	}
 	settleContract(&next, resolvedRules)
 	next.LastScorecard = makeScorecard(next, resolvedRules, false)
+	gameResult := settleTargetGame(&next, resolvedRules)
+	if gameResult != nil {
+		next.LastScorecard.GameResult = cloneTargetResult(gameResult)
+		events = append(events, Event{Kind: EventTargetGameCompleted, Revision: next.Revision, Hand: next.HandNumber, Winners: append([]SeatID(nil), gameResult.Winners...)})
+	}
 	if next.Config.Mode == ModeEndless {
 		recordEndlessPoints(state, &next)
 		next.CompletedHands++
@@ -403,7 +412,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 		}
 		return next, events, nil
 	}
-	if next.CompletedHands+1 >= next.Config.MaxHands {
+	if gameResult != nil || targetForRules(resolvedRules) == 0 && next.CompletedHands+1 >= next.Config.MaxHands {
 		next.CompletedHands++
 		next.Phase = PhaseGameComplete
 		events = append(events, Event{Kind: EventHandCompleted, Revision: next.Revision, Hand: next.HandNumber},
@@ -601,6 +610,14 @@ func cloneState(state MatchState) MatchState {
 		result.Winners = slices.Clone(result.Winners)
 		next.ShortGameResult = &result
 	}
+	next.GameScores = cloneSeatScores(state.GameScores)
+	if state.GameTeamScores != nil {
+		next.GameTeamScores = make(map[int]int, len(state.GameTeamScores))
+		for team, score := range state.GameTeamScores {
+			next.GameTeamScores[team] = score
+		}
+	}
+	next.GameResult = cloneTargetResult(state.GameResult)
 	next.Shuffles = make([]ShuffleRecord, len(state.Shuffles))
 	for i, record := range state.Shuffles {
 		next.Shuffles[i] = ShuffleRecord{Kind: record.Kind, Order: slices.Clone(record.Order)}

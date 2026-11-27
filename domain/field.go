@@ -39,6 +39,14 @@ func restorationEligible(field []RuleInstance, catalog Catalog, config Config, i
 		current, err := ResolveRules(field, catalog, config)
 		return err == nil && activeEndlessRule(current, RulePartnership)
 	}
+	if id == RuleWinOnBid {
+		current, err := ResolveRules(field, catalog, config)
+		if err != nil {
+			return false
+		}
+		victory, err := current.Effect(MechanicVictory)
+		return err == nil && victory.Value != ValueHighestShared
+	}
 	if id != RulePointsPerTrick {
 		return true
 	}
@@ -316,7 +324,7 @@ func (r RuleResolution) ValidateMatchEffects(config Config) error {
 		{MechanicPlayRestriction, "", 0}, {MechanicWinnerEligibility, ValueLeadSuit, 0},
 		{MechanicRankComparison, "", 0}, {MechanicTieBreak, ValueFirstPlay, 0},
 		{MechanicTrickPoints, "", 0}, {MechanicHandLimit, ValueConfigured, config.MaxHands},
-		{MechanicVictory, ValueHighestShared, 0}, {MechanicReveal, ValueConfigured, config.RevealEvery},
+		{MechanicVictory, "", 0}, {MechanicReveal, ValueConfigured, config.RevealEvery},
 	}
 	for _, check := range checks {
 		effect, err := r.Effect(check.mechanic)
@@ -325,6 +333,15 @@ func (r RuleResolution) ValidateMatchEffects(config Config) error {
 		}
 		if check.value != "" && effect.Value != check.value || effect.Number != check.number {
 			return fmt.Errorf("unsupported %s effect %s/%d", check.mechanic, effect.Value, effect.Number)
+		}
+	}
+	if _, err := r.Effect(MechanicWinOnBid); err == nil {
+		victory, _ := r.Effect(MechanicVictory)
+		if victory.Value == ValueHighestShared {
+			return fmt.Errorf("Win on Your Bid requires a target score")
+		}
+		if _, err := r.Effect(MechanicAuction); err != nil {
+			return fmt.Errorf("Win on Your Bid requires an auction")
 		}
 	}
 	return nil
@@ -344,7 +361,11 @@ func RecordCompletedHand(state MatchState, catalog Catalog) (MatchState, *RuleIn
 	next.Field = append([]RuleInstance(nil), state.Field...)
 	next.RuleDraw = append([]RuleID(nil), state.RuleDraw...)
 	next.CompletedHands++
-	if next.CompletedHands >= next.Config.MaxHands || next.CompletedHands%next.Config.RevealEvery != 0 {
+	resolved, err := ResolveRules(next.Field, catalog, next.Config)
+	if err != nil {
+		return state, nil, err
+	}
+	if targetForRules(resolved) == 0 && next.CompletedHands >= next.Config.MaxHands || next.CompletedHands%next.Config.RevealEvery != 0 {
 		return next, nil, nil
 	}
 	for index, id := range next.RuleDraw {

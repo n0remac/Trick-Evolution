@@ -326,7 +326,7 @@ func TestPhaseOneSnapshotMigrationPreservesHistory(t *testing.T) {
 		}
 		old.Field = field
 		if mode == ModeEndless {
-			newCards := map[RuleID]bool{RuleAuction: true, RuleBidPoints: true, RuleBidTricks: true, RuleSetBidder: true}
+			newCards := map[RuleID]bool{RuleAuction: true, RuleBidPoints: true, RuleBidTricks: true, RuleSetBidder: true, RuleFirstTo5: true, RuleFirstTo21: true, RuleWinOnBid: true}
 			draw := old.RuleDraw[:0]
 			for _, id := range old.RuleDraw {
 				if !newCards[id] {

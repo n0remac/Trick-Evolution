@@ -255,7 +255,10 @@ func modeEffectDescription(e domain.EffectiveEffect, mode domain.MatchMode) stri
 		case domain.MechanicReveal:
 			return "Drafts, table changes, and holds happen at round boundaries."
 		case domain.MechanicVictory:
-			return "Completed hand points stay in the run score."
+			if e.Value == domain.ValueHighestShared {
+				return "Completed hand points stay in the run score; every three rounds produce a score milestone."
+			}
+			return "A target win produces a game result. The Endless run and its historical scores continue."
 		}
 	}
 	return effectDescription(e)
@@ -341,9 +344,17 @@ func effectDescription(e domain.EffectiveEffect) string {
 	case domain.MechanicLastTrickBonus:
 		return "The final trick winner gains 2 match points when the hand completes. No bonus is awarded for an unfinished hand."
 	case domain.MechanicHandLimit:
-		return fmt.Sprintf("The match ends after %d completed hands.", e.Number)
+		return fmt.Sprintf("The match ends after %d completed hands unless a target-score rule controls victory.", e.Number)
 	case domain.MechanicVictory:
+		if e.Value == domain.ValueFirstTo5 {
+			return "The first individual or team to reach five points in the current game interval wins after a completed hand."
+		}
+		if e.Value == domain.ValueFirstTo21 {
+			return "The first individual or team to reach 21 points in the current game interval wins after a completed hand."
+		}
 		return "The highest individual score wins; tied leaders share victory."
+	case domain.MechanicWinOnBid:
+		return "A target win also requires a made contract by the leading bidder or bidding team on that hand."
 	case domain.MechanicReveal:
 		return fmt.Sprintf("After every %d completed hands, reveal one eligible rule for the next hand. If none remains eligible, nothing changes. No rule is revealed after the final hand.", e.Number)
 	}

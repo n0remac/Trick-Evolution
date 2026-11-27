@@ -23,7 +23,7 @@ func TestEndlessGraphReferencesAndReachability(t *testing.T) {
 	for _, id := range catalog.RuleDeck() {
 		deck[id] = true
 	}
-	if len(deck) != 28 {
+	if len(deck) != 31 {
 		t.Fatalf("deck has %d candidates", len(deck))
 	}
 	seen := map[RuleID]bool{}
@@ -59,6 +59,106 @@ func TestEndlessGraphReferencesAndReachability(t *testing.T) {
 			}
 			seenTargets[target] = true
 		}
+	}
+}
+
+func TestRealDraftsReachTargetAndResetAtReplacementBoundary(t *testing.T) {
+	state, catalog := graphState(t)
+	chosenStrategy := false
+	for steps := 0; state.Round < 9 && steps < 40; steps++ {
+		switch state.Phase {
+		case PhasePlayingTrick, PhaseAuction:
+			state = finishHand(t, state)
+		case PhaseAwaitingChoice:
+			choice := RuleID("")
+			for _, id := range state.DraftOptions {
+				if id == RuleGamePoint {
+					choice, chosenStrategy = id, true
+					break
+				}
+			}
+			state = handAction(t, state, Action{Kind: ActionChooseRule, Seat: "human", Rule: choice, BoundaryID: state.PendingBoundaryID})
+		case PhaseHandComplete:
+			state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
+		}
+	}
+	if !chosenStrategy || state.Round != 9 || state.Phase != PhaseAwaitingChoice {
+		t.Fatalf("round-nine draft missing: round %d phase %s strategy %t", state.Round, state.Phase, chosenStrategy)
+	}
+	if !containsRule(state.DraftOptions, RuleFirstTo5) || !containsRule(state.DraftOptions, RuleAuction) {
+		t.Fatalf("target displaced independent strategy: %v", state.DraftOptions)
+	}
+	state = handAction(t, state, Action{Kind: ActionChooseRule, Seat: "human", Rule: RuleFirstTo5, BoundaryID: state.PendingBoundaryID})
+	state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
+	if targetOfState(state, catalog) != 5 || state.GameNumber < 2 || state.ShortGameRound != 0 || state.KnownGame != "" {
+		t.Fatal("target deal did not start a separate unnamed game interval")
+	}
+	state = finishHand(t, state)
+	if state.Phase == PhaseAwaitingChoice {
+		state = handAction(t, state, Action{Kind: ActionChooseRule, Seat: "human", BoundaryID: state.PendingBoundaryID})
+	}
+	runBefore := cloneSeatScores(state.RunScores)
+	state = handAction(t, state, Action{Kind: ActionRemoveRule, Seat: "human", Rule: RuleFirstTo5})
+	if !applyEndlessRule(&state, catalog, RuleFirstTo21) {
+		t.Fatal("target replacement was unreachable")
+	}
+	state = handAction(t, state, Action{Kind: ActionStartHand, Seat: "human", DeckOrder: canonicalOrder()})
+	if targetOfState(state, catalog) != 21 || state.GameScores["human"] != 0 || !reflect.DeepEqual(state.RunScores, runBefore) {
+		t.Fatal("replacement did not reset only target interval")
+	}
+}
+
+func targetOfState(state MatchState, catalog Catalog) int {
+	r, _ := ResolveRules(state.Field, catalog, state.Config)
+	return targetForRules(r)
+}
+
+func containsRule(ids []RuleID, want RuleID) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCuratedNamedGamePathAndIncompatibleReplacements(t *testing.T) {
+	catalog := DefaultCatalog()
+	cfg := DefaultConfig()
+	cfg.Mode, cfg.HandSize = ModeEndless, 3
+	s, err := NewMatch([]SeatID{"a", "b", "c", "d"}, cfg, catalog, identityShuffle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = finishHand(t, s)
+	s.Round = 9 // The actual early draft cadence is covered above; this probes late legal edges.
+	for _, id := range []RuleID{RuleExpandedHand, RuleSixCardHand, RulePitchTrump, RuleHighTrump, RuleLowTrump, RuleJackTrump, RuleGamePoint, RuleNoPoints, RuleAuction, RuleSetBidder, RulePartnership, RuleFirstTo21, RuleWinOnBid} {
+		if !applyEndlessRule(&s, catalog, id) {
+			t.Fatalf("Pitch path cannot draft %s", id)
+		}
+	}
+	s = handAction(t, s, Action{Kind: ActionStartHand, Seat: "a", DeckOrder: canonicalOrder()})
+	if s.KnownGame != "Four-point partnership Pitch variant" {
+		t.Fatalf("curated Pitch path: %q", s.KnownGame)
+	}
+	cutthroat := finishHand(t, cloneState(s))
+	cutthroat = handAction(t, cutthroat, Action{Kind: ActionRemoveRule, Seat: "a", Rule: RulePartnership})
+	cutthroat = handAction(t, cutthroat, Action{Kind: ActionStartHand, Seat: "a", DeckOrder: canonicalOrder()})
+	if cutthroat.KnownGame != "Four-point cutthroat Pitch variant" {
+		t.Fatalf("curated cutthroat path: %q", cutthroat.KnownGame)
+	}
+	s = finishHand(t, s)
+	for _, id := range []RuleID{RuleWinOnBid, RuleSetBidder, RuleAuction, RuleHighTrump, RuleLowTrump, RuleJackTrump, RuleGamePoint} {
+		s = handAction(t, s, Action{Kind: ActionRemoveRule, Seat: "a", Rule: id})
+	}
+	for _, id := range []RuleID{RuleWhistDeal, RuleWhistTrump, RuleWhistMajority, RuleFirstTo5} {
+		if !applyEndlessRule(&s, catalog, id) {
+			t.Fatalf("Whist replacement cannot draft %s", id)
+		}
+	}
+	s = handAction(t, s, Action{Kind: ActionStartHand, Seat: "a", DeckOrder: canonicalOrder()})
+	if s.KnownGame != "Classic short Whist (without honours)" {
+		t.Fatalf("curated Whist replacement path: %q", s.KnownGame)
 	}
 }
 

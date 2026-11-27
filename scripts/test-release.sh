@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/test-release.sh [--browser-smoke | --browser-bidding-smoke | --browser-lifecycle-smoke | --browser-rules-smoke | --browser-invite-smoke | --browser-bot-smoke | --browser-3d-smoke | --browser-full] [--race]
+Usage: scripts/test-release.sh [--browser-smoke | --browser-target-smoke | --browser-bidding-smoke | --browser-lifecycle-smoke | --browser-rules-smoke | --browser-invite-smoke | --browser-bot-smoke | --browser-3d-smoke | --browser-full] [--race]
                                [--browser-bin PATH] [--artifacts DIR]
 
 Default: focused Go packages (including the ten-hand black-box fixtures) and
@@ -21,6 +21,11 @@ while (($#)); do
     --browser-smoke)
       [[ "$browser_mode" == none ]] || { usage >&2; exit 2; }
       browser_mode=smoke
+      shift
+      ;;
+    --browser-target-smoke)
+      [[ "$browser_mode" == none ]] || { usage >&2; exit 2; }
+      browser_mode=target-smoke
       shift
       ;;
     --browser-bidding-smoke)

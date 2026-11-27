@@ -40,6 +40,13 @@ func renderScorecard(card *domain.Scorecard, name func(domain.SeatID) string, cl
 		}
 		parts = append(parts, h.P(h.Class("scorecard-contract"), h.T(line)))
 	}
+	if result := card.GameResult; result != nil {
+		winners := make([]string, 0, len(result.Winners))
+		for _, id := range result.Winners {
+			winners = append(winners, name(id))
+		}
+		parts = append(parts, h.P(h.Class("scorecard-result"), h.T(fmt.Sprintf("Target game %d · first to %d · winner: %s", result.Number, result.Target, strings.Join(winners, " and ")))))
+	}
 	for _, team := range card.Teams {
 		members := make([]string, 0, len(team.Seats))
 		for _, id := range team.Seats {

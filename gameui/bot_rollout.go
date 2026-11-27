@@ -217,6 +217,32 @@ rounds:
 }
 
 func rolloutScore(state domain.MatchState, initial domain.PlayerView, objective RolloutObjective) int {
+	if objective == ObjectiveMatchMargin && initial.Public.GameTarget > 0 {
+		bonus := 0
+		if result := state.GameResult; result != nil && result.Hand == state.HandNumber {
+			won := false
+			for _, id := range result.Winners {
+				if id == initial.Seat {
+					won = true
+				}
+			}
+			if won {
+				bonus = 1000
+			} else {
+				bonus = -1000
+			}
+		}
+		if team, ok := initial.Public.HandTeams[initial.Seat]; ok {
+			return bonus + state.GameTeamScores[team] - state.GameTeamScores[1-team]
+		}
+		best := -int(^uint(0)>>1) - 1
+		for _, seat := range state.Seats {
+			if seat.ID != initial.Seat && state.GameScores[seat.ID] > best {
+				best = state.GameScores[seat.ID]
+			}
+		}
+		return bonus + state.GameScores[initial.Seat] - best
+	}
 	if team, ok := initial.Public.HandTeams[initial.Seat]; ok {
 		if objective == ObjectiveHandPoints {
 			return state.TeamScores[team] - initial.Public.TeamScores[team]

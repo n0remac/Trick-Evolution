@@ -51,6 +51,7 @@ const (
 	MechanicLastTrickBonus    Mechanic        = "last_trick_bonus"
 	MechanicHandLimit         Mechanic        = "hand_limit"
 	MechanicVictory           Mechanic        = "victory"
+	MechanicWinOnBid          Mechanic        = "win_on_bid"
 	MechanicReveal            Mechanic        = "reveal"
 	ValueStandardDeck         EffectValue     = "standard_52"
 	ValueConfigured           EffectValue     = "configured"
@@ -86,6 +87,9 @@ const (
 	ValueCaptureLow           EffectValue     = "capture_low"
 	ValueKeepLow              EffectValue     = "keep_low"
 	ValueHighestShared        EffectValue     = "highest_shared_ties"
+	ValueFirstTo5             EffectValue     = "first_to_5"
+	ValueFirstTo21            EffectValue     = "first_to_21"
+	ValueWinOnBid             EffectValue     = "win_on_bid"
 )
 
 type FieldVisibility string
@@ -129,6 +133,9 @@ const (
 	RuleBidTricks         RuleID     = "rule.bid_for_tricks"
 	RuleSetBidder         RuleID     = "rule.set_the_bidder"
 	RuleDefaultBidPoints  RuleID     = "baseline.bid_for_points"
+	RuleFirstTo5          RuleID     = "rule.first_to_5"
+	RuleFirstTo21         RuleID     = "rule.first_to_21"
+	RuleWinOnBid          RuleID     = "rule.win_on_your_bid"
 	RuleDeckStandard      RuleID     = "baseline.standard_deck"
 	RuleHandSize          RuleID     = "baseline.hand_size"
 	RuleUnusedCards       RuleID     = "baseline.unused_cards"
@@ -186,7 +193,7 @@ type Catalog struct {
 	Definitions []RuleDefinition
 }
 
-const CatalogVersion = 9
+const CatalogVersion = 10
 
 func (c Catalog) Definition(id RuleID) (RuleDefinition, bool) {
 	for _, d := range c.Definitions {
@@ -216,9 +223,11 @@ func (c Catalog) EvolutionDeck(mode MatchMode, initial ...RuleID) []RuleID {
 	}
 	partnershipSelected := false
 	auctionSelected := false
+	targetSelected := false
 	for _, id := range initial {
 		partnershipSelected = partnershipSelected || id == RulePartnership
 		auctionSelected = auctionSelected || id == RuleAuction
+		targetSelected = targetSelected || id == RuleFirstTo5 || id == RuleFirstTo21
 	}
 	var old []RuleID
 	for _, id := range all {
@@ -231,7 +240,11 @@ func (c Catalog) EvolutionDeck(mode MatchMode, initial ...RuleID) []RuleID {
 			if auctionSelected {
 				old = append(old, id)
 			}
-		case RulePartnership, RuleWhistTrump, RuleWhistDeal, RuleWhistMajority, RuleSixCardHand, RuleAuction:
+		case RuleWinOnBid:
+			if auctionSelected && targetSelected {
+				old = append(old, id)
+			}
+		case RulePartnership, RuleWhistTrump, RuleWhistDeal, RuleWhistMajority, RuleSixCardHand, RuleAuction, RuleFirstTo5, RuleFirstTo21:
 		default:
 			old = append(old, id)
 		}
@@ -418,6 +431,8 @@ func validTypedEffect(e TypedEffect) bool {
 	values[MechanicAuction] = ValueAuction
 	values[MechanicBidMetric] = ValueBidPoints
 	values[MechanicSetBidder] = ValueAward
+	values[MechanicWinOnBid] = ValueWinOnBid
+	values[MechanicVictory] = ValueHighestShared
 	want, ok := values[e.Mechanic]
 	if !ok {
 		return false
@@ -442,6 +457,12 @@ func validTypedEffect(e TypedEffect) bool {
 	}
 	if e.Mechanic == MechanicLowOwner {
 		return (e.Value == ValueCaptureLow || e.Value == ValueKeepLow) && e.Config == ""
+	}
+	if e.Mechanic == MechanicVictory {
+		return (e.Value == ValueHighestShared || e.Value == ValueFirstTo5 || e.Value == ValueFirstTo21) && e.Config == ""
+	}
+	if e.Mechanic == MechanicWinOnBid {
+		return e.Value == ValueWinOnBid && e.Config == ""
 	}
 	if e.Value != want {
 		return false
@@ -488,6 +509,9 @@ func DefaultCatalog() Catalog {
 		baseline(RuleDefaultCaptureLow, "Capture Low", "When Low Trump Scores is active, the captor owns its point unless Keep Low replaces this rule.", FieldScoreVictory, TypedEffect{MechanicLowOwner, ValueCaptureLow, ""}),
 		baseline(RuleHandLimit, "Fixed Hand Limit", "End after the configured number of hands.", FieldScoreVictory, TypedEffect{MechanicHandLimit, ValueConfigured, "max_hands"}),
 		baseline(RuleVictory, "Highest Score Wins", "Highest score wins; tied leaders share victory.", FieldScoreVictory, TypedEffect{MechanicVictory, ValueHighestShared, ""}),
+		{ID: RuleFirstTo5, Title: "First to 5", Text: "A completed hand wins when an individual or team reaches five interval points. Tied leaders share victory.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicVictory, Value: ValueFirstTo5}}, Overrides: []RuleID{RuleVictory, RuleFirstTo21}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleFirstTo21, Title: "First to 21", Text: "A completed hand wins when an individual or team reaches 21 interval points. Tied leaders share victory.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicVictory, Value: ValueFirstTo21}}, Overrides: []RuleID{RuleVictory, RuleFirstTo5}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleWinOnBid, Title: "Win on Your Bid", Text: "A target victory requires the leading side to have made its own contract on the crossing hand.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicWinOnBid, Value: ValueWinOnBid}}, Prerequisites: []RuleID{RuleAuction}, InDeck: true, StartingVisibility: NotStarting},
 		baseline(RuleReveal, "Rule Reveal", "Reveal at the configured interval between hands if an eligible card remains.", FieldPlay, TypedEffect{MechanicReveal, ValueConfigured, "reveal_every"}),
 		{ID: RulePartnership, Title: "Partner Across", Text: "Four seats form fixed opposite-seat teams. New points are shared by each team; earlier individual scores stay personal. Teams freeze for each hand.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicScoreOwnership, Value: ValuePartnership}}, Overrides: []RuleID{RuleIndividualScore, RuleRestoreIndividual}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleRestoreIndividual, Title: "Restore Individual Scores", Text: "Future hands score individually again. Past team and personal ledgers remain unchanged.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicScoreOwnership, Value: ValueIndividual}}, Overrides: []RuleID{RulePartnership}, InDeck: true, StartingVisibility: NotStarting},
