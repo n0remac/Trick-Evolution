@@ -138,6 +138,7 @@ type command struct {
 	ID               string        `json:"id"`
 	Card             domain.CardID `json:"card,omitempty"`
 	Rule             domain.RuleID `json:"rule,omitempty"`
+	Bid              int           `json:"bid,omitempty"`
 	BoundaryID       string        `json:"boundaryId,omitempty"`
 	Settings         string        `json:"settings,omitempty"`
 	ExpectedRevision *uint64       `json:"-"`
@@ -769,6 +770,7 @@ func decodeCommand(data []byte, html bool) (command, error) {
 			ID         string          `json:"id"`
 			Card       domain.CardID   `json:"card"`
 			Rule       domain.RuleID   `json:"rule"`
+			Bid        string          `json:"bid"`
 			BoundaryID string          `json:"boundaryId"`
 			Settings   string          `json:"settings"`
 			Revision   string          `json:"revision"`
@@ -792,7 +794,14 @@ func decodeCommand(data []byte, html bool) (command, error) {
 		if err != nil {
 			return cmd, fmt.Errorf("invalid revision: %w", err)
 		}
-		cmd = command{Type: envelope.Type, ID: envelope.ID, Card: envelope.Card, Rule: envelope.Rule, BoundaryID: envelope.BoundaryID, Settings: envelope.Settings, ExpectedRevision: &revision}
+		bid := 0
+		if envelope.Bid != "" {
+			bid, err = strconv.Atoi(envelope.Bid)
+			if err != nil {
+				return cmd, fmt.Errorf("invalid bid: %w", err)
+			}
+		}
+		cmd = command{Type: envelope.Type, ID: envelope.ID, Card: envelope.Card, Rule: envelope.Rule, Bid: bid, BoundaryID: envelope.BoundaryID, Settings: envelope.Settings, ExpectedRevision: &revision}
 		return cmd, nil
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -914,7 +923,7 @@ func (r *room) handleCommand(c *client, cmd command) {
 		c.enqueue(serverMessage{Type: "error", ID: cmd.ID, Code: "stale_session", Message: "reconnect to continue"})
 		return
 	}
-	fingerprint := cmd.Type + ":" + string(cmd.Card) + ":" + string(cmd.Rule) + ":" + cmd.BoundaryID + ":" + cmd.Settings
+	fingerprint := cmd.Type + ":" + string(cmd.Card) + ":" + string(cmd.Rule) + ":" + strconv.Itoa(cmd.Bid) + ":" + cmd.BoundaryID + ":" + cmd.Settings
 	if existing, ok := r.seen[c.seat][cmd.ID]; ok {
 		r.mu.Unlock()
 		if existing.fingerprint != fingerprint {
@@ -1070,6 +1079,22 @@ func (r *room) handleCommand(c *client, cmd command) {
 			break
 		}
 		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionPlayCard, Seat: c.seat, Card: cmd.Card}, r.server.catalog)
+	case "bid", "pass":
+		if r.state == nil {
+			err = errors.New("game has not started")
+			break
+		}
+		kind := domain.ActionBid
+		if cmd.Type == "pass" {
+			kind = domain.ActionPass
+		}
+		next, events, err = domain.Step(*r.state, domain.Action{Kind: kind, Seat: c.seat, Bid: cmd.Bid}, r.server.catalog)
+	case "remove_rule":
+		if r.state == nil {
+			err = errors.New("game has not started")
+			break
+		}
+		next, events, err = domain.Step(*r.state, domain.Action{Kind: domain.ActionRemoveRule, Seat: c.seat, Rule: cmd.Rule}, r.server.catalog)
 	case "choose_rule":
 		if r.state == nil {
 			err = errors.New("game has not started")

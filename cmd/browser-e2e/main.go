@@ -101,19 +101,19 @@ const stateExpression = `(() => {
 func main() { os.Exit(runMain()) }
 
 func runMain() int {
-	mode := flag.String("mode", "smoke", "smoke, lifecycle-smoke, rules-smoke, invite-smoke, bot-smoke, 3d-smoke, or full")
+	mode := flag.String("mode", "smoke", "smoke, bidding-smoke, lifecycle-smoke, rules-smoke, invite-smoke, bot-smoke, 3d-smoke, or full")
 	browserPath := flag.String("browser", "", "Chromium/Chrome executable (auto-detected if empty)")
 	artifactRoot := flag.String("artifacts", "artifacts/browser-e2e", "directory for run reports and failure artifacts")
 	timeLimit := flag.Duration("timeout", 0, "overall time bound (default: 45s smoke, 150s full)")
 	flag.Parse()
-	if *mode != "smoke" && *mode != "lifecycle-smoke" && *mode != "rules-smoke" && *mode != "invite-smoke" && *mode != "bot-smoke" && *mode != "3d-smoke" && *mode != "full" {
-		fmt.Fprintln(os.Stderr, "-mode must be smoke, lifecycle-smoke, rules-smoke, invite-smoke, bot-smoke, 3d-smoke, or full")
+	if *mode != "smoke" && *mode != "bidding-smoke" && *mode != "lifecycle-smoke" && *mode != "rules-smoke" && *mode != "invite-smoke" && *mode != "bot-smoke" && *mode != "3d-smoke" && *mode != "full" {
+		fmt.Fprintln(os.Stderr, "-mode must be smoke, bidding-smoke, lifecycle-smoke, rules-smoke, invite-smoke, bot-smoke, 3d-smoke, or full")
 		return 2
 	}
 	if *timeLimit == 0 {
 		if *mode == "full" {
 			*timeLimit = 180 * time.Second
-		} else if *mode == "rules-smoke" || *mode == "lifecycle-smoke" || *mode == "invite-smoke" {
+		} else if *mode == "rules-smoke" || *mode == "bidding-smoke" || *mode == "lifecycle-smoke" || *mode == "invite-smoke" {
 			*timeLimit = 75 * time.Second
 		} else {
 			*timeLimit = 45 * time.Second
@@ -160,6 +160,11 @@ func (r *runner) run(explicitBrowser string) error {
 	var err error
 	if r.mode == "3d-smoke" || r.mode == "rules-smoke" {
 		server, err = gameui.NewServerWithBotOptions(domain.DefaultConfig(), shuffle, gameui.BotOptions{Mode: gameui.BotModeHeuristic})
+	} else if r.mode == "bidding-smoke" {
+		cfg := domain.DefaultConfig()
+		cfg.HandSize, cfg.MaxHands = 1, 1
+		cfg.InitialRules = []domain.RuleID{domain.RuleAuction, domain.RuleSetBidder}
+		server, err = gameui.NewServerWithConfig(cfg, shuffle)
 	} else {
 		server, err = gameui.NewServerWithConfig(domain.DefaultConfig(), shuffle)
 	}
@@ -200,6 +205,14 @@ func (r *runner) run(explicitBrowser string) error {
 	if err != nil {
 		return err
 	}
+	if r.mode == "bidding-smoke" {
+		if err := r.bob.cdp.call(r.ctx, "Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 844, "deviceScaleFactor": 2, "mobile": true}, nil); err != nil {
+			return err
+		}
+		if err := r.bob.cdp.call(r.ctx, "Page.reload", map[string]any{}, nil); err != nil {
+			return err
+		}
+	}
 	if err := r.join(r.alice, "Alice"); err != nil {
 		return err
 	}
@@ -219,11 +232,18 @@ func (r *runner) run(explicitBrowser string) error {
 		return err
 	}
 	if _, _, err := r.waitBoth("first deal", 40*time.Second, func(a, b uiState) bool {
-		return a.Hand == 1 && b.Hand == 1 && a.HandCards == 5 && b.HandCards == 5 && a.Revision == 1 && b.Revision == 1
+		handSize := 5
+		if r.mode == "bidding-smoke" {
+			handSize = 1
+		}
+		return a.Hand == 1 && b.Hand == 1 && a.HandCards == handSize && b.HandCards == handSize && a.Revision == 1 && b.Revision == 1
 	}); err != nil {
 		return err
 	}
 	r.steps = append(r.steps, "two isolated browser contexts joined and received first private hands")
+	if r.mode == "bidding-smoke" {
+		return r.biddingSmoke()
+	}
 	limit := 0
 	if r.mode == "smoke" || r.mode == "lifecycle-smoke" {
 		limit = 3

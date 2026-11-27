@@ -19,6 +19,7 @@ const (
 	ErrMustFollowOrTrump ErrorCode = "must_follow_or_trump"
 	ErrIllegalLead       ErrorCode = "illegal_lead"
 	ErrInvalidDeck       ErrorCode = "invalid_deck"
+	ErrInvalidBid        ErrorCode = "invalid_bid"
 )
 
 type TransitionError struct {
@@ -34,14 +35,17 @@ func transitionError(code ErrorCode, detail string) error {
 type EventKind string
 
 const (
-	EventHandStarted   EventKind = "hand_started"
-	EventCardPlayed    EventKind = "card_played"
-	EventTrickWon      EventKind = "trick_won"
-	EventHandCompleted EventKind = "hand_completed"
-	EventRuleRevealed  EventKind = "rule_revealed"
-	EventGameEnded     EventKind = "game_ended"
-	EventGameCompleted EventKind = "game_completed"
-	EventRoundDecision EventKind = "round_decision"
+	EventHandStarted      EventKind = "hand_started"
+	EventCardPlayed       EventKind = "card_played"
+	EventTrickWon         EventKind = "trick_won"
+	EventHandCompleted    EventKind = "hand_completed"
+	EventRuleRevealed     EventKind = "rule_revealed"
+	EventRuleRemoved      EventKind = "rule_removed"
+	EventGameEnded        EventKind = "game_ended"
+	EventGameCompleted    EventKind = "game_completed"
+	EventRoundDecision    EventKind = "round_decision"
+	EventAuctionCall      EventKind = "auction_call"
+	EventAuctionCompleted EventKind = "auction_completed"
 )
 
 // Event has public facts only. A transport can broadcast it without exposing
@@ -59,6 +63,8 @@ type Event struct {
 	Plays          []Play
 	Score          int
 	Rule           RuleID
+	Bid            int
+	Fallback       bool
 	RuleInstanceID string
 	Winners        []SeatID // Set only on game_completed; ties share the win.
 }
@@ -94,6 +100,10 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 		return stepEndGame(state, action, seatIndex, false)
 	case ActionChooseRule:
 		return stepChooseRule(state, action, seatIndex, catalog)
+	case ActionBid, ActionPass:
+		return stepAuction(state, action)
+	case ActionRemoveRule:
+		return stepRemoveRule(state, action, seatIndex, catalog)
 	default:
 		return state, nil, transitionError(ErrUnknownAction, "action kind is not supported")
 	}
@@ -103,7 +113,7 @@ func Step(state MatchState, action Action, catalog Catalog) (MatchState, []Event
 // trick earns no point; its public plays and private hands remain in the
 // terminal snapshot for audit and reconnect.
 func stepEndGame(state MatchState, action Action, seatIndex int, hostOnly bool) (MatchState, []Event, error) {
-	if state.Phase != PhasePlayingTrick && state.Phase != PhaseHandComplete && state.Phase != PhaseAwaitingChoice {
+	if state.Phase != PhasePlayingTrick && state.Phase != PhaseAuction && state.Phase != PhaseHandComplete && state.Phase != PhaseAwaitingChoice {
 		return state, nil, transitionError(ErrWrongPhase, "game is not active")
 	}
 	if hostOnly && seatIndex != 0 {
@@ -115,7 +125,7 @@ func stepEndGame(state MatchState, action Action, seatIndex int, hostOnly bool) 
 	next.Turn = ""
 	next.EndedEarly = true
 	next.EndedBy = action.Seat
-	if state.Phase == PhasePlayingTrick {
+	if state.Phase == PhasePlayingTrick || state.Phase == PhaseAuction {
 		next.LastScorecard = makeScorecard(next, RuleResolution{}, true)
 	}
 	return next, []Event{
@@ -203,6 +213,7 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	next.Captured = make(map[SeatID][]CardID, len(next.Seats))
 	next.DealOwner = make(map[CardID]SeatID)
 	next.HandAwards = nil
+	next.Auction = nil
 	dealerIndex := (indexOfSeat(next.Seats, state.Dealer) + 1) % len(next.Seats)
 	next.Dealer = next.Seats[dealerIndex].ID
 	leaderIndex := (dealerIndex + 1) % len(next.Seats)
@@ -241,6 +252,9 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 	}
 	next.StandardDraw = append([]CardID(nil), filtered[newCards*len(next.Seats):]...)
 	if err := startHandRules(&next, resolved); err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
+	if err := startAuction(&next, resolved); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
 	next.Shuffles = append(next.Shuffles, ShuffleRecord{Kind: StandardDeckKind, Order: order})
@@ -375,6 +389,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	if err := settleHandScores(&next, resolvedRules); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
 	}
+	settleContract(&next, resolvedRules)
 	next.LastScorecard = makeScorecard(next, resolvedRules, false)
 	if next.Config.Mode == ModeEndless {
 		recordEndlessPoints(state, &next)
@@ -541,6 +556,25 @@ func cloneState(state MatchState) MatchState {
 		for team, score := range state.TeamScores {
 			next.TeamScores[team] = score
 		}
+	}
+	if state.TeamAwardBalances != nil {
+		next.TeamAwardBalances = make(map[SeatID]int, len(state.TeamAwardBalances))
+		for seat, score := range state.TeamAwardBalances {
+			next.TeamAwardBalances[seat] = score
+		}
+	}
+	if state.Auction != nil {
+		a := *state.Auction
+		a.Passed = make(map[SeatID]bool, len(state.Auction.Passed))
+		for seat, passed := range state.Auction.Passed {
+			a.Passed[seat] = passed
+		}
+		a.Calls = slices.Clone(state.Auction.Calls)
+		if a.Contract != nil {
+			c := *a.Contract
+			a.Contract = &c
+		}
+		next.Auction = &a
 	}
 	next.LastScorecard = cloneScorecard(state.LastScorecard)
 	next.Config.InitialRules = slices.Clone(state.Config.InitialRules)

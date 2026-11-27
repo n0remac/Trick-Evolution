@@ -106,6 +106,11 @@ func TestEndlessCadenceScoreAndOnceOnlyDraft(t *testing.T) {
 					holds++
 				}
 			}
+		case PhaseAuction:
+			state, _, err = Step(state, Action{Kind: ActionPass, Seat: state.Turn}, catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
 		default:
 			t.Fatalf("unexpected phase %s", state.Phase)
 		}

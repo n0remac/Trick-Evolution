@@ -72,6 +72,21 @@ func ReplaceEndlessBotSeat(state MatchState, oldID, newID SeatID) (MatchState, e
 	moveSeatKey(next.RunScores, oldID, newID)
 	moveSeatKey(next.ShortGameScores, oldID, newID)
 	moveSeatKey(next.HandTeams, oldID, newID)
+	moveSeatKey(next.TeamAwardBalances, oldID, newID)
+	if next.Auction != nil {
+		moveSeatKey(next.Auction.Passed, oldID, newID)
+		if next.Auction.HighBidder == oldID {
+			next.Auction.HighBidder = newID
+		}
+		if next.Auction.Contract != nil && next.Auction.Contract.Bidder == oldID {
+			next.Auction.Contract.Bidder = newID
+		}
+		for i := range next.Auction.Calls {
+			if next.Auction.Calls[i].Seat == oldID {
+				next.Auction.Calls[i].Seat = newID
+			}
+		}
+	}
 	if next.ShortGameResult != nil {
 		moveSeatKey(next.ShortGameResult.Scores, oldID, newID)
 		for i, id := range next.ShortGameResult.Winners {
@@ -390,9 +405,11 @@ func endlessRoundLength(state MatchState) int {
 }
 
 func eligibleEndlessRule(state MatchState, catalog Catalog, id RuleID) ([]RuleInstance, bool) {
-	if id == RulePartnership {
+	if id == RulePartnership || id == RuleAuction {
 		if state.Round < 6 || len(state.Seats) != 4 {
-			return nil, false
+			if id == RulePartnership || state.Round < 6 {
+				return nil, false
+			}
 		}
 		current, err := ResolveRules(state.Field, catalog, state.Config)
 		if err != nil || !endlessEstablishedScoring(current) {
@@ -421,6 +438,14 @@ func eligibleEndlessRule(state MatchState, catalog Catalog, id RuleID) ([]RuleIn
 		InstanceID: fmt.Sprintf("rule:endless:%d", len(state.Field)), DefinitionID: id,
 		Sequence: len(state.Field), IntroducedAfterHand: state.CompletedHands,
 	})
+	if id == RuleSixCardHand || id == RuleWhistDeal {
+		for i := range field[:len(field)-1] {
+			if field[i].DefinitionID == RuleExpandedHand || field[i].DefinitionID == RuleKeepOne ||
+				id == RuleSixCardHand && field[i].DefinitionID == RuleWhistDeal || id == RuleWhistDeal && field[i].DefinitionID == RuleSixCardHand {
+				field[i].Removed = true
+			}
+		}
+	}
 	resolved, err := ResolveRules(field, catalog, state.Config)
 	if err != nil || !resolved.History[len(field)-1].Active {
 		return nil, false
@@ -428,8 +453,16 @@ func eligibleEndlessRule(state MatchState, catalog Catalog, id RuleID) ([]RuleIn
 	if err = resolved.ValidateMatchEffects(state.Config); err != nil {
 		return nil, false
 	}
-	if _, err = HandPlanForRules(state.Config, len(state.Seats), resolved); err != nil {
+	plan, err := HandPlanForRules(state.Config, len(state.Seats), resolved)
+	if err != nil {
 		return nil, false
+	}
+	if id == RuleAuction {
+		probe := state
+		probe.TricksPerHand = plan.Tricks
+		if _, _, _, err := AuctionBounds(probe, resolved); err != nil {
+			return nil, false
+		}
 	}
 	if !preservesDependencies(state.Field, field, catalog, state.Config) {
 		return nil, false
@@ -510,7 +543,26 @@ func endlessOptions(state MatchState, catalog Catalog) []RuleID {
 	if state.Round >= 6 && endlessCandidate(state, catalog, draw, RulePartnership) {
 		options = append(options, RulePartnership)
 	}
-	if len(followUps) > 0 {
+	if state.Round >= 6 && endlessCandidate(state, catalog, draw, RuleAuction) {
+		options = append(options, RuleAuction)
+	}
+	if state.Round >= 7 && len(options) < 3 {
+		hand := RuleSixCardHand
+		if (state.Round-7)/2%2 == 1 {
+			hand = RuleWhistDeal
+		}
+		if !endlessCandidate(state, catalog, draw, hand) {
+			if hand == RuleSixCardHand {
+				hand = RuleWhistDeal
+			} else {
+				hand = RuleSixCardHand
+			}
+		}
+		if endlessCandidate(state, catalog, draw, hand) {
+			options = append(options, hand)
+		}
+	}
+	if len(followUps) > 0 && len(options) < 3 {
 		if len(options) == 0 || options[0] != followUps[0] {
 			options = append(options, followUps[0])
 		}
@@ -582,6 +634,45 @@ func applyEndlessRule(state *MatchState, catalog Catalog, id RuleID) bool {
 		}
 	}
 	return true
+}
+
+// Remove a live evolution only between hands. A dependent rule must first be
+// removed or replaced; history stays in the field for replay and review.
+func stepRemoveRule(state MatchState, action Action, seatIndex int, catalog Catalog) (MatchState, []Event, error) {
+	if state.Phase != PhaseHandComplete && state.Phase != PhaseAwaitingChoice {
+		return state, nil, transitionError(ErrWrongPhase, "rules can be removed only between hands")
+	}
+	if seatIndex != 0 {
+		return state, nil, transitionError(ErrNotHost, "only the host may remove a rule")
+	}
+	next := cloneState(state)
+	rules, err := ResolveRules(next.Field, catalog, next.Config)
+	if err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
+	found := false
+	for i := len(next.Field) - 1; i >= 0; i-- {
+		if next.Field[i].DefinitionID == action.Rule && !next.Field[i].Starting && rules.History[i].Active {
+			next.Field[i].Removed = true
+			found = true
+			break
+		}
+	}
+	if !found {
+		return state, nil, transitionError(ErrInvalidState, "rule is not an active removable evolution")
+	}
+	resolved, err := ResolveRules(next.Field, catalog, next.Config)
+	if err != nil || resolved.ValidateMatchEffects(next.Config) != nil || !preservesDependencies(state.Field, next.Field, catalog, next.Config) {
+		return state, nil, transitionError(ErrInvalidState, "removal would invalidate another active rule")
+	}
+	if _, err := HandPlanForRules(next.Config, len(next.Seats), resolved); err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
+	if next.Phase == PhaseAwaitingChoice {
+		next.DraftOptions = endlessOptions(next, catalog)
+	}
+	next.Revision++
+	return next, []Event{{Kind: EventRuleRemoved, Revision: next.Revision, Hand: next.HandNumber, Rule: action.Rule}}, nil
 }
 
 func settleEndlessBoundary(state *MatchState, catalog Catalog) error {

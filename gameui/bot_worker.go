@@ -26,7 +26,7 @@ func (r *room) hasBotLocked() bool {
 }
 
 func (r *room) botTurnLocked() bool {
-	if r.state == nil || r.state.Phase != domain.PhasePlayingTrick {
+	if r.state == nil || r.state.Phase != domain.PhasePlayingTrick && r.state.Phase != domain.PhaseAuction {
 		return false
 	}
 	if r.state.Config.Mode == domain.ModeEndless {
@@ -95,7 +95,10 @@ func (r *room) runBots() {
 			case <-timer.C:
 			}
 			decision := BotDecision{Reason: "heuristic"}
-			if r.server.botOptions.Mode == BotModeRollout {
+			bid := 0
+			if observation.View.Public.Phase == domain.PhaseAuction {
+				bid = chooseBotBid(observation.View)
+			} else if r.server.botOptions.Mode == BotModeRollout {
 				seed := r.server.botOptions.SeedFactory()
 				decision, err = decideRollout(r.ctx, observation, r.server.catalog, seed, r.server.botOptions.Budget)
 			} else {
@@ -117,7 +120,14 @@ func (r *room) runBots() {
 				r.dispatchMu.Unlock()
 				continue
 			}
-			next, events, err := domain.Step(*r.state, domain.Action{Kind: domain.ActionPlayCard, Seat: seat, Card: decision.Card}, r.server.catalog)
+			kind := domain.ActionPlayCard
+			if observation.View.Public.Phase == domain.PhaseAuction {
+				kind = domain.ActionPass
+				if bid > 0 {
+					kind = domain.ActionBid
+				}
+			}
+			next, events, err := domain.Step(*r.state, domain.Action{Kind: kind, Seat: seat, Card: decision.Card, Bid: bid}, r.server.catalog)
 			if err != nil {
 				r.mu.Unlock()
 				r.dispatchMu.Unlock()

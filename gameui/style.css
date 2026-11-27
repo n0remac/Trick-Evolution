@@ -243,6 +243,20 @@ h2 { margin: 0 0 .75rem; }
 .review-settings button, #review-reset-form button { min-height: 44px; }
 .hand-awards { position: absolute; bottom: 5.5rem; left: 50%; transform: translateX(-50%); max-height: 9rem; overflow: auto; width: min(26rem, 90vw); padding: .5rem; background: #102b21ed; z-index: 4; }
 .hand-awards p { margin: .25rem 0; }
+.auction-panel { position: absolute; z-index: 5; left: 50%; bottom: max(1rem, env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(34rem, calc(100vw - 1rem)); max-height: min(65dvh, 32rem); overflow-y: auto; padding: .85rem; border: 1px solid #c9b77e; border-radius: .7rem; background: #102b21f5; pointer-events: auto; box-shadow: 0 10px 30px #07140eaa; }
+.auction-panel h2 { margin: 0 0 .35rem; font-size: 1.1rem; }
+.auction-panel p { margin: .25rem 0; }
+.auction-calls, .auction-hand { display: flex; flex-wrap: wrap; gap: .35rem; margin: .6rem 0; }
+.auction-calls span, .auction-hand span { padding: .25rem .45rem; border: 1px solid #719484; border-radius: .35rem; }
+.auction-hand strong { flex: 1 1 100%; }
+.auction-actions { display: flex; align-items: end; gap: .5rem; }
+.auction-actions form { display: flex; align-items: end; gap: .4rem; }
+.auction-actions label { display: grid; gap: .2rem; }
+.auction-actions select, .auction-actions button, .rule-removals button { min-height: 44px; }
+.rule-removals { position: absolute; z-index: 5; right: .5rem; bottom: .5rem; max-width: min(20rem, 90vw); max-height: 40dvh; overflow: auto; padding: .5rem; background: #102b21f5; pointer-events: auto; }
+.rule-removals form { margin: .3rem 0; }
+.contract-indicator { color: #ffe09a; }
+.scorecard-contract { font-weight: 700; color: #ffe09a; }
 @media (max-width: 600px) {
   #rules-review { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
   .review-header { padding-top: max(.8rem, env(safe-area-inset-top)); }

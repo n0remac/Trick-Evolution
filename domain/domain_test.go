@@ -63,7 +63,7 @@ func TestStage1SetupReplayAndProjection(t *testing.T) {
 	if len(view.ActiveField) != 2 || view.ActiveField[0].Instance.DefinitionID != RuleFollowSuit || view.ActiveField[1].Instance.DefinitionID != RuleHighCardWins {
 		t.Fatalf("visible field %+v", view.ActiveField)
 	}
-	if len(view.Rules) != len(StartingField(catalog)) || len(view.Effective) != 17 {
+	if len(view.Rules) != len(StartingField(catalog)) || len(view.Effective) != 18 {
 		t.Fatalf("baseline history/effects %d/%d", len(view.Rules), len(view.Effective))
 	}
 	for _, want := range []struct {
@@ -115,10 +115,10 @@ func TestCatalogValidation(t *testing.T) {
 	if err := catalog.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Definitions) != 92 {
+	if len(catalog.Definitions) != 97 {
 		t.Fatalf("catalog entries %d", len(catalog.Definitions))
 	}
-	wantDeck := []RuleID{RuleExpandedHand, RuleKeepOne, RulePartnership, RuleRestoreIndividual, RuleWhistDeal, RuleSixCardHand, RuleSpadesTrump, RulePitchTrump, RuleWhistTrump, RuleFollowOrTrump, RuleBreakSpades, RuleBreakHearts, RuleHighTrump, RuleLowTrump, RuleCaptureLow, RuleKeepLow, RuleJackTrump, RuleGamePoint, RuleNoPoints, RulePointsPerTrick, RuleWhistMajority, RuleAvoidQueenHearts, RuleAvoidHearts, RuleLastTrickBonus}
+	wantDeck := []RuleID{RuleExpandedHand, RuleKeepOne, RulePartnership, RuleRestoreIndividual, RuleAuction, RuleBidPoints, RuleBidTricks, RuleSetBidder, RuleWhistDeal, RuleSixCardHand, RuleSpadesTrump, RulePitchTrump, RuleWhistTrump, RuleFollowOrTrump, RuleBreakSpades, RuleBreakHearts, RuleHighTrump, RuleLowTrump, RuleCaptureLow, RuleKeepLow, RuleJackTrump, RuleGamePoint, RuleNoPoints, RulePointsPerTrick, RuleWhistMajority, RuleAvoidQueenHearts, RuleAvoidHearts, RuleLastTrickBonus}
 	if !reflect.DeepEqual(catalog.RuleDeck(), wantDeck) {
 		t.Fatalf("default evolution deck: %v", catalog.RuleDeck())
 	}

@@ -5,8 +5,12 @@ package domain
 var endlessFollowUps = map[RuleID][]RuleID{
 	RuleExpandedHand:      {RuleKeepOne, RuleGamePoint, RuleSixCardHand, RuleWhistDeal},
 	RuleSixCardHand:       {RuleWhistDeal, RuleKeepOne},
-	RuleWhistDeal:         {RuleWhistMajority, RuleWhistTrump},
+	RuleWhistDeal:         {RuleWhistMajority, RuleWhistTrump, RuleSixCardHand},
 	RulePartnership:       {RuleRestoreIndividual, RuleWhistMajority},
+	RuleAuction:           {RuleBidTricks, RuleSetBidder},
+	RuleBidTricks:         {RuleBidPoints, RuleSetBidder},
+	RuleBidPoints:         {RuleBidTricks, RuleSetBidder},
+	RuleSetBidder:         {RuleBidTricks, RuleBidPoints},
 	RuleRestoreIndividual: {RulePartnership},
 	RuleWhistTrump:        {RuleHighTrump, RuleLowTrump, RuleJackTrump},
 	RuleWhistMajority:     {RulePointsPerTrick, RuleGamePoint},
@@ -20,7 +24,7 @@ var endlessFollowUps = map[RuleID][]RuleID{
 	RuleKeepLow:           {RuleCaptureLow, RuleJackTrump},
 	RuleCaptureLow:        {RuleKeepLow, RuleJackTrump},
 	RuleJackTrump:         {RuleGamePoint, RuleLowTrump},
-	RuleGamePoint:         {RuleNoPoints, RuleLastTrickBonus, RulePartnership},
+	RuleGamePoint:         {RuleNoPoints, RuleLastTrickBonus, RulePartnership, RuleAuction},
 	RuleAvoidHearts:       {RuleBreakHearts, RuleAvoidQueenHearts},
 	RuleBreakHearts:       {RuleAvoidHearts, RuleAvoidQueenHearts},
 	RuleAvoidQueenHearts:  {RuleAvoidHearts, RuleBreakHearts},
@@ -85,6 +89,16 @@ func endlessCandidate(state MatchState, catalog Catalog, draw map[RuleID]int, id
 }
 
 func endlessAutomaticChoice(state MatchState, catalog Catalog) (RuleID, bool) {
+	if state.Round >= 6 {
+		resolved, err := ResolveRules(state.Field, catalog, state.Config)
+		if err == nil {
+			for _, id := range []RuleID{RulePartnership, RuleAuction} {
+				if !activeEndlessRule(resolved, id) && endlessCandidate(state, catalog, endlessDrawPosition(state), id) {
+					return id, true
+				}
+			}
+		}
+	}
 	choices := endlessFollowUpChoices(state, catalog)
 	if len(choices) == 0 {
 		return "", false

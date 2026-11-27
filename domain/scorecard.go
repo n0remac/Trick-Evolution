@@ -11,6 +11,7 @@ type Scorecard struct {
 	Players    []ScorecardPlayer
 	Teams      []ScorecardTeam
 	Notes      []ScorecardNote
+	Contract   *Contract
 }
 
 type ScorecardTeam struct {
@@ -44,6 +45,10 @@ type ScorecardNote struct {
 
 func makeScorecard(state MatchState, rules RuleResolution, partial bool) *Scorecard {
 	card := &Scorecard{HandNumber: state.HandNumber, Round: state.Round, Partial: partial}
+	if state.Auction != nil && state.Auction.Contract != nil {
+		c := *state.Auction.Contract
+		card.Contract = &c
+	}
 	retained := make(map[CardID]bool, len(state.Retained))
 	for _, id := range state.Retained {
 		retained[id] = true
@@ -210,6 +215,10 @@ func cloneScorecard(card *Scorecard) *Scorecard {
 		return nil
 	}
 	next := *card
+	if card.Contract != nil {
+		c := *card.Contract
+		next.Contract = &c
+	}
 	next.Notes = append([]ScorecardNote(nil), card.Notes...)
 	next.Teams = make([]ScorecardTeam, len(card.Teams))
 	for i, team := range card.Teams {

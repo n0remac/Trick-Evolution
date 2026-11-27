@@ -290,6 +290,19 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 		HandNumber: public.HandNumber, TrickNumber: public.TrickNumber, DealSize: prepared.dealSize, TricksPerHand: public.TricksPerHand, CompletedHands: public.CompletedHands,
 		Round: public.Round, RoundHand: public.RoundHand, TableCue: public.TableCue,
 		Field: append([]domain.RuleInstance(nil), prepared.field...), RuleDraw: append([]domain.RuleID(nil), prepared.rules...)}
+	if public.Auction != nil {
+		a := *public.Auction
+		a.Calls = append([]domain.AuctionCall(nil), public.Auction.Calls...)
+		a.Passed = make(map[domain.SeatID]bool, len(public.Auction.Passed))
+		for seat, passed := range public.Auction.Passed {
+			a.Passed[seat] = passed
+		}
+		if a.Contract != nil {
+			c := *a.Contract
+			a.Contract = &c
+		}
+		state.Auction = &a
+	}
 	if state.TricksPerHand == 0 { // Older unit fixtures omit the frozen limit.
 		state.TricksPerHand = prepared.dealSize
 	}

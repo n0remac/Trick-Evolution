@@ -17,6 +17,29 @@ func renderScorecard(card *domain.Scorecard, name func(domain.SeatID) string, cl
 		title = fmt.Sprintf("Hand %d · completed tricks only", card.HandNumber)
 	}
 	parts := []*h.Node{h.Class("scorecard " + class), h.H2(h.T(title))}
+	if c := card.Contract; c != nil {
+		unit := "points"
+		if c.Metric == domain.ValueBidTricks {
+			unit = "tricks"
+		}
+		outcome := "made"
+		if card.Partial {
+			outcome = "unsettled"
+		} else if !c.Made {
+			outcome = "failed"
+		}
+		line := fmt.Sprintf("%s bid %d %s · actual %d · %s", name(c.Bidder), c.Bid, unit, c.Actual, outcome)
+		if c.Fallback {
+			line += " · all-pass dealer fallback"
+		}
+		if c.Team >= 0 {
+			line = fmt.Sprintf("Team %d · %s", c.Team+1, line)
+		}
+		if c.Penalty > 0 {
+			line += fmt.Sprintf(" · set penalty −%d", c.Penalty)
+		}
+		parts = append(parts, h.P(h.Class("scorecard-contract"), h.T(line)))
+	}
 	for _, team := range card.Teams {
 		members := make([]string, 0, len(team.Seats))
 		for _, id := range team.Seats {

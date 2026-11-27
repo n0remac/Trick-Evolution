@@ -14,6 +14,7 @@ type HandAward struct {
 	Trick      int
 	Tally      int
 	Points     int
+	TeamWide   bool // One team award; attributed to one seat for personal ledgers.
 }
 
 func gameCardValue(rank uint8) int {
@@ -76,17 +77,14 @@ func settleHandScores(state *MatchState, rules RuleResolution) error {
 	if trick, err := rules.Effect(MechanicTrickPoints); err == nil && trick.Value == ValueAboveHalf {
 		if len(state.HandTeams) == 4 {
 			for team := 0; team < 2; team++ {
-				count, recipient := 0, SeatID("")
+				count := 0
 				for _, seat := range state.Seats {
 					if state.HandTeams[seat.ID] == team {
 						count += len(state.Captured[seat.ID]) / len(state.Seats)
-						if recipient == "" {
-							recipient = seat.ID
-						}
 					}
 				}
 				if points := count - state.TricksPerHand/2; points > 0 {
-					awardPoints(state, HandAward{Rule: RuleWhistMajority, Title: "Whist Tricks Above Half", Seat: recipient, Tally: count, Points: points})
+					awardPoints(state, HandAward{Rule: RuleWhistMajority, Title: "Whist Tricks Above Half", Seat: teamAwardSeat(state, team), Tally: count, Points: points, TeamWide: true})
 				}
 			}
 		} else {
@@ -153,7 +151,6 @@ func settleHandScores(state *MatchState, rules RuleResolution) error {
 	if active(MechanicGamePoint) {
 		best, winner, tied := -1, SeatID(""), false
 		teamTally := map[int]int{}
-		teamRecipient := map[int]SeatID{}
 		for _, seat := range state.Seats {
 			tally := 0
 			for _, id := range state.Captured[seat.ID] {
@@ -165,9 +162,6 @@ func settleHandScores(state *MatchState, rules RuleResolution) error {
 			}
 			if team, ok := state.HandTeams[seat.ID]; ok {
 				teamTally[team] += tally
-				if teamRecipient[team] == "" {
-					teamRecipient[team] = seat.ID
-				}
 			} else {
 				if tally > best {
 					best, winner, tied = tally, seat.ID, false
@@ -178,13 +172,17 @@ func settleHandScores(state *MatchState, rules RuleResolution) error {
 		}
 		if len(state.HandTeams) == 4 {
 			best, tied = teamTally[0], teamTally[0] == teamTally[1]
-			winner = teamRecipient[0]
+			winner = teamAwardSeat(state, 0)
 			if teamTally[1] > best {
-				best, winner = teamTally[1], teamRecipient[1]
+				best, winner = teamTally[1], teamAwardSeat(state, 1)
 			}
 		}
 		if !tied {
-			award(RuleGamePoint, "Game Point", winner, "", best)
+			if len(state.HandTeams) == 4 {
+				awardPoints(state, HandAward{Rule: RuleGamePoint, Title: "Game Point", Seat: winner, Tally: best, Points: 1, TeamWide: true})
+			} else {
+				award(RuleGamePoint, "Game Point", winner, "", best)
+			}
 		}
 	}
 	return nil

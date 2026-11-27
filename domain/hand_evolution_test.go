@@ -31,6 +31,9 @@ func handAction(t *testing.T, state MatchState, action Action) MatchState {
 
 func finishHand(t *testing.T, state MatchState) MatchState {
 	t.Helper()
+	for state.Phase == PhaseAuction {
+		state = handAction(t, state, Action{Kind: ActionPass, Seat: state.Turn})
+	}
 	for state.Phase == PhasePlayingTrick {
 		state = handAction(t, state, Action{Kind: ActionPlayCard, Seat: state.Turn, Card: legalCard(state, DefaultCatalog())})
 	}

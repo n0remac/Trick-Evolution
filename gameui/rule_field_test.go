@@ -85,8 +85,8 @@ func TestRuleFieldReplacementAdditiveAndReconnect(t *testing.T) {
 	for _, rule := range ordered {
 		ids = append(ids, rule.Instance.InstanceID)
 	}
-	if !reflect.DeepEqual(ids, []string{"tie", "rule:initial:14", "high-again"}) {
-		// The starting Follow Suit instance is catalog index 14. The tie
+	if !reflect.DeepEqual(ids, []string{"tie", "rule:initial:15", "high-again"}) {
+		// The starting Follow Suit instance is catalog index 15. The tie
 		// replacement inherits its hidden baseline slot; the final high card
 		// inherits the first high card's slot.
 		t.Fatalf("unexpected stable rule positions: %v", ids)

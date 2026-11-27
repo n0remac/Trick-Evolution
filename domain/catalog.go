@@ -25,6 +25,9 @@ const (
 	MechanicKeepOne           Mechanic        = "keep_one_card"
 	MechanicUnused            Mechanic        = "unused_cards"
 	MechanicScoreOwnership    Mechanic        = "score_ownership"
+	MechanicAuction           Mechanic        = "auction"
+	MechanicBidMetric         Mechanic        = "bid_metric"
+	MechanicSetBidder         Mechanic        = "set_bidder"
 	MechanicFullDeal          Mechanic        = "full_deal"
 	MechanicSixCardHand       Mechanic        = "six_card_hand"
 	MechanicTurnOrder         Mechanic        = "turn_order"
@@ -55,6 +58,9 @@ const (
 	ValueOutOfPlay            EffectValue     = "out_of_play"
 	ValueIndividual           EffectValue     = "individual"
 	ValuePartnership          EffectValue     = "opposite_seats"
+	ValueAuction              EffectValue     = "competitive"
+	ValueBidPoints            EffectValue     = "bid_points"
+	ValueBidTricks            EffectValue     = "bid_tricks"
 	ValueFullDeal             EffectValue     = "full_deal"
 	ValueSixCards             EffectValue     = "six_cards"
 	ValueTurnUpTrump          EffectValue     = "turn_up"
@@ -118,6 +124,11 @@ const (
 	RuleWhistDeal         RuleID     = "rule.whist_full_deal"
 	RuleWhistMajority     RuleID     = "rule.whist_tricks_above_half"
 	RuleSixCardHand       RuleID     = "rule.six_card_hand"
+	RuleAuction           RuleID     = "rule.competitive_auction"
+	RuleBidPoints         RuleID     = "rule.bid_for_points"
+	RuleBidTricks         RuleID     = "rule.bid_for_tricks"
+	RuleSetBidder         RuleID     = "rule.set_the_bidder"
+	RuleDefaultBidPoints  RuleID     = "baseline.bid_for_points"
 	RuleDeckStandard      RuleID     = "baseline.standard_deck"
 	RuleHandSize          RuleID     = "baseline.hand_size"
 	RuleUnusedCards       RuleID     = "baseline.unused_cards"
@@ -175,7 +186,7 @@ type Catalog struct {
 	Definitions []RuleDefinition
 }
 
-const CatalogVersion = 8
+const CatalogVersion = 9
 
 func (c Catalog) Definition(id RuleID) (RuleDefinition, bool) {
 	for _, d := range c.Definitions {
@@ -196,17 +207,18 @@ func (c Catalog) RuleDeck() []RuleID {
 	return deck
 }
 
-// EvolutionDeck preserves the original finite draw and its seeded replay.
-// New phase-one cards enter Endless curation and remain available as explicit
-// pregame selections in finite rooms.
+// EvolutionDeck preserves the original finite draw unless a matching optional
+// strategy was selected before play. Endless uses the whole curated deck.
 func (c Catalog) EvolutionDeck(mode MatchMode, initial ...RuleID) []RuleID {
 	all := c.RuleDeck()
 	if mode == ModeEndless {
 		return all
 	}
 	partnershipSelected := false
+	auctionSelected := false
 	for _, id := range initial {
 		partnershipSelected = partnershipSelected || id == RulePartnership
+		auctionSelected = auctionSelected || id == RuleAuction
 	}
 	var old []RuleID
 	for _, id := range all {
@@ -215,7 +227,11 @@ func (c Catalog) EvolutionDeck(mode MatchMode, initial ...RuleID) []RuleID {
 			if partnershipSelected {
 				old = append(old, id)
 			}
-		case RulePartnership, RuleWhistTrump, RuleWhistDeal, RuleWhistMajority, RuleSixCardHand:
+		case RuleBidPoints, RuleBidTricks, RuleSetBidder:
+			if auctionSelected {
+				old = append(old, id)
+			}
+		case RulePartnership, RuleWhistTrump, RuleWhistDeal, RuleWhistMajority, RuleSixCardHand, RuleAuction:
 		default:
 			old = append(old, id)
 		}
@@ -399,6 +415,9 @@ func validTypedEffect(e TypedEffect) bool {
 	values := map[Mechanic]EffectValue{MechanicDeck: ValueStandardDeck, MechanicHandSize: ValueConfigured, MechanicExpandedHand: ValuePlusTwo, MechanicKeepOne: ValueAward, MechanicUnused: ValueOutOfPlay, MechanicScoreOwnership: ValueIndividual, MechanicTurnOrder: ValueClockwise, MechanicFirstLeader: ValueLeftOfDealer, MechanicNextLeader: ValueWinnerLeads, MechanicTrump: ValueNoTrump, MechanicBreakSpades: ValueBreakSpades, MechanicBreakHearts: ValueBreakHearts, MechanicPlayRestriction: ValueFollow, MechanicWinnerEligibility: ValueLeadSuit, MechanicRankComparison: ValueHigh, MechanicTieBreak: ValueFirstPlay, MechanicTrickPoints: ValueOnePoint, MechanicLowOwner: ValueCaptureLow, MechanicHighTrump: ValueAward, MechanicLowTrump: ValueAward, MechanicJackTrump: ValueAward, MechanicGamePoint: ValueAward, MechanicAvoidQueenHearts: ValueAward, MechanicAvoidHearts: ValueAward, MechanicLastTrickBonus: ValueAward, MechanicHandLimit: ValueConfigured, MechanicVictory: ValueHighestShared, MechanicReveal: ValueConfigured}
 	values[MechanicFullDeal] = ValueFullDeal
 	values[MechanicSixCardHand] = ValueSixCards
+	values[MechanicAuction] = ValueAuction
+	values[MechanicBidMetric] = ValueBidPoints
+	values[MechanicSetBidder] = ValueAward
 	want, ok := values[e.Mechanic]
 	if !ok {
 		return false
@@ -417,6 +436,9 @@ func validTypedEffect(e TypedEffect) bool {
 	}
 	if e.Mechanic == MechanicTrickPoints {
 		return (e.Value == ValueOnePoint || e.Value == ValueNoPoints || e.Value == ValueAboveHalf) && e.Config == ""
+	}
+	if e.Mechanic == MechanicBidMetric {
+		return (e.Value == ValueBidPoints || e.Value == ValueBidTricks) && e.Config == ""
 	}
 	if e.Mechanic == MechanicLowOwner {
 		return (e.Value == ValueCaptureLow || e.Value == ValueKeepLow) && e.Config == ""
@@ -456,6 +478,7 @@ func DefaultCatalog() Catalog {
 		{ID: RuleKeepOne, Title: "Keep One Card", Text: "Stop each hand with one unplayed card per player. Your last card stays private and joins your next hand; deal one fewer new card then. A final-hand leftover is not captured or scored as a capture.", Category: "rule", Status: StatusSupported, FieldCategory: FieldHand, Effects: []TypedEffect{{Mechanic: MechanicKeepOne, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
 		baseline(RuleUnusedCards, "Unused Cards", "Cards not dealt are out of play for this hand.", FieldHand, TypedEffect{MechanicUnused, ValueOutOfPlay, ""}),
 		baseline(RuleIndividualScore, "Individual Scores", "Each player has an individual score.", FieldScoreVictory, TypedEffect{MechanicScoreOwnership, ValueIndividual, ""}),
+		baseline(RuleDefaultBidPoints, "Default Bid Metric", "An auction bids for hand points unless Bid for Tricks replaces this metric.", FieldScoreVictory, TypedEffect{MechanicBidMetric, ValueBidPoints, ""}),
 		baseline(RuleClockwise, "Clockwise Play", "Play proceeds clockwise.", FieldPlay, TypedEffect{MechanicTurnOrder, ValueClockwise, ""}),
 		baseline(RuleFirstLeader, "First Leader", "Player left of the dealer leads; dealer rotates each hand.", FieldPlay, TypedEffect{MechanicFirstLeader, ValueLeftOfDealer, ""}),
 		baseline(RuleWinnerLeads, "Winner Leads", "Trick winner leads the next trick.", FieldTrick, TypedEffect{MechanicNextLeader, ValueWinnerLeads, ""}),
@@ -468,6 +491,10 @@ func DefaultCatalog() Catalog {
 		baseline(RuleReveal, "Rule Reveal", "Reveal at the configured interval between hands if an eligible card remains.", FieldPlay, TypedEffect{MechanicReveal, ValueConfigured, "reveal_every"}),
 		{ID: RulePartnership, Title: "Partner Across", Text: "Four seats form fixed opposite-seat teams. New points are shared by each team; earlier individual scores stay personal. Teams freeze for each hand.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicScoreOwnership, Value: ValuePartnership}}, Overrides: []RuleID{RuleIndividualScore, RuleRestoreIndividual}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleRestoreIndividual, Title: "Restore Individual Scores", Text: "Future hands score individually again. Past team and personal ledgers remain unchanged.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicScoreOwnership, Value: ValueIndividual}}, Overrides: []RuleID{RulePartnership}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleAuction, Title: "Competitive Auction", Text: "After each deal, players bid in turn or pass. Highest bidder leads. If all pass, dealer takes the minimum bid. Bids use hand points by default.", Category: "rule", Status: StatusSupported, FieldCategory: FieldPlay, Effects: []TypedEffect{{Mechanic: MechanicAuction, Value: ValueAuction}}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleBidPoints, Title: "Bid for Points", Text: "Contracts count the bidder's or team's net hand scoring awards. Replaces Bid for Tricks.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicBidMetric, Value: ValueBidPoints}}, Overrides: []RuleID{RuleDefaultBidPoints, RuleBidTricks}, Prerequisites: []RuleID{RuleAuction}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleBidTricks, Title: "Bid for Tricks", Text: "Contracts count captured tricks, including both partners' tricks in a team contract.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicBidMetric, Value: ValueBidTricks}}, Overrides: []RuleID{RuleDefaultBidPoints, RuleBidPoints}, Prerequisites: []RuleID{RuleAuction}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleSetBidder, Title: "Set the Bidder", Text: "A failed bidder loses the bid amount instead of keeping their own earned hand points; opponents keep theirs.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicSetBidder, Value: ValueAward}}, Prerequisites: []RuleID{RuleAuction}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleWhistDeal, Title: "Whist Full Deal", Text: "Deal the whole deck equally. Any remainder is out of play. Cannot combine with hand-size or carry modifiers.", Category: "rule", Status: StatusSupported, FieldCategory: FieldHand, Effects: []TypedEffect{{Mechanic: MechanicFullDeal, Value: ValueFullDeal}}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleSixCardHand, Title: "Six-Card Hand", Text: "Deal six cards per player on the next hand. Cannot combine with Full Deal, Expanded Hand, or Keep One.", Category: "rule", Status: StatusSupported, FieldCategory: FieldHand, Effects: []TypedEffect{{Mechanic: MechanicSixCardHand, Value: ValueSixCards}}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleSpadesTrump, Title: "Spades Are Trump", Text: "Spades beat nontrump cards. If no trump is played, the lead suit wins.", Category: "rule", Status: StatusSupported, FieldCategory: FieldTrick, Effects: []TypedEffect{{Mechanic: MechanicTrump, Value: ValueSpadesTrump}}, Overrides: []RuleID{RuleNoTrump, RulePitchTrump, RuleWhistTrump}, InDeck: true, StartingVisibility: NotStarting},

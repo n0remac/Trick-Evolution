@@ -41,6 +41,7 @@ type PublicView struct {
 	TurnedTrumpCard   CardID
 	HandTeams         map[SeatID]int
 	TeamScores        map[int]int
+	Auction           *AuctionState
 	BrokenSpades      bool
 	BrokenHearts      bool
 	Dealer            SeatID
@@ -89,6 +90,19 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 		Seats: make([]PublicSeat, len(state.Seats))}
 	view.LastScorecard = cloneScorecard(state.LastScorecard)
 	view.TurnedTrumpCard = state.TurnedTrumpCard
+	if state.Auction != nil {
+		a := *state.Auction
+		a.Passed = make(map[SeatID]bool, len(state.Auction.Passed))
+		for id, passed := range state.Auction.Passed {
+			a.Passed[id] = passed
+		}
+		a.Calls = append([]AuctionCall(nil), state.Auction.Calls...)
+		if a.Contract != nil {
+			c := *a.Contract
+			a.Contract = &c
+		}
+		view.Auction = &a
+	}
 	if len(state.HandTeams) > 0 {
 		view.HandTeams = make(map[SeatID]int, len(state.HandTeams))
 		for id, team := range state.HandTeams {

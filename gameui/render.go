@@ -247,6 +247,12 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 	rules := renderRuleField(public, catalog)
 	next := ""
 	switch public.Phase {
+	case domain.PhaseAuction:
+		if public.Turn == seat {
+			next = "Your bid or pass"
+		} else {
+			next = name(public.Turn) + " to bid"
+		}
 	case domain.PhasePlayingTrick:
 		if public.Turn == seat {
 			next = "Your turn"
@@ -316,7 +322,7 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			score, label = public.TeamScores[team], fmt.Sprintf("team %d score", team+1)
 		}
 		turn := ""
-		if public.Phase == domain.PhasePlayingTrick && public.Turn == player.ID {
+		if (public.Phase == domain.PhasePlayingTrick || public.Phase == domain.PhaseAuction) && public.Turn == player.ID {
 			turn = " · turn"
 		}
 		fallbackSeats = append(fallbackSeats, h.Span(h.T(fmt.Sprintf("%s · %s %d%s", name(player.ID), label, score, turn))))
@@ -327,6 +333,13 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 	}
 	if public.TurnedTrumpCard != "" {
 		bar = append(bar, h.Span(h.Class("trump-indicator"), h.T("Turned trump: "+cardLabel(public.TurnedTrumpCard))))
+	}
+	if a := public.Auction; a != nil && a.Contract != nil {
+		unit := "points"
+		if a.Contract.Metric == domain.ValueBidTricks {
+			unit = "tricks"
+		}
+		bar = append(bar, h.Span(h.Class("contract-indicator"), h.T(fmt.Sprintf("Contract: %s bid %d %s", name(a.Contract.Bidder), a.Contract.Bid, unit))))
 	}
 	if public.Mode == domain.ModeEndless && public.Phase != domain.PhaseGameComplete {
 		bar = append(bar, h.Div(h.Class("invite-control"), h.Button(h.Type("button"), h.Attr("data-action", "share-endless"), h.T("Invite")),
@@ -360,7 +373,39 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			h.Attr("data-next", next), h.Attr("data-event", result), h.Attr("data-result", shortResult), h.Attr("data-result-number", shortResultNumber), h.T(next)),
 		h.Div(fallbackSeats...)}
 	parts := []*h.Node{h.Class("game-panel"), h.Attr("data-hand", fmt.Sprint(public.HandNumber)), h.Div(bar...), h.Div(hud...)}
-	if public.Phase == domain.PhasePlayingTrick {
+	if public.Phase == domain.PhaseAuction && public.Auction != nil {
+		a := public.Auction
+		unit := "points"
+		if a.Metric == domain.ValueBidTricks {
+			unit = "tricks"
+		}
+		items := []*h.Node{h.Class("auction-panel"), h.H2(h.T("Competitive auction")), h.P(h.T(fmt.Sprintf("Bid %d–%d %s. A bid must beat %d; passing ends your bidding for this hand.", a.Min, a.Max, unit, a.HighBid)))}
+		if a.HighBidder != "" {
+			items = append(items, h.P(h.T(fmt.Sprintf("Leading bid: %s · %d", name(a.HighBidder), a.HighBid))))
+		}
+		calls := []*h.Node{h.Class("auction-calls")}
+		for _, call := range a.Calls {
+			label := "pass"
+			if call.Bid > 0 {
+				label = fmt.Sprintf("%d", call.Bid)
+			}
+			calls = append(calls, h.Span(h.T(name(call.Seat)+" "+label)))
+		}
+		items = append(items, h.Div(calls...))
+		if public.Turn == seat {
+			options := []*h.Node{}
+			for bid := max(a.Min, a.HighBid+1); bid <= a.Max; bid++ {
+				options = append(options, h.Option(h.Value(fmt.Sprint(bid)), h.T(fmt.Sprintf("%d %s", bid, unit))))
+			}
+			items = append(items, h.Div(h.Class("auction-actions"), h.Form(h.Attr("ws-send", ""), h.Input(h.Type("hidden"), h.Name("type"), h.Value("bid")), h.Input(h.Type("hidden"), h.Name("revision"), h.Value(fmt.Sprint(public.Revision))), h.Label(h.T("Your bid"), h.Select(append([]*h.Node{h.Name("bid")}, options...)...)), h.Button(h.Type("submit"), h.T("Bid"))), commandForm("pass", "Pass", "", false, "", public.Revision)))
+		}
+		hand := []*h.Node{h.Class("auction-hand"), h.NewNode("strong", []*h.Node{h.T("Your hand")})}
+		for _, card := range view.Hand {
+			hand = append(hand, h.Span(h.Class(cardClass(card)), h.T(cardLabel(card))))
+		}
+		items = append(items, h.Div(hand...))
+		parts = append(parts, h.Section(items...))
+	} else if public.Phase == domain.PhasePlayingTrick {
 		legal, _ := domain.LegalCards(*view, catalog)
 		allowed := make(map[domain.CardID]bool, len(legal))
 		for _, id := range legal {
@@ -386,6 +431,22 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			}
 		}
 		parts = append(parts, h.Div(handStatus...))
+		if host {
+			removable := []*h.Node{}
+			for _, rule := range public.ActiveField {
+				if rule.Instance.Starting {
+					continue
+				}
+				definition, ok := catalog.Definition(rule.Instance.DefinitionID)
+				if !ok {
+					continue
+				}
+				removable = append(removable, h.Form(h.Attr("ws-send", ""), h.Input(h.Type("hidden"), h.Name("type"), h.Value("remove_rule")), h.Input(h.Type("hidden"), h.Name("revision"), h.Value(fmt.Sprint(public.Revision))), h.Input(h.Type("hidden"), h.Name("rule"), h.Value(string(definition.ID))), h.Button(h.Type("submit"), h.T("Remove "+definition.Title))))
+			}
+			if len(removable) > 0 {
+				parts = append(parts, h.NewNode("details", []*h.Node{h.Class("rule-removals"), h.NewNode("summary", []*h.Node{h.T("Remove a rule before the next deal")}), h.Div(removable...)}))
+			}
+		}
 		if message.ReviewRule != "" {
 			if definition, ok := catalog.Definition(message.ReviewRule); ok {
 				card := []*h.Node{h.Class("new-rule-review"), h.NewNode("strong", []*h.Node{h.Class("new-rule-title"), h.T(definition.Title)}), h.P(h.Class("new-rule-text"), h.T(definition.Text))}
@@ -414,6 +475,22 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			}
 		}
 		choices = append(choices, draftForm("", "Keep current rules", public.PendingBoundaryID, public.Revision))
+		if host {
+			remove := []*h.Node{h.NewNode("summary", []*h.Node{h.T("Remove an active rule")})}
+			for _, rule := range public.ActiveField {
+				if rule.Instance.Starting {
+					continue
+				}
+				definition, ok := catalog.Definition(rule.Instance.DefinitionID)
+				if !ok {
+					continue
+				}
+				remove = append(remove, h.Form(h.Attr("ws-send", ""), h.Input(h.Type("hidden"), h.Name("type"), h.Value("remove_rule")), h.Input(h.Type("hidden"), h.Name("revision"), h.Value(fmt.Sprint(public.Revision))), h.Input(h.Type("hidden"), h.Name("rule"), h.Value(string(definition.ID))), h.Button(h.Type("submit"), h.T("Remove "+definition.Title))))
+			}
+			if len(remove) > 1 {
+				choices = append(choices, h.NewNode("details", remove))
+			}
+		}
 		parts = append(parts, h.Div(choices...))
 	} else if public.Phase == domain.PhaseGameComplete {
 		status := "Game complete"
@@ -586,9 +663,25 @@ func eventNotice(events []domain.Event, catalog domain.Catalog, name func(domain
 			}
 		case domain.EventTrickWon:
 			outcomes = append(outcomes, fmt.Sprintf("%s won trick %d.", name(event.Seat), event.Trick))
+		case domain.EventAuctionCall:
+			if event.Bid == 0 {
+				outcomes = append(outcomes, name(event.Seat)+" passed.")
+			} else {
+				outcomes = append(outcomes, fmt.Sprintf("%s bid %d.", name(event.Seat), event.Bid))
+			}
+		case domain.EventAuctionCompleted:
+			if event.Fallback {
+				outcomes = append(outcomes, fmt.Sprintf("All passed. Dealer %s takes %d and leads.", name(event.Seat), event.Bid))
+			} else {
+				outcomes = append(outcomes, fmt.Sprintf("%s won the auction at %d and leads.", name(event.Seat), event.Bid))
+			}
 		case domain.EventRuleRevealed:
 			if definition, ok := catalog.Definition(event.Rule); ok {
 				outcomes = append(outcomes, fmt.Sprintf("%s revealed after hand %d; it applies from hand %d.", definition.Title, event.Hand, event.Hand+1))
+			}
+		case domain.EventRuleRemoved:
+			if definition, ok := catalog.Definition(event.Rule); ok {
+				outcomes = append(outcomes, definition.Title+" removed for the next hand.")
 			}
 		}
 	}

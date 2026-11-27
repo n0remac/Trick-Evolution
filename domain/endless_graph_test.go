@@ -23,7 +23,7 @@ func TestEndlessGraphReferencesAndReachability(t *testing.T) {
 	for _, id := range catalog.RuleDeck() {
 		deck[id] = true
 	}
-	if len(deck) != 24 {
+	if len(deck) != 28 {
 		t.Fatalf("deck has %d candidates", len(deck))
 	}
 	seen := map[RuleID]bool{}

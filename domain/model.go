@@ -44,6 +44,7 @@ type Phase string
 const (
 	PhaseAwaitingStart  Phase = "awaiting_start"
 	PhasePlayingTrick   Phase = "playing_trick"
+	PhaseAuction        Phase = "auction"
 	PhaseHandComplete   Phase = "hand_complete"
 	PhaseAwaitingChoice Phase = "awaiting_choice"
 	PhaseGameComplete   Phase = "game_complete"
@@ -57,6 +58,9 @@ const (
 	ActionEndGame    ActionKind = "end_game"
 	ActionLeaveGame  ActionKind = "leave_game"
 	ActionChooseRule ActionKind = "choose_rule"
+	ActionBid        ActionKind = "bid"
+	ActionPass       ActionKind = "pass"
+	ActionRemoveRule ActionKind = "remove_rule"
 )
 
 // Action is the future Step input. Seat is always supplied by a trusted adapter.
@@ -66,6 +70,7 @@ type Action struct {
 	Card       CardID   // Only used for play_card.
 	DeckOrder  []CardID // Full chosen order, required for start_hand.
 	Rule       RuleID
+	Bid        int
 	BoundaryID string
 }
 
@@ -150,8 +155,10 @@ type MatchState struct {
 	HandAwards        []HandAward
 	HandTeams         map[SeatID]int // Frozen for the dealt hand; nil means individual scoring.
 	TeamScores        map[int]int    // Points earned while the current partnership interval is active.
-	TurnedTrumpCard   CardID         // Public card revealed by Whist Turn-Up Trump.
-	LastScorecard     *Scorecard     // Last settled hand; survives the next deal and roster change.
+	TeamAwardBalances map[SeatID]int // Attribution of team-wide awards in this interval.
+	Auction           *AuctionState
+	TurnedTrumpCard   CardID     // Public card revealed by Whist Turn-Up Trump.
+	LastScorecard     *Scorecard // Last settled hand; survives the next deal and roster change.
 	StandardDraw      []CardID
 	RuleDraw          []RuleID
 	CurrentTrick      []Play
@@ -182,6 +189,32 @@ type MatchState struct {
 	ShortGameScores   map[SeatID]int
 	ShortGameResult   *ShortGameResult
 	Shuffles          []ShuffleRecord
+}
+
+type AuctionState struct {
+	Metric     EffectValue
+	Min, Max   int
+	HighBid    int
+	HighBidder SeatID
+	Passed     map[SeatID]bool
+	Calls      []AuctionCall
+	Contract   *Contract
+}
+
+type AuctionCall struct {
+	Seat SeatID
+	Bid  int // Zero is a pass.
+}
+
+type Contract struct {
+	Bidder   SeatID
+	Team     int // -1 for an individual contract.
+	Bid      int
+	Metric   EffectValue
+	Fallback bool // Dealer took the minimum after every seat passed.
+	Actual   int
+	Made     bool
+	Penalty  int
 }
 
 type ShortGameResult struct {
@@ -266,6 +299,9 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 	if err := startHandRules(&state, resolved); err != nil {
 		return MatchState{}, err
 	}
+	if err := startAuction(&state, resolved); err != nil {
+		return MatchState{}, err
+	}
 	return state, nil
 }
 
@@ -333,6 +369,9 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 		return MatchState{}, err
 	}
 	if err := startHandRules(&state, resolved); err != nil {
+		return MatchState{}, err
+	}
+	if err := startAuction(&state, resolved); err != nil {
 		return MatchState{}, err
 	}
 	return state, nil

@@ -15,6 +15,7 @@ func startHandRules(state *MatchState, rules RuleResolution) error {
 		}
 		if len(state.HandTeams) == 0 {
 			state.TeamScores = map[int]int{0: 0, 1: 0}
+			state.TeamAwardBalances = make(map[SeatID]int, 4)
 		}
 		state.HandTeams = make(map[SeatID]int, 4)
 		for i, seat := range state.Seats {
@@ -23,6 +24,7 @@ func startHandRules(state *MatchState, rules RuleResolution) error {
 	} else {
 		state.HandTeams = nil
 		state.TeamScores = nil
+		state.TeamAwardBalances = nil
 	}
 	state.TurnedTrumpCard = ""
 	if trump, err := rules.Effect(MechanicTrump); err == nil && trump.Value == ValueTurnUpTrump {
@@ -49,11 +51,39 @@ func awardPoints(state *MatchState, award HandAward) {
 					state.TeamScores = make(map[int]int, 2)
 				}
 				state.TeamScores[team] += award.Points
+				if award.TeamWide {
+					if state.TeamAwardBalances == nil {
+						state.TeamAwardBalances = make(map[SeatID]int, 4)
+					}
+					state.TeamAwardBalances[award.Seat] += award.Points
+				}
 			}
 			state.HandAwards = append(state.HandAwards, award)
 			return
 		}
 	}
+}
+
+// Attribute a team-wide award to the member with less of its shared awards.
+// Deal parity breaks ties so equal balances do not always favor the first seat.
+func teamAwardSeat(state *MatchState, team int) SeatID {
+	var members []SeatID
+	for _, seat := range state.Seats {
+		if state.HandTeams[seat.ID] == team {
+			members = append(members, seat.ID)
+		}
+	}
+	if len(members) != 2 {
+		return ""
+	}
+	a, b := members[0], members[1]
+	if state.TeamAwardBalances[a] < state.TeamAwardBalances[b] {
+		return a
+	}
+	if state.TeamAwardBalances[b] < state.TeamAwardBalances[a] {
+		return b
+	}
+	return members[state.HandNumber%2]
 }
 
 func matchWinners(state MatchState) []SeatID {

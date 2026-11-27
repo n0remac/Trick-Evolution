@@ -224,7 +224,7 @@ func validateHandFacts(state MatchState, rules RuleResolution) error {
 	if state.TrumpSuit != "" && !validSuit(state.TrumpSuit) {
 		return fmt.Errorf("invalid hand trump suit")
 	}
-	if state.Phase != PhasePlayingTrick {
+	if state.Phase != PhasePlayingTrick && state.Phase != PhaseAuction {
 		return nil // A rule revealed after the hand applies from the next deal.
 	}
 	plan, err := HandPlanForRules(state.Config, len(state.Seats), rules)

@@ -47,6 +47,12 @@ func HandPlanForRules(config Config, seatCount int, rules RuleResolution) (HandP
 	if ownership, err := rules.Effect(MechanicScoreOwnership); err == nil && ownership.Value == ValuePartnership && seatCount != 4 {
 		return HandPlan{}, fmt.Errorf("partnerships require exactly four seats")
 	}
+	if _, err := rules.Effect(MechanicAuction); err == nil {
+		probe := MatchState{Seats: make([]Seat, seatCount), TricksPerHand: plan.Tricks}
+		if _, _, _, err := AuctionBounds(probe, rules); err != nil {
+			return HandPlan{}, err
+		}
+	}
 	return plan, nil
 }
 
