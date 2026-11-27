@@ -148,7 +148,10 @@ type MatchState struct {
 	Captured          map[SeatID][]CardID
 	DealOwner         map[CardID]SeatID // Private until hand settlement.
 	HandAwards        []HandAward
-	LastScorecard     *Scorecard // Last settled hand; survives the next deal and roster change.
+	HandTeams         map[SeatID]int // Frozen for the dealt hand; nil means individual scoring.
+	TeamScores        map[int]int    // Points earned while the current partnership interval is active.
+	TurnedTrumpCard   CardID         // Public card revealed by Whist Turn-Up Trump.
+	LastScorecard     *Scorecard     // Last settled hand; survives the next deal and roster change.
 	StandardDraw      []CardID
 	RuleDraw          []RuleID
 	CurrentTrick      []Play
@@ -223,7 +226,7 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 	for i, card := range standard {
 		standardOrder[i] = string(card.ID)
 	}
-	rules := catalog.RuleDeck()
+	rules := catalog.EvolutionDeck(cfg.Mode, cfg.InitialRules...)
 	selected := map[RuleID]bool{}
 	for _, id := range cfg.InitialRules {
 		selected[id] = true
@@ -260,6 +263,9 @@ func NewMatch(ids []SeatID, cfg Config, catalog Catalog, source ShuffleSource) (
 	if err != nil {
 		return MatchState{}, err
 	}
+	if err := startHandRules(&state, resolved); err != nil {
+		return MatchState{}, err
+	}
 	return state, nil
 }
 
@@ -280,7 +286,7 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 	if err := validateOrder(records[0].Order, standardIDs()); err != nil {
 		return MatchState{}, fmt.Errorf("standard shuffle: %w", err)
 	}
-	rules := catalog.RuleDeck()
+	rules := catalog.EvolutionDeck(cfg.Mode, cfg.InitialRules...)
 	selected := map[RuleID]bool{}
 	for _, id := range cfg.InitialRules {
 		selected[id] = true
@@ -324,6 +330,9 @@ func ReplayMatch(ids []SeatID, cfg Config, catalog Catalog, records []ShuffleRec
 	}
 	state.TrumpSuit, err = TrumpForTrick(resolved, "", nil)
 	if err != nil {
+		return MatchState{}, err
+	}
+	if err := startHandRules(&state, resolved); err != nil {
 		return MatchState{}, err
 	}
 	return state, nil

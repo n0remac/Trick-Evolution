@@ -15,13 +15,26 @@ func HandPlanForRules(config Config, seatCount int, rules RuleResolution) (HandP
 		return HandPlan{}, err
 	}
 	plan := HandPlan{DealSize: config.HandSize}
-	if _, err := rules.Effect(MechanicExpandedHand); err == nil {
+	_, full := rules.Effect(MechanicFullDeal)
+	_, six := rules.Effect(MechanicSixCardHand)
+	_, expanded := rules.Effect(MechanicExpandedHand)
+	_, keep := rules.Effect(MechanicKeepOne)
+	if full == nil && (six == nil || expanded == nil || keep == nil) || six == nil && (expanded == nil || keep == nil) {
+		return HandPlan{}, fmt.Errorf("Full Deal and Six-Card Hand cannot combine with other hand modifiers")
+	}
+	if full == nil {
+		plan.DealSize = 52 / seatCount
+	}
+	if six == nil {
+		plan.DealSize = 6
+	}
+	if expanded == nil {
 		plan.DealSize += 2
 	}
 	if plan.DealSize*seatCount > 52 {
 		return HandPlan{}, fmt.Errorf("effective hand size %d cannot be dealt to %d players from one standard deck", plan.DealSize, seatCount)
 	}
-	if _, err := rules.Effect(MechanicKeepOne); err == nil {
+	if keep == nil {
 		plan.KeepOne = true
 		if plan.DealSize < 2 {
 			return HandPlan{}, fmt.Errorf("Keep One Card requires an effective hand size of at least 2")
@@ -30,6 +43,9 @@ func HandPlanForRules(config Config, seatCount int, rules RuleResolution) (HandP
 	plan.Tricks = plan.DealSize
 	if plan.KeepOne {
 		plan.Tricks--
+	}
+	if ownership, err := rules.Effect(MechanicScoreOwnership); err == nil && ownership.Value == ValuePartnership && seatCount != 4 {
+		return HandPlan{}, fmt.Errorf("partnerships require exactly four seats")
 	}
 	return plan, nil
 }

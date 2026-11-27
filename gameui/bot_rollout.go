@@ -217,6 +217,12 @@ rounds:
 }
 
 func rolloutScore(state domain.MatchState, initial domain.PlayerView, objective RolloutObjective) int {
+	if team, ok := initial.Public.HandTeams[initial.Seat]; ok {
+		if objective == ObjectiveHandPoints {
+			return state.TeamScores[team] - initial.Public.TeamScores[team]
+		}
+		return state.TeamScores[team] - state.TeamScores[1-team]
+	}
 	bot, otherBest, baseline := 0, -int(^uint(0)>>1)-1, 0
 	for _, seat := range initial.Public.Seats {
 		if seat.ID == initial.Seat {

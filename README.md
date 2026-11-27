@@ -4,6 +4,8 @@ The current game interface is rendered with shared GoDom and updated through HTM
 
 See [Basic Play and Rule Field Stage 1](docs/BASIC_RULES_STAGE1.md) for the rule model, [Stage 2](docs/BASIC_RULES_STAGE2.md) for the Game Rules review, and [Stage 3](docs/BASIC_RULES_STAGE3.md) for the table rule field. See [Pitch scoring and pregame rules](docs/PITCH_SCORING_AND_PREGAME.md) for room settings and Pitch awards, [Scoring expansion Stage 1](docs/SCORING_EXPANSION_STAGE1.md) for three additional score cards, and [Hand evolution Stage 2](docs/HAND_EVOLUTION_STAGE2.md) for Expanded Hand and Keep One Card. [Trump and Play Restrictions with AI](docs/TRUMP_PLAY_AI.md) describes the earlier trump and bot milestone.
 
+[Pitch and Whist phase 1](docs/PITCH_WHIST_PHASE1.md) defines opposite-seat teams, score attribution, the Whist deal, turn-up trump, majority scoring, and six-card hands.
+
 ## Play locally
 
 ```sh

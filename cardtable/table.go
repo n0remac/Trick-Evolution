@@ -30,6 +30,8 @@ type Seat struct {
 	Count         int           `json:"count"`
 	Score         int           `json:"score"`
 	ScoreLabel    string        `json:"scoreLabel"`
+	Team          int           `json:"team,omitempty"`
+	Partner       bool          `json:"partner,omitempty"`
 	Tricks        int           `json:"tricks"`
 	LabelPosition scene.Vec3    `json:"labelPosition"`
 	Turn          bool          `json:"turn"`
@@ -153,7 +155,14 @@ func Build(view domain.PlayerView, catalog domain.Catalog, events ...domain.Even
 		if view.Public.Mode == domain.ModeEndless {
 			score, scoreLabel = view.Public.RunScores[s.ID], "Run score"
 		}
+		team, partnered := view.Public.HandTeams[s.ID]
+		displayTeam := 0
+		if partnered {
+			displayTeam = team + 1
+			score, scoreLabel = view.Public.TeamScores[team], fmt.Sprintf("Team %d score", team+1)
+		}
 		seats = append(seats, Seat{ID: s.ID, Count: s.HandCount, Score: score, ScoreLabel: scoreLabel, Tricks: s.TricksWon,
+			Team: displayTeam, Partner: partnered && s.ID != view.Seat && team == view.Public.HandTeams[view.Seat],
 			LabelPosition: label, Turn: view.Public.Phase == domain.PhasePlayingTrick && s.ID == view.Public.Turn, Self: s.ID == view.Seat})
 		if offset == 0 {
 			continue

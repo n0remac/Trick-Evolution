@@ -27,6 +27,10 @@ func StartingFieldWithConfig(catalog Catalog, config Config) []RuleInstance {
 // restorationEligible checks the field before insertion. A prerequisite on
 // Points per Trick would turn false as soon as that card replaced No Points.
 func restorationEligible(field []RuleInstance, catalog Catalog, config Config, id RuleID) bool {
+	if id == RuleRestoreIndividual {
+		current, err := ResolveRules(field, catalog, config)
+		return err == nil && activeEndlessRule(current, RulePartnership)
+	}
 	if id != RulePointsPerTrick {
 		return true
 	}
@@ -60,8 +64,14 @@ func ValidateInitialRules(config Config, catalog Catalog) error {
 				return fmt.Errorf("initial rules contain conflicting alternatives")
 			}
 		}
-		if _, err := HandPlanForRules(config, 2, r); err != nil {
-			return err
+		if id == RuleRestoreIndividual && !restorationEligible(field[:len(field)-1], catalog, config, id) {
+			return fmt.Errorf("Individual Scores can be restored only after partnerships")
+		}
+		ownership, _ := r.Effect(MechanicScoreOwnership)
+		if ownership.Value != ValuePartnership {
+			if _, err := HandPlanForRules(config, 2, r); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -289,7 +299,7 @@ func (r RuleResolution) ValidateMatchEffects(config Config) error {
 		number   int
 	}{
 		{MechanicDeck, ValueStandardDeck, 0}, {MechanicHandSize, ValueConfigured, config.HandSize},
-		{MechanicUnused, ValueOutOfPlay, 0}, {MechanicScoreOwnership, ValueIndividual, 0},
+		{MechanicUnused, ValueOutOfPlay, 0}, {MechanicScoreOwnership, "", 0},
 		{MechanicTurnOrder, ValueClockwise, 0}, {MechanicFirstLeader, ValueLeftOfDealer, 0},
 		{MechanicNextLeader, ValueWinnerLeads, 0}, {MechanicTrump, "", 0},
 		{MechanicPlayRestriction, "", 0}, {MechanicWinnerEligibility, ValueLeadSuit, 0},

@@ -20,6 +20,7 @@ type preparedObservation struct {
 	captured    map[domain.SeatID][]domain.CardID
 	voids       map[domain.SeatID]map[domain.Suit]bool
 	opponents   []domain.PublicSeat
+	turnUp      domain.CardID // Known dealer card, excluded from random opponent slots.
 }
 
 // prepareObservation uses only a public history and one private bot hand.
@@ -147,6 +148,34 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 			return preparedObservation{}, fmt.Errorf("bot hand contradicts public void")
 		}
 	}
+	if public.TurnedTrumpCard != "" {
+		turned, ok := domain.CardDetails(public.TurnedTrumpCard)
+		if !ok || turned.Suit != public.TrumpSuit {
+			return preparedObservation{}, fmt.Errorf("invalid public turn-up card")
+		}
+		if seen[public.TurnedTrumpCard] {
+			owner := domain.SeatID("")
+			for _, id := range view.Hand {
+				if id == public.TurnedTrumpCard {
+					owner = view.Seat
+				}
+			}
+			for _, play := range observation.Played {
+				if play.Card == public.TurnedTrumpCard {
+					owner = play.Seat
+				}
+			}
+			if owner != public.Dealer {
+				return preparedObservation{}, fmt.Errorf("turn-up card has wrong public owner")
+			}
+		} else {
+			if public.Dealer == view.Seat {
+				return preparedObservation{}, fmt.Errorf("dealer lacks known turn-up card")
+			}
+			prepared.turnUp = public.TurnedTrumpCard
+			seen[prepared.turnUp] = true
+		}
+	}
 	for _, card := range domain.StandardDeck() {
 		if !seen[card.ID] {
 			prepared.unknown = append(prepared.unknown, card)
@@ -155,6 +184,9 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 	needed := 0
 	for _, seat := range prepared.opponents {
 		needed += seat.HandCount
+	}
+	if prepared.turnUp != "" {
+		needed--
 	}
 	if len(prepared.unknown)-needed != 52-dealSize*len(public.Seats) {
 		return preparedObservation{}, fmt.Errorf("unknown pool has wrong size")
@@ -178,7 +210,7 @@ func prepareObservation(observation BotObservation, catalog domain.Catalog) (pre
 			revealed[instance.DefinitionID] = true
 		}
 	}
-	for _, id := range catalog.RuleDeck() {
+	for _, id := range catalog.EvolutionDeck(public.Mode, public.InitialRules...) {
 		if !revealed[id] {
 			prepared.rules = append(prepared.rules, id)
 		}
@@ -205,7 +237,11 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 	})
 	var slots []domain.SeatID
 	for _, seat := range opponents {
-		for i := 0; i < seat.HandCount; i++ {
+		count := seat.HandCount
+		if seat.ID == public.Dealer && prepared.turnUp != "" {
+			count--
+		}
+		for i := 0; i < count; i++ {
 			slots = append(slots, seat.ID)
 		}
 	}
@@ -250,7 +286,7 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 	}
 	state := domain.MatchState{Revision: public.Revision, CatalogVersion: catalog.Version, Config: prepared.config,
 		Phase: public.Phase, Seats: make([]domain.Seat, len(public.Seats)), Hands: make(map[domain.SeatID][]domain.CardID), Captured: make(map[domain.SeatID][]domain.CardID),
-		CurrentTrick: append([]domain.Play(nil), public.CurrentTrick...), TrumpSuit: public.TrumpSuit, BrokenSpades: public.BrokenSpades, BrokenHearts: public.BrokenHearts, Dealer: public.Dealer, Leader: public.Leader, Turn: public.Turn,
+		CurrentTrick: append([]domain.Play(nil), public.CurrentTrick...), TrumpSuit: public.TrumpSuit, TurnedTrumpCard: public.TurnedTrumpCard, BrokenSpades: public.BrokenSpades, BrokenHearts: public.BrokenHearts, Dealer: public.Dealer, Leader: public.Leader, Turn: public.Turn,
 		HandNumber: public.HandNumber, TrickNumber: public.TrickNumber, DealSize: prepared.dealSize, TricksPerHand: public.TricksPerHand, CompletedHands: public.CompletedHands,
 		Round: public.Round, RoundHand: public.RoundHand, TableCue: public.TableCue,
 		Field: append([]domain.RuleInstance(nil), prepared.field...), RuleDraw: append([]domain.RuleID(nil), prepared.rules...)}
@@ -266,6 +302,20 @@ func (prepared preparedObservation) sampleWorld(ctx context.Context, random *ran
 	}
 	state.Hands[prepared.observation.View.Seat] = append([]domain.CardID(nil), prepared.observation.View.Hand...)
 	state.DealOwner = make(map[domain.CardID]domain.SeatID)
+	if prepared.turnUp != "" {
+		state.Hands[public.Dealer] = append(state.Hands[public.Dealer], prepared.turnUp)
+		state.DealOwner[prepared.turnUp] = public.Dealer
+	}
+	if len(public.HandTeams) == 4 {
+		state.HandTeams = make(map[domain.SeatID]int, 4)
+		for id, team := range public.HandTeams {
+			state.HandTeams[id] = team
+		}
+		state.TeamScores = make(map[int]int, 2)
+		for team, score := range public.TeamScores {
+			state.TeamScores[team] = score
+		}
+	}
 	for _, play := range prepared.observation.Played {
 		state.DealOwner[play.Card] = play.Seat
 	}

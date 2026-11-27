@@ -167,7 +167,13 @@ func NewServerWithBotOptions(config domain.Config, shuffle func() domain.Shuffle
 	if err := catalog.Validate(); err != nil {
 		return nil, err
 	}
-	if err := domain.ValidateInitialSetup(config, 2, catalog); err != nil {
+	setupSeats := 2
+	for _, id := range config.InitialRules {
+		if id == domain.RulePartnership {
+			setupSeats = 4
+		}
+	}
+	if err := domain.ValidateInitialSetup(config, setupSeats, catalog); err != nil {
 		return nil, err
 	}
 	if shuffle == nil {

@@ -71,6 +71,7 @@ func ReplaceEndlessBotSeat(state MatchState, oldID, newID SeatID) (MatchState, e
 	moveSeatKey(next.Captured, oldID, newID)
 	moveSeatKey(next.RunScores, oldID, newID)
 	moveSeatKey(next.ShortGameScores, oldID, newID)
+	moveSeatKey(next.HandTeams, oldID, newID)
 	if next.ShortGameResult != nil {
 		moveSeatKey(next.ShortGameResult.Scores, oldID, newID)
 		for i, id := range next.ShortGameResult.Winners {
@@ -389,6 +390,15 @@ func endlessRoundLength(state MatchState) int {
 }
 
 func eligibleEndlessRule(state MatchState, catalog Catalog, id RuleID) ([]RuleInstance, bool) {
+	if id == RulePartnership {
+		if state.Round < 6 || len(state.Seats) != 4 {
+			return nil, false
+		}
+		current, err := ResolveRules(state.Field, catalog, state.Config)
+		if err != nil || !endlessEstablishedScoring(current) {
+			return nil, false
+		}
+	}
 	d, ok := catalog.Definition(id)
 	if !ok || !d.InDeck || d.Status != StatusSupported {
 		return nil, false
@@ -425,6 +435,11 @@ func eligibleEndlessRule(state MatchState, catalog Catalog, id RuleID) ([]RuleIn
 		return nil, false
 	}
 	return field, true
+}
+
+func endlessEstablishedScoring(rules RuleResolution) bool {
+	points, err := rules.Effect(MechanicTrickPoints)
+	return err == nil && points.Value == ValueAboveHalf || endlessPositiveScoringActive(rules)
 }
 
 func endlessPositiveScoringActive(resolved RuleResolution) bool {
@@ -492,10 +507,15 @@ func endlessOptions(state MatchState, catalog Catalog) []RuleID {
 	}
 	followUps := endlessFollowUpChoices(state, catalog)
 	var options []RuleID
-	if len(followUps) > 0 {
-		options = append(options, followUps[0])
+	if state.Round >= 6 && endlessCandidate(state, catalog, draw, RulePartnership) {
+		options = append(options, RulePartnership)
 	}
-	if len(followUps) > 1 {
+	if len(followUps) > 0 {
+		if len(options) == 0 || options[0] != followUps[0] {
+			options = append(options, followUps[0])
+		}
+	}
+	if len(followUps) > 1 && len(options) < 3 {
 		first := endlessMechanic(catalog, options[0])
 		second := followUps[1]
 		for _, id := range followUps[1:] {
@@ -505,6 +525,9 @@ func endlessOptions(state MatchState, catalog Catalog) []RuleID {
 			}
 		}
 		options = append(options, second)
+	}
+	if len(options) >= 3 {
+		return options
 	}
 	for _, id := range starters {
 		duplicate := false

@@ -89,10 +89,11 @@
       label.className = seat.turn ? 'table-seat current' : 'table-seat';
       label.title = seat.name;
       const name = document.createElement('strong');
-      name.textContent = seat.name;
+      name.textContent = `${seat.name}${seat.team ? ` · Team ${seat.team}${seat.partner ? ' · Partner' : ''}` : ''}`;
       const score = document.createElement('span');
       score.textContent = `· ${seat.score}`;
-      label.setAttribute('aria-label', `${seat.name}, ${seat.scoreLabel || 'score'} ${seat.score}${seat.turn ? ', to play' : ''}`);
+      const team = seat.team ? `, team ${seat.team}${seat.partner ? ', your partner' : ''}` : '';
+      label.setAttribute('aria-label', `${seat.name}${team}, ${seat.scoreLabel || 'score'} ${seat.score}${seat.turn ? ', to play' : ''}`);
       label.append(name, score);
       return label;
     }));

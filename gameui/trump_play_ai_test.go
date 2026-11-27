@@ -36,7 +36,7 @@ func optionalTrumpObservation(t *testing.T) (BotObservation, domain.MatchState, 
 		}
 	}
 	state.RuleDraw = nil
-	for _, id := range catalog.RuleDeck() {
+	for _, id := range catalog.EvolutionDeck(domain.ModeFinite) {
 		if id != domain.RuleSpadesTrump && id != domain.RuleFollowOrTrump {
 			state.RuleDraw = append(state.RuleDraw, id)
 		}
@@ -218,7 +218,7 @@ func observedOptionalTrick(t *testing.T, lead, off domain.CardID, botHand, human
 		}
 	}
 	state.RuleDraw = nil
-	for _, id := range catalog.RuleDeck() {
+	for _, id := range catalog.EvolutionDeck(domain.ModeFinite) {
 		if id != domain.RuleSpadesTrump && id != domain.RuleFollowOrTrump {
 			state.RuleDraw = append(state.RuleDraw, id)
 		}
@@ -297,7 +297,7 @@ func TestPitchOpeningHeuristicAndContinuation(t *testing.T) {
 		}
 	}
 	state.RuleDraw = nil
-	for _, id := range catalog.RuleDeck() {
+	for _, id := range catalog.EvolutionDeck(domain.ModeFinite) {
 		if id != domain.RulePitchTrump && id != domain.RuleFollowOrTrump {
 			state.RuleDraw = append(state.RuleDraw, id)
 		}
@@ -353,7 +353,7 @@ func pitchUnsetObservation(t *testing.T, catalog domain.Catalog) BotObservation 
 	pitchState.Field = append(pitchState.Field, domain.RuleInstance{InstanceID: "test:pitch", DefinitionID: domain.RulePitchTrump, Sequence: len(pitchState.Field)})
 	pitchState.Field = append(pitchState.Field, domain.RuleInstance{InstanceID: "test:optional", DefinitionID: domain.RuleFollowOrTrump, Sequence: len(pitchState.Field)})
 	pitchState.RuleDraw = nil
-	for _, id := range catalog.RuleDeck() {
+	for _, id := range catalog.EvolutionDeck(domain.ModeFinite) {
 		if id != domain.RulePitchTrump && id != domain.RuleFollowOrTrump {
 			pitchState.RuleDraw = append(pitchState.RuleDraw, id)
 		}

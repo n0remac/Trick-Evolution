@@ -48,7 +48,7 @@ func TestStage1SetupReplayAndProjection(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(a, replay) {
 		t.Fatal("replay diverged", err)
 	}
-	if a.Dealer != "north" || a.Leader != "east" || a.Turn != "east" || len(a.RuleDraw) != len(catalog.RuleDeck()) || len(a.StandardDraw) != 52-cfg.HandSize*len(ids) {
+	if a.Dealer != "north" || a.Leader != "east" || a.Turn != "east" || len(a.RuleDraw) != len(catalog.EvolutionDeck(cfg.Mode)) || len(a.StandardDraw) != 52-cfg.HandSize*len(ids) {
 		t.Fatalf("bad setup %+v", a)
 	}
 	for _, id := range ids {
@@ -105,7 +105,7 @@ func TestInjectedFixtureDeal(t *testing.T) {
 	if !reflect.DeepEqual(state.Hands["b"], []CardID{"std:H:02", "std:H:04", "std:H:06", "std:H:08", "std:H:10"}) || !reflect.DeepEqual(state.Hands["a"], []CardID{"std:H:03", "std:H:05", "std:H:07", "std:H:09", "std:H:11"}) {
 		t.Fatalf("deal changed %+v", state.Hands)
 	}
-	if len(state.RuleDraw) != len(DefaultCatalog().RuleDeck()) {
+	if len(state.RuleDraw) != len(DefaultCatalog().EvolutionDeck(state.Config.Mode)) {
 		t.Fatal("default evolution deck size changed")
 	}
 }
@@ -115,10 +115,10 @@ func TestCatalogValidation(t *testing.T) {
 	if err := catalog.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Definitions) != 87 {
+	if len(catalog.Definitions) != 92 {
 		t.Fatalf("catalog entries %d", len(catalog.Definitions))
 	}
-	wantDeck := []RuleID{RuleExpandedHand, RuleKeepOne, RuleSpadesTrump, RulePitchTrump, RuleFollowOrTrump, RuleBreakSpades, RuleBreakHearts, RuleHighTrump, RuleLowTrump, RuleCaptureLow, RuleKeepLow, RuleJackTrump, RuleGamePoint, RuleNoPoints, RulePointsPerTrick, RuleAvoidQueenHearts, RuleAvoidHearts, RuleLastTrickBonus}
+	wantDeck := []RuleID{RuleExpandedHand, RuleKeepOne, RulePartnership, RuleRestoreIndividual, RuleWhistDeal, RuleSixCardHand, RuleSpadesTrump, RulePitchTrump, RuleWhistTrump, RuleFollowOrTrump, RuleBreakSpades, RuleBreakHearts, RuleHighTrump, RuleLowTrump, RuleCaptureLow, RuleKeepLow, RuleJackTrump, RuleGamePoint, RuleNoPoints, RulePointsPerTrick, RuleWhistMajority, RuleAvoidQueenHearts, RuleAvoidHearts, RuleLastTrickBonus}
 	if !reflect.DeepEqual(catalog.RuleDeck(), wantDeck) {
 		t.Fatalf("default evolution deck: %v", catalog.RuleDeck())
 	}

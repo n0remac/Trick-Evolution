@@ -34,6 +34,11 @@ func TrumpForTrick(rules RuleResolution, selected Suit, plays []Play) (Suit, err
 		return "", nil
 	case ValueSpadesTrump:
 		return Spades, nil
+	case ValueTurnUpTrump:
+		if selected != "" && !validSuit(selected) {
+			return "", fmt.Errorf("invalid selected trump %s", selected)
+		}
+		return selected, nil
 	case ValueFirstLeadTrump:
 		if selected != "" {
 			if !validSuit(selected) {
@@ -241,6 +246,11 @@ func validateHandFacts(state MatchState, rules RuleResolution) error {
 	case ValueSpadesTrump:
 		if state.TrumpSuit != Spades {
 			return fmt.Errorf("fixed-spades hand has wrong trump")
+		}
+	case ValueTurnUpTrump:
+		card, ok := cardByID(state.TurnedTrumpCard)
+		if !ok || state.DealOwner[card.ID] != state.Dealer || state.TrumpSuit != card.Suit {
+			return fmt.Errorf("turn-up card does not match dealer or trump")
 		}
 	case ValueFirstLeadTrump:
 		led := state.TrickNumber > 1 || len(state.CurrentTrick) > 0

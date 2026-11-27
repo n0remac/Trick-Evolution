@@ -184,7 +184,7 @@ func renderSettings(config domain.Config, catalog domain.Catalog, settingsStatus
 	for _, group := range reviewCategories {
 		choices := []*h.Node{}
 		for _, d := range catalog.Definitions {
-			if d.Status != domain.StatusSupported || d.StartActive || d.ID == domain.RulePointsPerTrick || d.FieldCategory != group.category {
+			if d.Status != domain.StatusSupported || d.StartActive || d.ID == domain.RulePointsPerTrick || d.ID == domain.RuleRestoreIndividual || d.FieldCategory != group.category {
 				continue
 			}
 			input := []*h.Node{h.Type("checkbox"), h.Attr("data-initial-rule", string(d.ID)), h.Value(string(d.ID))}
@@ -271,9 +271,16 @@ func effectDescription(e domain.EffectiveEffect) string {
 		return "Add two to the configured cards per player at each new deal while active; the increase does not accumulate. The whole deal must fit 52 cards."
 	case domain.MechanicKeepOne:
 		return "Play one fewer trick than cards dealt. Each player keeps their one unplayed card privately for the next hand and receives one fewer new card then. An unplayed card is not captured; a final-hand leftover does not carry onward."
+	case domain.MechanicFullDeal:
+		return "Deal as many equal cards as possible from the 52-card deck. Any remainder is out of play."
+	case domain.MechanicSixCardHand:
+		return "Deal six cards per player at each new hand."
 	case domain.MechanicUnused:
 		return "Undealt cards are out of play for this hand."
 	case domain.MechanicScoreOwnership:
+		if e.Value == domain.ValuePartnership {
+			return "Four seats form two fixed opposite-seat teams. Each new award counts for its team and retains one player's attribution; earlier run points stay personal."
+		}
 		return "Each player keeps an individual score."
 	case domain.MechanicTurnOrder:
 		return "Players take turns clockwise."
@@ -287,6 +294,8 @@ func effectDescription(e domain.EffectiveEffect) string {
 			return "Spades are trump. If a trump card is played, only trump cards can win; otherwise the lead suit can win. The active rank and tie rules compare eligible cards."
 		case domain.ValueFirstLeadTrump:
 			return "The first card led each hand chooses trump for that hand, including its first trick. If trump is played, only trump can win; otherwise the lead suit can win. The normal opening leader still leads."
+		case domain.ValueTurnUpTrump:
+			return "The dealer's last dealt card is shown to everyone and sets trump for the whole hand. It remains in the dealer's hand."
 		}
 		return "There is no trump suit."
 	case domain.MechanicBreakSpades:
@@ -313,6 +322,9 @@ func effectDescription(e domain.EffectiveEffect) string {
 	case domain.MechanicTrickPoints:
 		if e.Value == domain.ValueNoPoints {
 			return "Captured tricks give no direct points."
+		}
+		if e.Value == domain.ValueAboveHalf {
+			return "At hand end, a team scores one per trick above half of all tricks. Individually, score one per trick above floor(tricks / players)."
 		}
 		return "Each captured trick scores one point."
 	case domain.MechanicLowOwner:

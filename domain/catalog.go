@@ -25,6 +25,8 @@ const (
 	MechanicKeepOne           Mechanic        = "keep_one_card"
 	MechanicUnused            Mechanic        = "unused_cards"
 	MechanicScoreOwnership    Mechanic        = "score_ownership"
+	MechanicFullDeal          Mechanic        = "full_deal"
+	MechanicSixCardHand       Mechanic        = "six_card_hand"
 	MechanicTurnOrder         Mechanic        = "turn_order"
 	MechanicFirstLeader       Mechanic        = "first_leader"
 	MechanicNextLeader        Mechanic        = "next_leader"
@@ -52,6 +54,11 @@ const (
 	ValuePlusTwo              EffectValue     = "plus_two"
 	ValueOutOfPlay            EffectValue     = "out_of_play"
 	ValueIndividual           EffectValue     = "individual"
+	ValuePartnership          EffectValue     = "opposite_seats"
+	ValueFullDeal             EffectValue     = "full_deal"
+	ValueSixCards             EffectValue     = "six_cards"
+	ValueTurnUpTrump          EffectValue     = "turn_up"
+	ValueAboveHalf            EffectValue     = "above_half"
 	ValueClockwise            EffectValue     = "clockwise"
 	ValueLeftOfDealer         EffectValue     = "left_of_dealer_rotating"
 	ValueWinnerLeads          EffectValue     = "winner_leads"
@@ -105,6 +112,12 @@ const (
 	RuleKeepOne           RuleID     = "rule.keep_one_card"
 	RuleNoPoints          RuleID     = "rule.no_points_for_tricks"
 	RulePointsPerTrick    RuleID     = "rule.points_per_trick"
+	RulePartnership       RuleID     = "phase.partner_across"
+	RuleRestoreIndividual RuleID     = "rule.restore_individual_scores"
+	RuleWhistTrump        RuleID     = "rule.whist_turn_up_trump"
+	RuleWhistDeal         RuleID     = "rule.whist_full_deal"
+	RuleWhistMajority     RuleID     = "rule.whist_tricks_above_half"
+	RuleSixCardHand       RuleID     = "rule.six_card_hand"
 	RuleDeckStandard      RuleID     = "baseline.standard_deck"
 	RuleHandSize          RuleID     = "baseline.hand_size"
 	RuleUnusedCards       RuleID     = "baseline.unused_cards"
@@ -162,7 +175,7 @@ type Catalog struct {
 	Definitions []RuleDefinition
 }
 
-const CatalogVersion = 7
+const CatalogVersion = 8
 
 func (c Catalog) Definition(id RuleID) (RuleDefinition, bool) {
 	for _, d := range c.Definitions {
@@ -181,6 +194,33 @@ func (c Catalog) RuleDeck() []RuleID {
 		}
 	}
 	return deck
+}
+
+// EvolutionDeck preserves the original finite draw and its seeded replay.
+// New phase-one cards enter Endless curation and remain available as explicit
+// pregame selections in finite rooms.
+func (c Catalog) EvolutionDeck(mode MatchMode, initial ...RuleID) []RuleID {
+	all := c.RuleDeck()
+	if mode == ModeEndless {
+		return all
+	}
+	partnershipSelected := false
+	for _, id := range initial {
+		partnershipSelected = partnershipSelected || id == RulePartnership
+	}
+	var old []RuleID
+	for _, id := range all {
+		switch id {
+		case RuleRestoreIndividual:
+			if partnershipSelected {
+				old = append(old, id)
+			}
+		case RulePartnership, RuleWhistTrump, RuleWhistDeal, RuleWhistMajority, RuleSixCardHand:
+		default:
+			old = append(old, id)
+		}
+	}
+	return old
 }
 
 func (c Catalog) Validate() error {
@@ -357,6 +397,8 @@ func baseline(id RuleID, title, text string, category FieldCategory, effect Type
 
 func validTypedEffect(e TypedEffect) bool {
 	values := map[Mechanic]EffectValue{MechanicDeck: ValueStandardDeck, MechanicHandSize: ValueConfigured, MechanicExpandedHand: ValuePlusTwo, MechanicKeepOne: ValueAward, MechanicUnused: ValueOutOfPlay, MechanicScoreOwnership: ValueIndividual, MechanicTurnOrder: ValueClockwise, MechanicFirstLeader: ValueLeftOfDealer, MechanicNextLeader: ValueWinnerLeads, MechanicTrump: ValueNoTrump, MechanicBreakSpades: ValueBreakSpades, MechanicBreakHearts: ValueBreakHearts, MechanicPlayRestriction: ValueFollow, MechanicWinnerEligibility: ValueLeadSuit, MechanicRankComparison: ValueHigh, MechanicTieBreak: ValueFirstPlay, MechanicTrickPoints: ValueOnePoint, MechanicLowOwner: ValueCaptureLow, MechanicHighTrump: ValueAward, MechanicLowTrump: ValueAward, MechanicJackTrump: ValueAward, MechanicGamePoint: ValueAward, MechanicAvoidQueenHearts: ValueAward, MechanicAvoidHearts: ValueAward, MechanicLastTrickBonus: ValueAward, MechanicHandLimit: ValueConfigured, MechanicVictory: ValueHighestShared, MechanicReveal: ValueConfigured}
+	values[MechanicFullDeal] = ValueFullDeal
+	values[MechanicSixCardHand] = ValueSixCards
 	want, ok := values[e.Mechanic]
 	if !ok {
 		return false
@@ -365,13 +407,16 @@ func validTypedEffect(e TypedEffect) bool {
 		return (e.Value == ValueFollow || e.Value == ValueAnySuit || e.Value == ValueFollowOrTrump) && e.Config == ""
 	}
 	if e.Mechanic == MechanicTrump {
-		return (e.Value == ValueNoTrump || e.Value == ValueSpadesTrump || e.Value == ValueFirstLeadTrump) && e.Config == ""
+		return (e.Value == ValueNoTrump || e.Value == ValueSpadesTrump || e.Value == ValueFirstLeadTrump || e.Value == ValueTurnUpTrump) && e.Config == ""
+	}
+	if e.Mechanic == MechanicScoreOwnership {
+		return (e.Value == ValueIndividual || e.Value == ValuePartnership) && e.Config == ""
 	}
 	if e.Mechanic == MechanicRankComparison {
 		return (e.Value == ValueHigh || e.Value == ValueLow) && e.Config == ""
 	}
 	if e.Mechanic == MechanicTrickPoints {
-		return (e.Value == ValueOnePoint || e.Value == ValueNoPoints) && e.Config == ""
+		return (e.Value == ValueOnePoint || e.Value == ValueNoPoints || e.Value == ValueAboveHalf) && e.Config == ""
 	}
 	if e.Mechanic == MechanicLowOwner {
 		return (e.Value == ValueCaptureLow || e.Value == ValueKeepLow) && e.Config == ""
@@ -421,19 +466,25 @@ func DefaultCatalog() Catalog {
 		baseline(RuleHandLimit, "Fixed Hand Limit", "End after the configured number of hands.", FieldScoreVictory, TypedEffect{MechanicHandLimit, ValueConfigured, "max_hands"}),
 		baseline(RuleVictory, "Highest Score Wins", "Highest score wins; tied leaders share victory.", FieldScoreVictory, TypedEffect{MechanicVictory, ValueHighestShared, ""}),
 		baseline(RuleReveal, "Rule Reveal", "Reveal at the configured interval between hands if an eligible card remains.", FieldPlay, TypedEffect{MechanicReveal, ValueConfigured, "reveal_every"}),
-		{ID: RuleSpadesTrump, Title: "Spades Are Trump", Text: "Spades beat nontrump cards. If no trump is played, the lead suit wins.", Category: "rule", Status: StatusSupported, FieldCategory: FieldTrick, Effects: []TypedEffect{{Mechanic: MechanicTrump, Value: ValueSpadesTrump}}, Overrides: []RuleID{RuleNoTrump, RulePitchTrump}, InDeck: true, StartingVisibility: NotStarting},
-		{ID: RulePitchTrump, Title: "Pitch the Trump", Text: "The first card led each hand chooses its trump suit, including the first trick.", Category: "rule", Status: StatusSupported, FieldCategory: FieldTrick, Effects: []TypedEffect{{Mechanic: MechanicTrump, Value: ValueFirstLeadTrump}}, Overrides: []RuleID{RuleNoTrump, RuleSpadesTrump}, InDeck: true, StartingVisibility: NotStarting},
-		{ID: RuleFollowOrTrump, Title: "Follow Suit or Trump", Text: "Follow suit or play trump when holding the lead suit. On a trump lead, follow trump if able.", Category: "rule", Status: StatusSupported, FieldCategory: FieldPlay, Effects: []TypedEffect{{Mechanic: MechanicPlayRestriction, Value: ValueFollowOrTrump}}, Overrides: []RuleID{RuleFollowSuit, RuleNoFollowRequired}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RulePartnership, Title: "Partner Across", Text: "Four seats form fixed opposite-seat teams. New points are shared by each team; earlier individual scores stay personal. Teams freeze for each hand.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicScoreOwnership, Value: ValuePartnership}}, Overrides: []RuleID{RuleIndividualScore, RuleRestoreIndividual}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleRestoreIndividual, Title: "Restore Individual Scores", Text: "Future hands score individually again. Past team and personal ledgers remain unchanged.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicScoreOwnership, Value: ValueIndividual}}, Overrides: []RuleID{RulePartnership}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleWhistDeal, Title: "Whist Full Deal", Text: "Deal the whole deck equally. Any remainder is out of play. Cannot combine with hand-size or carry modifiers.", Category: "rule", Status: StatusSupported, FieldCategory: FieldHand, Effects: []TypedEffect{{Mechanic: MechanicFullDeal, Value: ValueFullDeal}}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleSixCardHand, Title: "Six-Card Hand", Text: "Deal six cards per player on the next hand. Cannot combine with Full Deal, Expanded Hand, or Keep One.", Category: "rule", Status: StatusSupported, FieldCategory: FieldHand, Effects: []TypedEffect{{Mechanic: MechanicSixCardHand, Value: ValueSixCards}}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleSpadesTrump, Title: "Spades Are Trump", Text: "Spades beat nontrump cards. If no trump is played, the lead suit wins.", Category: "rule", Status: StatusSupported, FieldCategory: FieldTrick, Effects: []TypedEffect{{Mechanic: MechanicTrump, Value: ValueSpadesTrump}}, Overrides: []RuleID{RuleNoTrump, RulePitchTrump, RuleWhistTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RulePitchTrump, Title: "Pitch the Trump", Text: "The first card led each hand chooses its trump suit, including the first trick.", Category: "rule", Status: StatusSupported, FieldCategory: FieldTrick, Effects: []TypedEffect{{Mechanic: MechanicTrump, Value: ValueFirstLeadTrump}}, Overrides: []RuleID{RuleNoTrump, RuleSpadesTrump, RuleWhistTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleWhistTrump, Title: "Whist Turn-Up Trump", Text: "The last card dealt to the dealer is revealed and sets trump for the whole hand. It remains in the dealer's hand.", Category: "rule", Status: StatusSupported, FieldCategory: FieldTrick, Effects: []TypedEffect{{Mechanic: MechanicTrump, Value: ValueTurnUpTrump}}, Overrides: []RuleID{RuleNoTrump, RuleSpadesTrump, RulePitchTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleFollowOrTrump, Title: "Follow Suit or Trump", Text: "Follow suit or play trump when holding the lead suit. On a trump lead, follow trump if able.", Category: "rule", Status: StatusSupported, FieldCategory: FieldPlay, Effects: []TypedEffect{{Mechanic: MechanicPlayRestriction, Value: ValueFollowOrTrump}}, Overrides: []RuleID{RuleFollowSuit, RuleNoFollowRequired}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump, RuleWhistTrump}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleBreakSpades, Title: "Break Spades", Text: "Do not lead spades until a spade has been played on another suit lead, unless only spades remain.", Category: "rule", Status: StatusSupported, FieldCategory: FieldPlay, Effects: []TypedEffect{{Mechanic: MechanicBreakSpades, Value: ValueBreakSpades}}, Prerequisites: []RuleID{RuleSpadesTrump}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleBreakHearts, Title: "Break Hearts", Text: "Do not lead hearts until a heart has been played on another suit lead, unless only hearts remain.", Category: "rule", Status: StatusSupported, FieldCategory: FieldPlay, Effects: []TypedEffect{{Mechanic: MechanicBreakHearts, Value: ValueBreakHearts}}, InDeck: true, StartingVisibility: NotStarting},
-		{ID: RuleHighTrump, Title: "High Trump Scores", Text: "At hand end, the original holder of the highest dealt trump scores one point (ace high). Requires trump.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicHighTrump, Value: ValueAward}}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump}, InDeck: true, StartingVisibility: NotStarting},
-		{ID: RuleLowTrump, Title: "Low Trump Scores", Text: "At hand end, the lowest dealt trump scores one point for its captor by default. Keep Low changes ownership. Requires trump.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicLowTrump, Value: ValueAward}}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleHighTrump, Title: "High Trump Scores", Text: "At hand end, the original holder of the highest dealt trump scores one point (ace high). Requires trump.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicHighTrump, Value: ValueAward}}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump, RuleWhistTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleLowTrump, Title: "Low Trump Scores", Text: "At hand end, the lowest dealt trump scores one point for its captor by default. Keep Low changes ownership. Requires trump.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicLowTrump, Value: ValueAward}}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump, RuleWhistTrump}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleCaptureLow, Title: "Capture Low", Text: "The captor of the lowest dealt trump gets its point. Replaces Keep Low.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicLowOwner, Value: ValueCaptureLow}}, Overrides: []RuleID{RuleDefaultCaptureLow, RuleKeepLow}, Prerequisites: []RuleID{RuleLowTrump}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleKeepLow, Title: "Keep Low", Text: "The original holder of the lowest dealt trump gets its point. Replaces Capture Low.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicLowOwner, Value: ValueKeepLow}}, Overrides: []RuleID{RuleDefaultCaptureLow, RuleCaptureLow}, Prerequisites: []RuleID{RuleLowTrump}, InDeck: true, StartingVisibility: NotStarting},
-		{ID: RuleJackTrump, Title: "Trump Jack Scores", Text: "At hand end, the captor of the dealt trump Jack scores one point. Requires trump.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicJackTrump, Value: ValueAward}}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleJackTrump, Title: "Trump Jack Scores", Text: "At hand end, the captor of the dealt trump Jack scores one point. Requires trump.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicJackTrump, Value: ValueAward}}, PrerequisiteAny: []RuleID{RuleSpadesTrump, RulePitchTrump, RuleWhistTrump}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleGamePoint, Title: "Game Point", Text: "At hand end, the unique highest captured-card tally scores one point: 10=10, A=4, K=3, Q=2, J=1. Ties score nothing.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicGamePoint, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
-		{ID: RuleNoPoints, Title: "No Points for Tricks", Text: "Captured tricks give no ordinary trick point; other scoring rules still apply.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicTrickPoints, Value: ValueNoPoints}}, Overrides: []RuleID{RuleTrickPoint, RulePointsPerTrick}, InDeck: true, StartingVisibility: NotStarting},
-		{ID: RulePointsPerTrick, Title: "Points per Trick", Text: "Each captured trick scores one point. Replaces No Points for Tricks.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicTrickPoints, Value: ValueOnePoint}}, Overrides: []RuleID{RuleTrickPoint, RuleNoPoints}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleNoPoints, Title: "No Points for Tricks", Text: "Captured tricks give no ordinary trick point; other scoring rules still apply.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicTrickPoints, Value: ValueNoPoints}}, Overrides: []RuleID{RuleTrickPoint, RulePointsPerTrick, RuleWhistMajority}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RulePointsPerTrick, Title: "Points per Trick", Text: "Each captured trick scores one point. Replaces No Points for Tricks.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicTrickPoints, Value: ValueOnePoint}}, Overrides: []RuleID{RuleTrickPoint, RuleNoPoints, RuleWhistMajority}, InDeck: true, StartingVisibility: NotStarting},
+		{ID: RuleWhistMajority, Title: "Whist Tricks Above Half", Text: "At hand end, a team scores one per trick above half the completed tricks. Individually, score one per trick above floor(tricks per hand / players).", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicTrickPoints, Value: ValueAboveHalf}}, Overrides: []RuleID{RuleTrickPoint, RuleNoPoints, RulePointsPerTrick}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleAvoidQueenHearts, Title: "Avoid Queen of Hearts", Text: "Capturing the Queen of Hearts costs 5 match points when its trick completes. Stacks with Avoid Hearts; undealt or unplayed cards do not score.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicAvoidQueenHearts, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleAvoidHearts, Title: "Avoid Hearts", Text: "Each heart captured in a completed trick costs 1 match point, including the Queen of Hearts. Stacks with other scoring rules.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicAvoidHearts, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
 		{ID: RuleLastTrickBonus, Title: "Last Trick Bonus", Text: "The winner of the final completed trick of a completed hand gains 2 match points. An unfinished hand earns no bonus.", Category: "rule", Status: StatusSupported, FieldCategory: FieldScoreVictory, Effects: []TypedEffect{{Mechanic: MechanicLastTrickBonus, Value: ValueAward}}, InDeck: true, StartingVisibility: NotStarting},
@@ -472,7 +523,6 @@ func DefaultCatalog() Catalog {
 		unsupported("rule.minus_two_rule_cards", "-2 Rule Cards", "Discard two active rule cards from play.", "rule", unmodeled),
 		unsupported("phase.carry_one_card", "Carry One Card", "Keep one card from your previous hand to include in your next hand.", "phase", unmodeled),
 		unsupported("phase.reveal_one_opponent_card", "Reveal One Opponent Card", "Peek at one random card from an opponent’s hand at round start.", "phase", unmodeled),
-		unsupported("phase.partner_across", "Partner Across", "Partner with the player seated directly across from you.", "phase", bids),
 		unsupported("phase.bid_for_lead", "Bid for Lead", "Bid the number of tricks you will win. Highest bidder leads. Lose bid if you fail.", "phase", bids),
 		unsupported("phase.declare_goals", "Declare Goals", "Announce the number of tricks you aim to win. Lose bid if you fail.", "phase", bids),
 		unsupported("phase.two_cards_forward", "Two Cards Forward", "Pass two cards to the player on your left before play begins.", "phase", unmodeled),

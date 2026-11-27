@@ -17,6 +17,17 @@ func renderScorecard(card *domain.Scorecard, name func(domain.SeatID) string, cl
 		title = fmt.Sprintf("Hand %d · completed tricks only", card.HandNumber)
 	}
 	parts := []*h.Node{h.Class("scorecard " + class), h.H2(h.T(title))}
+	for _, team := range card.Teams {
+		members := make([]string, 0, len(team.Seats))
+		for _, id := range team.Seats {
+			members = append(members, name(id))
+		}
+		line := fmt.Sprintf("Team %d · %s · hand total %+d", team.Team+1, strings.Join(members, " & "), team.Total)
+		if team.GameTally > 0 {
+			line += fmt.Sprintf(" · Game tally %d", team.GameTally)
+		}
+		parts = append(parts, h.P(h.Class("scorecard-team"), h.T(line)))
+	}
 	for _, player := range card.Players {
 		items := []*h.Node{h.Class("scorecard-player"), h.H3(h.T(fmt.Sprintf("%s · hand total %+d", name(player.Seat), player.Total)))}
 		if len(player.Awards) == 0 {
@@ -25,7 +36,11 @@ func renderScorecard(card *domain.Scorecard, name func(domain.SeatID) string, cl
 		for _, award := range player.Awards {
 			detail := fmt.Sprintf("%s · %+d", award.Title, award.Points)
 			if award.Rule == domain.RuleGamePoint {
-				detail = fmt.Sprintf("Game Point · %+d match point (captured-card tally %d)", award.Points, award.Tally)
+				kind := "captured-card tally"
+				if len(card.Teams) == 2 {
+					kind = "team captured-card tally"
+				}
+				detail = fmt.Sprintf("Game Point · %+d match point (%s %d)", award.Points, kind, award.Tally)
 			}
 			if award.Card != "" {
 				detail += " · " + cardLabel(award.Card)

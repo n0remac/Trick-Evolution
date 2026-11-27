@@ -312,6 +312,9 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 			score = public.RunScores[player.ID]
 			label = "run score"
 		}
+		if team, ok := public.HandTeams[player.ID]; ok {
+			score, label = public.TeamScores[team], fmt.Sprintf("team %d score", team+1)
+		}
 		turn := ""
 		if public.Phase == domain.PhasePlayingTrick && public.Turn == player.ID {
 			turn = " · turn"
@@ -321,6 +324,9 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 	bar := []*h.Node{h.Class("game-top-bar"), h.Attr("aria-label", "Game controls"),
 		renderScoresControl(public, name, scoreName),
 		h.Button(h.Type("button"), h.Attr("data-action", "review-rules"), h.Attr("aria-haspopup", "dialog"), h.Attr("aria-controls", "rules-review"), h.T("Rules")),
+	}
+	if public.TurnedTrumpCard != "" {
+		bar = append(bar, h.Span(h.Class("trump-indicator"), h.T("Turned trump: "+cardLabel(public.TurnedTrumpCard))))
 	}
 	if public.Mode == domain.ModeEndless && public.Phase != domain.PhaseGameComplete {
 		bar = append(bar, h.Div(h.Class("invite-control"), h.Button(h.Type("button"), h.Attr("data-action", "share-endless"), h.T("Invite")),
@@ -451,8 +457,23 @@ func gamePanel(message serverMessage, seat domain.SeatID, catalog domain.Catalog
 func renderScoresControl(public domain.PublicView, name, scoreName func(domain.SeatID) string) *h.Node {
 	content := []*h.Node{}
 	standings := []*h.Node{h.Class("scores-standings"), h.NewNode("strong", []*h.Node{h.T("Standings")})}
-	for _, seat := range public.Seats {
-		standings = append(standings, h.Span(h.T(fmt.Sprintf("%s · %d", name(seat.ID), seat.Score))))
+	if len(public.HandTeams) == 4 {
+		for team := 0; team < 2; team++ {
+			members := []string{}
+			for _, seat := range public.Seats {
+				if public.HandTeams[seat.ID] == team {
+					members = append(members, name(seat.ID))
+				}
+			}
+			standings = append(standings, h.Span(h.T(fmt.Sprintf("Team %d · %s · %d", team+1, strings.Join(members, " & "), public.TeamScores[team]))))
+		}
+		for _, seat := range public.Seats {
+			standings = append(standings, h.Span(h.Class("muted"), h.T(fmt.Sprintf("%s · personal attribution %d", name(seat.ID), seat.Score))))
+		}
+	} else {
+		for _, seat := range public.Seats {
+			standings = append(standings, h.Span(h.T(fmt.Sprintf("%s · %d", name(seat.ID), seat.Score))))
+		}
 	}
 	content = append(content, h.Div(standings...))
 	if public.Mode == domain.ModeEndless {

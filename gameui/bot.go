@@ -154,6 +154,21 @@ func chooseBotCard(view domain.PlayerView, catalog domain.Catalog) (domain.CardI
 			cheapestLoss = id
 		}
 	}
+	if team, ok := view.Public.HandTeams[view.Seat]; ok && cheapestLoss != "" {
+		leader, err := domain.WinningPlay(view.Public.CurrentTrick, resolved, view.Public.TrumpSuit)
+		if err == nil && leader.Seat != view.Seat && view.Public.HandTeams[leader.Seat] == team {
+			// Keep a partner's winning trick, and avoid giving that partner penalties.
+			best := cheapestLoss
+			for _, id := range legal {
+				candidate := append(append([]domain.Play(nil), view.Public.CurrentTrick...), domain.Play{Seat: view.Seat, Card: id})
+				winner, err := domain.WinningPlay(candidate, resolved, view.Public.TrumpSuit)
+				if err == nil && winner.Seat != view.Seat && cost(cardFor(id))+heartPenalty(cardFor(id))*100 < cost(cardFor(best))+heartPenalty(cardFor(best))*100 {
+					best = id
+				}
+			}
+			return best, nil
+		}
+	}
 	if cheapestWin != "" && (bestWinNet >= 0 || cheapestLoss == "") {
 		return cheapestWin, nil
 	}

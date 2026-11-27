@@ -38,6 +38,9 @@ type PublicView struct {
 	Seats             []PublicSeat
 	CurrentTrick      []Play
 	TrumpSuit         Suit
+	TurnedTrumpCard   CardID
+	HandTeams         map[SeatID]int
+	TeamScores        map[int]int
 	BrokenSpades      bool
 	BrokenHearts      bool
 	Dealer            SeatID
@@ -85,6 +88,17 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 		Rules: rules.History, ActiveField: rules.ActiveField, Effective: rules.Effective, RulesRemaining: len(state.RuleDraw), CurrentTrick: append([]Play(nil), state.CurrentTrick...), TrumpSuit: state.TrumpSuit, BrokenSpades: state.BrokenSpades, BrokenHearts: state.BrokenHearts,
 		Seats: make([]PublicSeat, len(state.Seats))}
 	view.LastScorecard = cloneScorecard(state.LastScorecard)
+	view.TurnedTrumpCard = state.TurnedTrumpCard
+	if len(state.HandTeams) > 0 {
+		view.HandTeams = make(map[SeatID]int, len(state.HandTeams))
+		for id, team := range state.HandTeams {
+			view.HandTeams[id] = team
+		}
+		view.TeamScores = make(map[int]int, len(state.TeamScores))
+		for team, score := range state.TeamScores {
+			view.TeamScores[team] = score
+		}
+	}
 	if state.Config.Mode == ModeEndless {
 		if seats, ok := endlessNextRoster(state, rules); ok {
 			view.NextRosterSize = len(seats)
@@ -111,7 +125,7 @@ func ProjectPublic(state MatchState, catalog Catalog) (PublicView, error) {
 		}
 	}
 	if state.Phase == PhaseGameComplete {
-		view.Winners = gameWinners(state.Seats)
+		view.Winners = matchWinners(state)
 	}
 	if state.Phase == PhaseHandComplete || state.Phase == PhaseAwaitingChoice || state.Phase == PhaseGameComplete {
 		view.HandAwards = append([]HandAward(nil), state.HandAwards...)

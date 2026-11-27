@@ -9,7 +9,15 @@ type Scorecard struct {
 	Round      int
 	Partial    bool
 	Players    []ScorecardPlayer
+	Teams      []ScorecardTeam
 	Notes      []ScorecardNote
+}
+
+type ScorecardTeam struct {
+	Team      int
+	Seats     []SeatID
+	Total     int // Points earned in this hand, including penalties.
+	GameTally int // Combined captured-card Game tally, when Game Point is active.
 }
 
 type ScorecardPlayer struct {
@@ -57,6 +65,14 @@ func makeScorecard(state MatchState, rules RuleResolution, partial bool) *Scorec
 		}
 		card.Players = append(card.Players, entry)
 	}
+	if len(state.HandTeams) == 4 {
+		card.Teams = []ScorecardTeam{{Team: 0}, {Team: 1}}
+		for _, player := range card.Players {
+			team := state.HandTeams[player.Seat]
+			card.Teams[team].Seats = append(card.Teams[team].Seats, player.Seat)
+			card.Teams[team].Total += player.Total
+		}
+	}
 	if partial {
 		card.Notes = append(card.Notes, ScorecardNote{Text: "Only completed tricks count; the unfinished hand has no hand-end awards."})
 		return card
@@ -80,7 +96,18 @@ func makeScorecard(state MatchState, rules RuleResolution, partial bool) *Scorec
 				leaders++
 			}
 		}
-		if leaders > 1 {
+		if len(card.Teams) == 2 {
+			totals := [2]int{}
+			for _, player := range card.Players {
+				totals[state.HandTeams[player.Seat]] += player.GameTally.Total
+			}
+			for team := range card.Teams {
+				card.Teams[team].GameTally = totals[team]
+			}
+			if totals[0] == totals[1] {
+				card.Notes = append(card.Notes, ScorecardNote{Rule: RuleGamePoint, Text: fmt.Sprintf("Game Point teams tied at %d tally; no match point awarded.", totals[0])})
+			}
+		} else if leaders > 1 {
 			card.Notes = append(card.Notes, ScorecardNote{Rule: RuleGamePoint, Text: fmt.Sprintf("Game Point tied at %d tally; no match point awarded.", best)})
 		}
 	}
@@ -184,6 +211,11 @@ func cloneScorecard(card *Scorecard) *Scorecard {
 	}
 	next := *card
 	next.Notes = append([]ScorecardNote(nil), card.Notes...)
+	next.Teams = make([]ScorecardTeam, len(card.Teams))
+	for i, team := range card.Teams {
+		next.Teams[i] = team
+		next.Teams[i].Seats = append([]SeatID(nil), team.Seats...)
+	}
 	next.Players = make([]ScorecardPlayer, len(card.Players))
 	for i, player := range card.Players {
 		next.Players[i] = player

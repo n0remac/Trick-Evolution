@@ -120,7 +120,7 @@ func stepEndGame(state MatchState, action Action, seatIndex int, hostOnly bool) 
 	}
 	return next, []Event{
 		{Kind: EventGameEnded, Revision: next.Revision, Hand: next.HandNumber, Seat: action.Seat},
-		{Kind: EventGameCompleted, Revision: next.Revision, Hand: next.HandNumber, Winners: gameWinners(next.Seats)},
+		{Kind: EventGameCompleted, Revision: next.Revision, Hand: next.HandNumber, Winners: matchWinners(next)},
 	}, nil
 }
 
@@ -240,6 +240,9 @@ func stepStartHand(state MatchState, action Action, seatIndex int, resolved Rule
 		}
 	}
 	next.StandardDraw = append([]CardID(nil), filtered[newCards*len(next.Seats):]...)
+	if err := startHandRules(&next, resolved); err != nil {
+		return state, nil, transitionError(ErrInvalidState, err.Error())
+	}
 	next.Shuffles = append(next.Shuffles, ShuffleRecord{Kind: StandardDeckKind, Order: order})
 	if rosterChanged {
 		next.TableCue = fmt.Sprintf("The table now has %d players. Everyone received a fresh deal.", len(next.Seats))
@@ -332,8 +335,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	next.Seats[winnerIndex].TricksWon++
 	trickPoints, _ := resolvedRules.Effect(MechanicTrickPoints)
 	if trickPoints.Value == ValueOnePoint {
-		next.Seats[winnerIndex].Score++
-		next.HandAwards = append(next.HandAwards, HandAward{Rule: trickPoints.Source, Title: "Point per Trick", Seat: winner, Trick: next.TrickNumber, Points: 1})
+		awardPoints(&next, HandAward{Rule: trickPoints.Source, Title: "Point per Trick", Seat: winner, Trick: next.TrickNumber, Points: 1})
 	}
 	if err := scoreCapturedTrick(&next, resolvedRules, winnerIndex); err != nil {
 		return state, nil, transitionError(ErrInvalidState, err.Error())
@@ -341,8 +343,12 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 	for _, play := range next.CurrentTrick {
 		next.Captured[winner] = append(next.Captured[winner], play.Card)
 	}
+	winnerScore := next.Seats[winnerIndex].Score
+	if team, ok := next.HandTeams[winner]; ok {
+		winnerScore = next.TeamScores[team]
+	}
 	events = append(events, Event{Kind: EventTrickWon, Revision: next.Revision, Hand: next.HandNumber, Trick: next.TrickNumber, Seat: winner,
-		Plays: append([]Play(nil), next.CurrentTrick...), Score: next.Seats[winnerIndex].Score})
+		Plays: append([]Play(nil), next.CurrentTrick...), Score: winnerScore})
 	next.CurrentTrick = nil
 	next.Leader, next.Turn = winner, winner
 	if next.TrickNumber < next.TricksPerHand {
@@ -386,7 +392,7 @@ func stepPlay(state MatchState, action Action, seatIndex int, catalog Catalog, r
 		next.CompletedHands++
 		next.Phase = PhaseGameComplete
 		events = append(events, Event{Kind: EventHandCompleted, Revision: next.Revision, Hand: next.HandNumber},
-			Event{Kind: EventGameCompleted, Revision: next.Revision, Hand: next.HandNumber, Winners: gameWinners(next.Seats)})
+			Event{Kind: EventGameCompleted, Revision: next.Revision, Hand: next.HandNumber, Winners: matchWinners(next)})
 		return next, events, nil
 	}
 	var revealed *RuleInstance
@@ -524,6 +530,18 @@ func cloneState(state MatchState) MatchState {
 		}
 	}
 	next.HandAwards = slices.Clone(state.HandAwards)
+	if state.HandTeams != nil {
+		next.HandTeams = make(map[SeatID]int, len(state.HandTeams))
+		for id, team := range state.HandTeams {
+			next.HandTeams[id] = team
+		}
+	}
+	if state.TeamScores != nil {
+		next.TeamScores = make(map[int]int, len(state.TeamScores))
+		for team, score := range state.TeamScores {
+			next.TeamScores[team] = score
+		}
+	}
 	next.LastScorecard = cloneScorecard(state.LastScorecard)
 	next.Config.InitialRules = slices.Clone(state.Config.InitialRules)
 	next.Field = slices.Clone(state.Field)

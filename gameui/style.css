@@ -152,11 +152,13 @@ h2 { margin: 0 0 .75rem; }
   .rule-card-effect { display: none; }
 }
 .scores-control { position: relative; z-index: 5; font-size: .82rem; }
+.trump-indicator { align-self: center; color: #ffe09a; font-size: .8rem; font-weight: 700; white-space: nowrap; }
 .scorecard { padding: .7rem; border: 1px solid #d5bb75; border-radius: .7rem; background: #152d23f5; color: #edf3e7; text-align: left; }
 .scorecard h2 { font-size: 1rem; margin: 0 0 .5rem; color: #ffe09a; }
 .scorecard h3 { font-size: .92rem; margin: 0 0 .35rem; }
 .scorecard p { font-size: .8rem; line-height: 1.4; margin: .2rem 0; overflow-wrap: anywhere; }
 .scorecard-player { padding: .5rem 0; border-top: 1px solid #527260; }
+.scorecard-team { color: #ffe09a; font-weight: 700; }
 .scorecard-note { color: #ffdf9b; padding-top: .35rem; }
 .scorecard-visible { position: absolute; z-index: 5; left: 50%; bottom: var(--hud-bottom); transform: translateX(-50%); width: min(42rem, calc(100vw - 1rem)); max-height: min(48dvh, 30rem); overflow-y: auto; pointer-events: auto; }
 .scorecard-saved { margin-top: .6rem; }

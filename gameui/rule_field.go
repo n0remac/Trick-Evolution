@@ -119,6 +119,34 @@ func renderFieldCard(rule domain.ResolvedRule, definition domain.RuleDefinition,
 func shortEffect(effect domain.EffectiveEffect, rule domain.ResolvedRule, public domain.PublicView) string {
 	pending := !rule.Instance.Starting && public.HandNumber <= rule.Instance.IntroducedAfterHand
 	switch effect.Mechanic {
+	case domain.MechanicScoreOwnership:
+		if effect.Value == domain.ValuePartnership {
+			if pending {
+				return "Opposite-seat teams · next hand"
+			}
+			return "Opposite-seat teams"
+		}
+		if pending {
+			return "Individual scores · next hand"
+		}
+		return "Individual scores"
+	case domain.MechanicFullDeal:
+		if pending {
+			return "Full equal deal · next hand"
+		}
+		return "Full equal deal"
+	case domain.MechanicSixCardHand:
+		if pending {
+			return "Six cards · next hand"
+		}
+		return "Six cards per player"
+	case domain.MechanicTrickPoints:
+		if effect.Value == domain.ValueAboveHalf {
+			if pending {
+				return "Tricks above half · next hand"
+			}
+			return "Tricks above half"
+		}
 	case domain.MechanicExpandedHand:
 		if pending {
 			return "+2 cards · next hand"
@@ -130,6 +158,15 @@ func shortEffect(effect domain.EffectiveEffect, rule domain.ResolvedRule, public
 		}
 		return "Keep 1 unplayed card"
 	case domain.MechanicTrump:
+		if effect.Value == domain.ValueTurnUpTrump {
+			if pending {
+				return "Turn up dealer's last card · next hand"
+			}
+			if public.TurnedTrumpCard != "" {
+				return "Trump: " + suitName(public.TrumpSuit) + " (" + cardLabel(public.TurnedTrumpCard) + " turned)"
+			}
+			return "Turn up dealer's last card"
+		}
 		if effect.Value == domain.ValueSpadesTrump {
 			if pending {
 				return "Trump: Spades · next hand"
